@@ -14,6 +14,18 @@ package.json                 Wrangler y comandos del proyecto
 
 No se usa `dist` porque no hay un framework que compilar. Wrangler publica directamente `public/` como Static Assets.
 
+## Generación de minutas
+
+- Mantener presionada durante 650 ms una tarjeta LT/TR genera una minuta con la
+  fecha local y únicamente las tareas abiertas de esa línea.
+- **Generar minuta de portafolio** distribuye las tareas abiertas entre DeID,
+  ICT, AER, Academias TI y temas generales/transversales.
+- **Generar minuta Cata 1-1** incorpora únicamente los temas pendientes
+  vinculados explícitamente a Cata.
+- El texto generado se puede editar en el panel lateral y copiar al
+  portapapeles. Como alternativa de teclado, `Mayús+Enter` sobre una LT/TR abre
+  su minuta.
+
 ## Configuración de Cloudflare
 
 La integración Git debe usar:
