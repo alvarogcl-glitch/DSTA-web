@@ -1,0 +1,15 @@
+{
+  "name": "dsta-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard ejecutivo PMO-DSTA con datos de Vikunja",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler versions upload",
+    "check": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "4.137.0"
+  }
+}
