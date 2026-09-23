@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 
 POLL_SECONDS = 30
 HEARTBEAT_SECONDS = 300
+USER_AGENT = "DSTA-Dashboard-Publisher/1.0"
 
 
 def load_env_file(path: Path | None) -> dict[str, str]:
@@ -44,7 +45,7 @@ def setting(name: str, file_values: dict[str, str]) -> str:
 
 
 def request_json(url: str, *, headers: dict[str, str], timeout: int = 30):
-    request = Request(url, headers=headers)
+    request = Request(url, headers={"User-Agent": USER_AGENT, **headers})
     with urlopen(request, timeout=timeout) as response:
         return json.load(response), response.headers
 
@@ -142,18 +143,31 @@ def publish(ingest_url: str, ingest_token: str, snapshot: dict) -> dict:
             "Authorization": f"Bearer {ingest_token}",
             "Content-Type": "application/json; charset=utf-8",
             "Content-Length": str(len(payload)),
+            "User-Agent": USER_AGENT,
         },
     )
     with urlopen(request, timeout=60) as response:
         return json.load(response)
 
 
-def run(once: bool, env_file: Path | None) -> int:
+def run(
+    once: bool,
+    env_file: Path | None,
+    dashboard_url_option: str | None,
+    ingest_token_file: Path | None,
+) -> int:
     values = load_env_file(env_file)
-    vikunja_url = setting("VIKUNJA_URL", values).rstrip("/")
+    vikunja_url = (os.environ.get("VIKUNJA_URL") or values.get("VIKUNJA_URL") or "http://127.0.0.1:3456").rstrip("/")
     vikunja_token = setting("VIKUNJA_API_TOKEN", values)
-    dashboard_url = setting("DSTA_DASHBOARD_URL", values).rstrip("/")
-    ingest_token = setting("DSTA_DASHBOARD_INGEST_TOKEN", values)
+    dashboard_url = (
+        dashboard_url_option or setting("DSTA_DASHBOARD_URL", values)
+    ).rstrip("/")
+    if ingest_token_file:
+        ingest_token = ingest_token_file.read_text(encoding="utf-8").strip()
+        if not ingest_token:
+            raise RuntimeError("El archivo del token de publicación está vacío")
+    else:
+        ingest_token = setting("DSTA_DASHBOARD_INGEST_TOKEN", values)
     if not dashboard_url.startswith("https://"):
         raise RuntimeError("DSTA_DASHBOARD_URL debe usar HTTPS")
 
@@ -186,8 +200,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Publica una vez y termina")
     parser.add_argument("--env-file", type=Path, help="Archivo local con variables de entorno")
+    parser.add_argument("--dashboard-url", help="URL HTTPS del Worker")
+    parser.add_argument(
+        "--ingest-token-file",
+        type=Path,
+        help="Archivo local que contiene únicamente el token de publicación",
+    )
     arguments = parser.parse_args()
-    return run(arguments.once, arguments.env_file)
+    return run(
+        arguments.once,
+        arguments.env_file,
+        arguments.dashboard_url,
+        arguments.ingest_token_file,
+    )
 
 
 if __name__ == "__main__":

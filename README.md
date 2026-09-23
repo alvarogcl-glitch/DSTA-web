@@ -49,6 +49,18 @@ DSTA_DASHBOARD_INGEST_TOKEN=...
 python tools/publish_dashboard.py --once --env-file C:\ruta\configuracion-local.env
 ```
 
+En esta instalación, la URL de producción es
+`https://dsta-web.alvaro-gcl.workers.dev`. El token también puede mantenerse en
+un archivo local independiente, lo que evita incluirlo en variables o argumentos
+de tareas programadas:
+
+```powershell
+python tools/publish_dashboard.py `
+  --env-file C:\Users\admin\AppData\Local\hermes\.env `
+  --dashboard-url https://dsta-web.alvaro-gcl.workers.dev `
+  --ingest-token-file C:\Users\admin\AppData\Local\hermes\cache\vikunja-dashboard-ingest-token.txt
+```
+
 En operación normal, el script consulta Vikunja cada 30 segundos. Solo escribe en KV si cambian los datos o cada cinco minutos como pulso de actividad, manteniéndose dentro de los límites del plan gratuito.
 
 ## Desarrollo local
