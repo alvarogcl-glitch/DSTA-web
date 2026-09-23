@@ -6,7 +6,7 @@
 <script>
 'use strict';
 const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let tasks=[],projects=[],busy=false,inspection=null,inspectionHistory=[];
+let tasks=[],projects=[],busy=false,inspection=null,inspectionHistory=[],closingDrawerHistory=false;
 const missing=v=>!v||String(v).toLowerCase().startsWith('por confirmar');
 const DAYS_AHEAD=45;
 const dayOffset=value=>{
@@ -51,6 +51,7 @@ const taskLines=list=>openTasks(list).map(t=>'#'+t.id+' '+t.title).join('\n\n');
 function minuteView(title,text){
  if(inspection)inspectionHistory.push(inspection);
  showInspection({title,fields:[],minuteText:text});
+ pushDrawerHistory();
 }
 function lineMinute(projectId){
  const project=projects.find(p=>String(p.id)===String(projectId));
@@ -98,7 +99,19 @@ function renderPriority(){
  panelSets['cata-open']=open;panelSets['cata-done']=done;
  $('#cata').innerHTML='<h3>Pendientes para revisión · '+open.length+'</h3>'+(open.map(t=>priorityCard(t,'cata-open','Vínculo: '+cataReason(t))).join('')||'<p class="empty muted">Sin pendientes vinculados explícitamente a Cata.</p>')+(done.length?'<details><summary>Antecedentes completados · '+done.length+'</summary><div class="priority-list">'+done.map(t=>priorityCard(t,'cata-done','Completada · vínculo: '+cataReason(t))).join('')+'</div></details>':'');
 }
-function close(){ $('#drawer').classList.remove('open');$('#backdrop').classList.remove('open');inspection=null;inspectionHistory=[] }
+function pushDrawerHistory(){
+ const depth=history.state?.dstaDrawer?(Number(history.state.dstaDrawerDepth)||0)+1:1;
+ history.pushState({dstaDrawer:true,dstaDrawerDepth:depth},'');
+}
+function closeDirect(){ $('#drawer').classList.remove('open');$('#backdrop').classList.remove('open');inspection=null;inspectionHistory=[] }
+function close(){
+ if(history.state?.dstaDrawer){
+  closingDrawerHistory=true;
+  const depth=Math.max(1,Number(history.state.dstaDrawerDepth)||1);
+  closeDirect();
+  history.go(-depth);
+ }else closeDirect();
+}
 function showInspection(view){
  inspection=view;
  $('#detail-title').textContent=view.title;
@@ -114,10 +127,12 @@ function showInspection(view){
 function inspector(title,fields,items){
  if(inspection)inspectionHistory.push(inspection);
  showInspection({title,fields,items});
+ pushDrawerHistory();
 }
 function back(){
- if(inspectionHistory.length)showInspection(inspectionHistory.pop());
- else close();
+ if(history.state?.dstaDrawer)history.back();
+ else if(inspectionHistory.length)showInspection(inspectionHistory.pop());
+ else closeDirect();
 }
 function showTask(id){const t=tasks.find(x=>String(x.id)===String(id));if(!t)return;inspector('#'+t.id+' · '+t.title,[['Estado',t.done?'Completada':'Abierta'],['Línea',t.project],...(cataReason(t)&&!t.done?[['Para revisar con Cata',cataReview(t)]]:[]),['Responsable',t.owner],['Fecha / horizonte',t.date],['Dependencia',t.dependency],['Criterio de cierre',t.criterion],['SOURCE',t.source],['ACTION_KEY',t.action_key],['Descripción estructurada',t.description]])}
 function filtered(){const q=$('#q').value.toLowerCase(),a=$('#a').value,s=$('#s').value;return tasks.filter(t=>(!q||(t.title+' '+t.project+' '+t.owner+' '+t.id).toLowerCase().includes(q))&&(!a||String(t.project_id)===a)&&(!s||(t.done?'done':'open')===s))}
@@ -134,6 +149,12 @@ function render(){
  window.metricSubsets=metrics.map(x=>x[1]);
 }
 async function refresh(){if(busy)return;busy=true;$('#refresh').disabled=true;try{const response=await fetch('/api/dashboard',{cache:'no-store'});const payload=await response.json();if(!response.ok||!Array.isArray(payload.tasks))throw Error(payload.error||'Respuesta inválida');tasks=payload.tasks;projects=payload.projects;render();$('#status').textContent=(payload.stale?'SNAPSHOT / SIN CONEXIÓN':'EN VIVO')+' · '+new Date(payload.timestamp).toLocaleString('es-CL');$('#status').classList.toggle('stale',!!payload.stale);$('#error').textContent=payload.error||''}catch(e){$('#status').textContent='SIN CONEXIÓN';$('#status').classList.add('stale');$('#error').textContent='No se pudo consultar Vikunja: '+e.message+' · se conservan los datos de esta sesión'}finally{busy=false;$('#refresh').disabled=false}}
+window.addEventListener('popstate',()=>{
+ if(closingDrawerHistory){closingDrawerHistory=false;return}
+ if(!$('#drawer').classList.contains('open'))return;
+ if(inspectionHistory.length)showInspection(inspectionHistory.pop());
+ else closeDirect();
+});
 let longPressTimer=null,longPressTarget=null,longPressStart=null,suppressProjectClickUntil=0;
 function cancelLongPress(){clearTimeout(longPressTimer);longPressTarget?.classList.remove('long-pressing');longPressTimer=null;longPressTarget=null;longPressStart=null}
 document.addEventListener('pointerdown',e=>{const target=e.target.closest('[data-project]');if(!target||e.button!==0)return;cancelLongPress();longPressTarget=target;longPressStart=[e.clientX,e.clientY];target.classList.add('long-pressing');longPressTimer=setTimeout(()=>{suppressProjectClickUntil=Date.now()+900;const id=target.dataset.project;cancelLongPress();lineMinute(id)},650)});
