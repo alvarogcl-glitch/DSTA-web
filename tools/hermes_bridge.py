@@ -1,8 +1,8 @@
-"""Local Hermes/Ollama bridge for the DSTA dashboard.
+"""Local Hermes bridge for the DSTA dashboard.
 
 The process makes outbound HTTPS requests to the dashboard Worker and never
-opens a port on the VM. Chat turns run through Hermes with only its Vikunja MCP
-toolset; Cata summaries use local Ollama without tools.
+opens a port on the VM. Chat turns use the Vikunja MCP toolset; Cata summaries
+use an isolated Hermes session without tools.
 """
 
 from __future__ import annotations
@@ -109,7 +109,8 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
     return answer[:20_000]
 
 
-def run_summarizer(job: dict, ollama_url: str, model: str) -> list[dict]:
+def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path,
+                   provider: str, model: str) -> list[dict]:
     tasks = job.get("tasks") or []
     allowed = {str(task["id"]) for task in tasks}
     instructions = (
@@ -121,30 +122,34 @@ def run_summarizer(job: dict, ollama_url: str, model: str) -> list[dict]:
         "distinción entre tareas abiertas y completadas. Responde solo JSON con la forma "
         '{"summaries":[{"id":123,"summary":"...","nextAction":"...","attention":"normal"}]}.'
     )
-    payload = {
-        "model": model,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2},
-        "messages": [
-            {"role": "system", "content": instructions},
-            {"role": "user", "content": json.dumps(tasks, ensure_ascii=False)},
-        ],
-    }
-    request = Request(
-        f"{ollama_url.rstrip('/')}/api/chat",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+    child_env = os.environ.copy()
+    child_env["HERMES_HOME"] = str(hermes_home)
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    result = subprocess.run(
+        [hermes_cli, "chat", "--quiet", "--source", "tool", "--safe-mode",
+         "--provider", provider, "--model", model, "--reasoning", "low",
+         "--max-turns", "1", "--query",
+         f"{instructions}\n\nTareas para resumir:\n{json.dumps(tasks, ensure_ascii=False)}"],
+        cwd=str(hermes_home),
+        env=child_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+        check=False,
     )
-    with urlopen(request, timeout=240) as response:
-        result = json.load(response)
-    content = result.get("message", {}).get("content", "")
-    decoded = json.loads(content)
+    if result.returncode != 0:
+        raise RuntimeError("Hermes no pudo generar los resúmenes.")
+    output = result.stdout or ""
+    start, end = output.find("{"), output.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("Hermes no devolvió JSON de resúmenes.")
+    decoded = json.loads(output[start:end + 1])
     if isinstance(decoded, dict):
         decoded = decoded.get("summaries", [])
     if not isinstance(decoded, list):
-        raise RuntimeError("El modelo local devolvió un formato de resumen inválido.")
+        raise RuntimeError("Hermes devolvió un formato de resumen inválido.")
     summaries = []
     for item in decoded:
         task_id = str(item.get("id", ""))
@@ -178,18 +183,18 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
 
 
 def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_home: Path,
-                hermes_provider: str, hermes_model: str, ollama_url: str,
-                summary_model: str) -> None:
+                hermes_provider: str, hermes_model: str) -> None:
     try:
         if job.get("kind") == "summary":
-            summaries = run_summarizer(job, ollama_url, summary_model)
+            summaries = run_summarizer(job, hermes_cli, hermes_home,
+                                       hermes_provider, hermes_model)
             finish_job(base_url, token, job, summaries=summaries)
         else:
             reply = run_hermes(job, hermes_cli, hermes_home, hermes_provider, hermes_model)
             finish_job(base_url, token, job, reply=reply)
         print(f"{job.get('kind')} completado", flush=True)
     except Exception as error:
-        safe_error = "El resumen local no pudo generarse." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
+        safe_error = "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
         try:
             finish_job(base_url, token, job, error=safe_error)
         except (HTTPError, URLError, OSError, ValueError):
@@ -206,8 +211,6 @@ def run(*, once: bool, env_file: Path | None) -> int:
     hermes_cli = setting("HERMES_CLI", values, str(DEFAULT_HERMES_CLI) if DEFAULT_HERMES_CLI.exists() else "hermes")
     hermes_provider = setting("DSTA_HERMES_PROVIDER", values, "openai-codex")
     hermes_model = setting("DSTA_HERMES_MODEL", values, "gpt-6-luna")
-    ollama_url = setting("DSTA_OLLAMA_URL", values, "http://127.0.0.1:11434").rstrip("/")
-    summary_model = setting("DSTA_SUMMARY_MODEL", values, "qwen3.5:4b")
     if not dashboard_url.startswith("https://"):
         raise RuntimeError("DSTA_DASHBOARD_URL debe usar HTTPS")
     if not bridge_token:
@@ -224,7 +227,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 chat_job = result.get("job")
                 if chat_job:
                     process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                hermes_provider, hermes_model, ollama_url, summary_model)
+                                hermes_provider, hermes_model)
                     if once:
                         return 0
                     continue
@@ -235,11 +238,11 @@ def run(*, once: bool, env_file: Path | None) -> int:
                     if summary_job:
                         if once:
                             process_job(summary_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                        hermes_provider, hermes_model, ollama_url, summary_model)
+                                        hermes_provider, hermes_model)
                             return 0
                         summary_future = summaries.submit(
                             process_job, summary_job, dashboard_url, bridge_token, hermes_cli,
-                            hermes_home, hermes_provider, hermes_model, ollama_url, summary_model,
+                            hermes_home, hermes_provider, hermes_model,
                         )
                 if once:
                     return 0
@@ -252,7 +255,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Puente saliente entre el dashboard, Hermes y Ollama local")
+    parser = argparse.ArgumentParser(description="Puente saliente entre el dashboard y Hermes")
     parser.add_argument("--once", action="store_true", help="Procesa una solicitud disponible y termina")
     parser.add_argument("--env-file", type=Path, help="Archivo local con la URL y el secreto del puente")
     args = parser.parse_args()

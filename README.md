@@ -87,8 +87,8 @@ acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone seis
 operaciones acotadas: consultar proyectos/tareas, editar campos, completar una
 tarea, actualizar su campo estructurado de dependencia y añadir comentarios.
 Puede programar un recordatorio cuando se lo pidas y le indiques cuándo. Los
-resúmenes automáticos de Cata usan el modelo local
-`qwen3.5:4b` de Ollama, sin herramientas de escritura. Solo se recalculan para
+resúmenes automáticos de Cata usan Hermes en una sesión aislada sin herramientas.
+Solo se recalculan para
 tareas cuyo contenido cambió y se descartan si la tarea vuelve a cambiar antes
 de terminar el resumen.
 
@@ -114,15 +114,13 @@ de terminar el resumen.
    `DSTA_BRIDGE_TOKEN` en `C:\Users\admin\AppData\Local\hermes\.env`. No lo
    guardes en el repositorio.
 
-4. La URL del Worker y las rutas de Hermes y Ollama ya tienen valores
+4. La URL del Worker y la ruta de Hermes ya tienen valores
    predeterminados para esta VM. Si cambian, configura estas variables locales:
 
    ```dotenv
    HERMES_CLI=C:\Users\admin\AppData\Local\Programs\Python\Python312\Scripts\hermes.exe
    DSTA_HERMES_PROVIDER=openai-codex
    DSTA_HERMES_MODEL=gpt-6-luna
-   DSTA_OLLAMA_URL=http://127.0.0.1:11434
-   DSTA_SUMMARY_MODEL=qwen3.5:4b
    ```
 
 5. Despliega el Worker actualizado desde `main` y ejecuta el puente en la VM:
