@@ -8,6 +8,7 @@ toolset; Cata summaries use local Ollama without tools.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import os
 import re
@@ -85,6 +86,7 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
     )
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
+    child_env["PYTHONIOENCODING"] = "utf-8"
     result = subprocess.run(
         [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
          "--model", model, "--toolsets", "vikunja-dashboard,cronjob",
@@ -93,12 +95,14 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
         env=child_env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
         check=False,
     )
     if result.returncode != 0:
         raise RuntimeError("Hermes no pudo completar la consulta. Revisa el estado del agente en la VM.")
-    answer = result.stdout.strip()
+    answer = (result.stdout or "").strip()
     answer = re.sub(r"\n?\[?Session ID: [^\]\r\n]+\]?\s*$", "", answer, flags=re.IGNORECASE).strip()
     if not answer:
         raise RuntimeError("Hermes terminó sin devolver una respuesta.")
@@ -184,7 +188,7 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             reply = run_hermes(job, hermes_cli, hermes_home, hermes_provider, hermes_model)
             finish_job(base_url, token, job, reply=reply)
         print(f"{job.get('kind')} completado", flush=True)
-    except (HTTPError, URLError, OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+    except Exception as error:
         safe_error = "El resumen local no pudo generarse." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
         try:
             finish_job(base_url, token, job, error=safe_error)
@@ -212,25 +216,39 @@ def run(*, once: bool, env_file: Path | None) -> int:
         raise RuntimeError("No se encontró Hermes CLI; define HERMES_CLI con su ruta completa")
 
     print("Puente Hermes listo; el canal usa solicitudes HTTPS salientes.", flush=True)
-    while True:
-        try:
-            result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
-            job = result.get("job")
-            if not job:
-                result = request_json(f"{dashboard_url}/api/bridge/next?kind=summary", token=bridge_token)
-                job = result.get("job")
-            if job:
-                process_job(job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                            hermes_provider, hermes_model, ollama_url, summary_model)
-            elif once:
-                return 0
-            else:
+    with ThreadPoolExecutor(max_workers=1) as summaries:
+        summary_future: Future | None = None
+        while True:
+            try:
+                result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
+                chat_job = result.get("job")
+                if chat_job:
+                    process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                                hermes_provider, hermes_model, ollama_url, summary_model)
+                    if once:
+                        return 0
+                    continue
+
+                if summary_future is None or summary_future.done():
+                    result = request_json(f"{dashboard_url}/api/bridge/next?kind=summary", token=bridge_token)
+                    summary_job = result.get("job")
+                    if summary_job:
+                        if once:
+                            process_job(summary_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                                        hermes_provider, hermes_model, ollama_url, summary_model)
+                            return 0
+                        summary_future = summaries.submit(
+                            process_job, summary_job, dashboard_url, bridge_token, hermes_cli,
+                            hermes_home, hermes_provider, hermes_model, ollama_url, summary_model,
+                        )
+                if once:
+                    return 0
                 time.sleep(POLL_SECONDS)
-        except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
-            print(f"Puente sin conexión ({type(error).__name__}); reintenta en {POLL_SECONDS}s", file=sys.stderr, flush=True)
-            if once:
-                return 1
-            time.sleep(POLL_SECONDS)
+            except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
+                print(f"Puente sin conexión ({type(error).__name__}); reintenta en {POLL_SECONDS}s", file=sys.stderr, flush=True)
+                if once:
+                    return 1
+                time.sleep(POLL_SECONDS)
 
 
 def main() -> int:
