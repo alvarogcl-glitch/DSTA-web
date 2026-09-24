@@ -27,6 +27,7 @@ function environment() {
     DASHBOARD_PASSWORD: 'password',
     INGEST_TOKEN: 'ingest',
     DSTA_BRIDGE_TOKEN: 'bridge',
+    legacyValues: snapshotValues,
     CHAT_STATE: { getByName() { return { fetch(request) {
       return chat.fetch(typeof request === 'string' ? new Request(request) : request);
     } }; } },
@@ -74,5 +75,11 @@ assert.equal(status.body.reply, 'Hola, Álvaro.');
 const next = await call(env, 'POST', '/api/assistant', { message: 'otra consulta' });
 assert.equal(next.status, 202);
 assert.notEqual(next.body.id, first.body.id);
+
+const legacyId = 'd2228b81-07db-4c0e-9ff5-4c8d60e9bdf7';
+env.legacyValues.set(`dsta-ai-job-v1:${legacyId}`,
+  { id: legacyId, kind: 'chat', status: 'completed', reply: 'Respuesta anterior' });
+const legacy = await call(env, 'GET', `/api/assistant?id=${legacyId}`);
+assert.equal(legacy.body.reply, 'Respuesta anterior');
 
 console.log('assistant Durable Object queue checks passed');

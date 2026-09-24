@@ -207,7 +207,12 @@ async function createAssistantJob(request, env) {
 async function readAssistantJob(url, env) {
   const id = url.searchParams.get("id") || "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
-  return chatStub(env).fetch(`https://chat.internal/status?id=${encodeURIComponent(id)}`);
+  const response = await chatStub(env).fetch(`https://chat.internal/status?id=${encodeURIComponent(id)}`);
+  if (response.status !== 404) return response;
+  // Old KV replies remain readable during the one-day cutover window.
+  const oldJob = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
+  if (!oldJob || oldJob.kind !== "chat") return response;
+  return json({ id: oldJob.id, status: oldJob.status, reply: oldJob.reply || "", error: oldJob.error || "" });
 }
 
 function bridgeAuthorized(request, env) {
