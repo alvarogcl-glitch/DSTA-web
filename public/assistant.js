@@ -162,10 +162,11 @@
     document.querySelectorAll('#cata .priority-card[data-task]').forEach(card => {
       const record = summaries[card.dataset.task];
       if (!record?.summary) return;
-      const summary = document.createElement('span');
-      summary.className = `dsta-ai-task-summary ${record.attention || 'normal'}`;
+      const summary = card.querySelector('.review-note') || document.createElement('span');
+      summary.className = `review-note dsta-ai-task-summary ${record.attention || 'normal'}`;
+      summary.replaceChildren();
       const label = document.createElement('b');
-      label.textContent = record.attention === 'bloqueada' ? 'Resumen IA · bloqueada' : record.attention === 'seguimiento' ? 'Resumen IA · seguimiento' : 'Resumen IA';
+      label.textContent = 'Para revisar con Cata · Resumen IA';
       const text = document.createElement('span');
       text.textContent = record.summary;
       summary.append(label, text);
@@ -175,9 +176,7 @@
         action.textContent = `Próxima acción: ${record.nextAction}`;
         summary.append(action);
       }
-      const oldNote = card.querySelector('.review-note');
-      if (oldNote) oldNote.hidden = true;
-      card.append(summary);
+      if (!summary.parentElement) card.append(summary);
     });
   }
 
