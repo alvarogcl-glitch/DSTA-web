@@ -61,7 +61,8 @@ def request_json(url: str, *, token: str, method: str = "GET", payload: dict | N
         return json.load(response)
 
 
-def run_hermes(job: dict, hermes_cli: str, hermes_home: Path) -> str:
+def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
+               provider: str, model: str) -> str:
     history = job.get("history") or []
     transcript = "\n".join(
         f"{('Tú' if item.get('role') == 'user' else 'Hermes')}: {item.get('content', '')}"
@@ -85,7 +86,8 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path) -> str:
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     result = subprocess.run(
-        [hermes_cli, "chat", "--quiet", "--source", "tool", "--toolsets", "vikunja-dashboard,cronjob",
+        [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
+         "--model", model, "--toolsets", "vikunja-dashboard,cronjob",
          "--max-turns", "12", "--query", prompt],
         cwd=str(hermes_home),
         env=child_env,
@@ -172,13 +174,14 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
 
 
 def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_home: Path,
-                ollama_url: str, summary_model: str) -> None:
+                hermes_provider: str, hermes_model: str, ollama_url: str,
+                summary_model: str) -> None:
     try:
         if job.get("kind") == "summary":
             summaries = run_summarizer(job, ollama_url, summary_model)
             finish_job(base_url, token, job, summaries=summaries)
         else:
-            reply = run_hermes(job, hermes_cli, hermes_home)
+            reply = run_hermes(job, hermes_cli, hermes_home, hermes_provider, hermes_model)
             finish_job(base_url, token, job, reply=reply)
         print(f"{job.get('kind')} completado", flush=True)
     except (HTTPError, URLError, OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
@@ -197,6 +200,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
     dashboard_url = setting("DSTA_DASHBOARD_URL", values, DEFAULT_DASHBOARD_URL).rstrip("/")
     bridge_token = setting("DSTA_BRIDGE_TOKEN", values)
     hermes_cli = setting("HERMES_CLI", values, str(DEFAULT_HERMES_CLI) if DEFAULT_HERMES_CLI.exists() else "hermes")
+    hermes_provider = setting("DSTA_HERMES_PROVIDER", values, "openai-codex")
+    hermes_model = setting("DSTA_HERMES_MODEL", values, "gpt-6-luna")
     ollama_url = setting("DSTA_OLLAMA_URL", values, "http://127.0.0.1:11434").rstrip("/")
     summary_model = setting("DSTA_SUMMARY_MODEL", values, "qwen3.5:4b")
     if not dashboard_url.startswith("https://"):
@@ -215,7 +220,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind=summary", token=bridge_token)
                 job = result.get("job")
             if job:
-                process_job(job, dashboard_url, bridge_token, hermes_cli, hermes_home, ollama_url, summary_model)
+                process_job(job, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                            hermes_provider, hermes_model, ollama_url, summary_model)
             elif once:
                 return 0
             else:

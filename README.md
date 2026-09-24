@@ -119,6 +119,8 @@ de terminar el resumen.
 
    ```dotenv
    HERMES_CLI=C:\Users\admin\AppData\Local\Programs\Python\Python312\Scripts\hermes.exe
+   DSTA_HERMES_PROVIDER=openai-codex
+   DSTA_HERMES_MODEL=gpt-6-luna
    DSTA_OLLAMA_URL=http://127.0.0.1:11434
    DSTA_SUMMARY_MODEL=qwen3.5:4b
    ```
@@ -130,9 +132,9 @@ de terminar el resumen.
      --env-file C:\Users\admin\AppData\Local\hermes\.env
    ```
 
-   Mantén el proceso activo para recibir consultas y procesar resúmenes. Después
-   de validar la conexión, configúralo en el Programador de tareas de Windows
-   para iniciarse al iniciar sesión en la VM.
+   Mantén el proceso activo para recibir consultas y procesar resúmenes. En esta
+   VM, la tarea programada `DSTA Hermes Bridge` lo inicia al comenzar sesión
+   y lo mantiene activo en segundo plano.
 
 Sin `DSTA_BRIDGE_TOKEN`, el dashboard y la publicación de Vikunja siguen
 funcionando; el chat informa que el puente no está configurado y no se generan
