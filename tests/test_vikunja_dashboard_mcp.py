@@ -90,5 +90,67 @@ class SafeTaskUpdateTests(unittest.TestCase):
         mocked.assert_called_once_with("GET", "/api/v1/tasks/17")
 
 
+class CreateTaskTests(unittest.TestCase):
+    def test_create_task_requires_project_in_pmo_scope_and_verifies_result(self):
+        projects = [
+            {"id": 2, "title": "PMO-DSTA", "parent_project_id": 0},
+            {"id": 13, "title": "LT3 - Estrategia", "parent_project_id": 2},
+        ]
+        created = {"id": 99, "project_id": 13, "title": "Acordar alcance", "description": "Responsable: Ana"}
+        with patch.object(dashboard_mcp, "request", side_effect=[projects, created, created]) as mocked:
+            result = dashboard_mcp.pmo_create_task(
+                project_id=13, title="Acordar alcance", owner="Ana", dependency="LT2",
+                target_date="2026-10-20", closure_criterion="Alcance aprobado",
+            )
+
+        self.assertEqual(result["task"]["id"], 99)
+        self.assertEqual(mocked.call_args_list[0], call("GET", "/api/v1/projects"))
+        posted = mocked.call_args_list[1]
+        self.assertEqual(posted.args, ("PUT", "/api/v1/projects/13/tasks"))
+        self.assertIn("Responsable: Ana", posted.kwargs["json"]["description"])
+        self.assertIn("Dependencia: LT2", posted.kwargs["json"]["description"])
+        self.assertIn("Criterio de cierre: Alcance aprobado", posted.kwargs["json"]["description"])
+        self.assertEqual(mocked.call_args_list[2], call("GET", "/api/v1/tasks/99"))
+
+    def test_create_task_rejects_project_outside_pmo_scope(self):
+        projects = [{"id": 7, "title": "Personal", "parent_project_id": 0}]
+        with patch.object(dashboard_mcp, "request", return_value=projects) as mocked:
+            with self.assertRaisesRegex(ValueError, "proyecto PMO-DSTA"):
+                dashboard_mcp.pmo_create_task(project_id=7, title="Nueva tarea")
+        mocked.assert_called_once_with("GET", "/api/v1/projects")
+
+
+class CreateProjectTests(unittest.TestCase):
+    def test_create_lt_project_under_pmo_root_and_verify_result(self):
+        projects = [{"id": 2, "title": "PMO-DSTA", "parent_project_id": 0}]
+        created = {"id": 13, "title": "LT3 - Estrategia", "parent_project_id": 2}
+        with patch.object(dashboard_mcp, "request", side_effect=[projects, created, created]) as mocked:
+            result = dashboard_mcp.pmo_create_project("LT3 - Estrategia", "Descripción ejecutiva")
+
+        self.assertEqual(result["project"]["id"], 13)
+        posted = mocked.call_args_list[1]
+        self.assertEqual(posted.args, ("PUT", "/api/v1/projects"))
+        self.assertEqual(posted.kwargs["json"], {
+            "title": "LT3 - Estrategia", "description": "Descripción ejecutiva", "parent_project_id": 2,
+        })
+        self.assertEqual(mocked.call_args_list[2], call("GET", "/api/v1/projects/13"))
+
+    def test_create_project_fails_closed_when_pmo_root_is_missing(self):
+        with patch.object(dashboard_mcp, "request", return_value=[]) as mocked:
+            with self.assertRaisesRegex(RuntimeError, "proyecto raíz PMO-DSTA"):
+                dashboard_mcp.pmo_create_project("LT3 - Estrategia")
+        mocked.assert_called_once_with("GET", "/api/v1/projects")
+
+    def test_create_project_rejects_duplicate_and_invalid_line(self):
+        projects = [{"id": 2, "title": "PMO-DSTA", "parent_project_id": 0},
+                    {"id": 13, "title": "LT3 — Estrategia", "parent_project_id": 2}]
+        with patch.object(dashboard_mcp, "request", return_value=projects) as mocked:
+            with self.assertRaisesRegex(ValueError, "ya existe"):
+                dashboard_mcp.pmo_create_project("LT3 — Otra iniciativa")
+            with self.assertRaisesRegex(ValueError, "LT1-LT7 o Transversal"):
+                dashboard_mcp.pmo_create_project("LT9 - Inventada")
+        mocked.assert_called_once_with("GET", "/api/v1/projects")
+
+
 if __name__ == "__main__":
     unittest.main()

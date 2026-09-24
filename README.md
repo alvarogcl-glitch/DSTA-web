@@ -85,9 +85,15 @@ propagación de Workers KV; los trabajos terminados se purgan pasado un día.
 El snapshot de Vikunja y los resúmenes siguen en Workers KV.
 
 El chat invoca Hermes con los toolsets `vikunja-dashboard` y `cronjob`, sin
-acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone seis
-operaciones acotadas: consultar proyectos/tareas, editar campos, completar una
-tarea, actualizar su campo estructurado de dependencia y añadir comentarios.
+acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone
+operaciones acotadas para consultar proyectos/tareas, crear tareas estructuradas
+en una LT/TR existente, crear proyectos LT1-LT7/Transversal bajo PMO-DSTA,
+editar campos, completar tareas, actualizar su campo estructurado de dependencia
+y añadir comentarios. Las nuevas tareas incluyen Responsable, Fecha objetivo,
+Dependencia, Criterio de cierre, `SOURCE` y `ACTION_KEY`; lo no especificado queda
+como `Por confirmar`. Cada creación se relee desde Vikunja antes de confirmar al
+usuario. La creación de proyectos rechaza líneas existentes y cualquier nombre
+fuera de LT1-LT7/Transversal; no hay operaciones de borrado en el MCP.
 Puede programar un recordatorio cuando se lo pidas y le indiques cuándo. Los
 resúmenes automáticos de Cata usan Hermes en una sesión aislada sin herramientas.
 Solo se recalculan para

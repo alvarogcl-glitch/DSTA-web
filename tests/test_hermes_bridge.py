@@ -25,6 +25,10 @@ class HermesWindowTests(unittest.TestCase):
             )
         expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         self.assertEqual(run.call_args.kwargs["creationflags"], expected)
+        prompt = run.call_args.args[0][-1]
+        self.assertIn("pmo_create_task", prompt)
+        self.assertIn("pmo_create_project", prompt)
+        self.assertIn("no crees una línea LT/TR duplicada", prompt)
 
     def test_summaries_hide_console(self):
         output = '{"summaries":[{"id":1,"summary":"Pendiente","nextAction":"","attention":"normal"}]}'
