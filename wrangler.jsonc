@@ -14,6 +14,20 @@
       "binding": "DASHBOARD_DATA"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_STATE",
+        "class_name": "DashboardChatQueue"
+      }
+    ]
+  },
+  "exports": {
+    "DashboardChatQueue": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
   "observability": {
     "enabled": true
   }

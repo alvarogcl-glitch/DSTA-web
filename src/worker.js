@@ -1,7 +1,7 @@
+import { DurableObject } from "cloudflare:workers";
+
 const SNAPSHOT_KEY = "vikunja-dashboard-v1";
 const SUMMARY_KEY = "dsta-ai-summaries-v1";
-const CHAT_QUEUE_KEY = "dsta-ai-chat-queue-v1";
-const CHAT_BUSY_KEY = "dsta-ai-chat-busy-v1";
 const SUMMARY_QUEUE_KEY = "dsta-ai-summary-queue-v1";
 const SUMMARY_BUSY_KEY = "dsta-ai-summary-busy-v1";
 const JOB_PREFIX = "dsta-ai-job-v1:";
@@ -14,6 +14,10 @@ const JSON_HEADERS = {
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
+}
+
+function chatStub(env) {
+  return env.CHAT_STATE.getByName("pmo-dsta");
 }
 
 function configured(env) {
@@ -181,13 +185,6 @@ async function createAssistantJob(request, env) {
       typeof item.content !== "string" || item.content.length > 4_000)) {
     return json({ error: "Historial de conversación inválido." }, 400);
   }
-  const active = await activeChatJob(env);
-  if (active) {
-    if (active.message === message.trim() && String(active.task?.id ?? "") === String(taskId ?? "")) {
-      return json({ id: active.id, status: active.status }, 202);
-    }
-    return json({ error: "Hermes ya está atendiendo una consulta. Espera un momento y vuelve a intentar." }, 429);
-  }
   const snapshot = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
   const task = taskId === null ? null : snapshot?.tasks?.find(item => String(item.id) === String(taskId));
   if (taskId !== null && !task) return json({ error: "La tarea seleccionada ya no está en el snapshot actual." }, 404);
@@ -200,27 +197,17 @@ async function createAssistantJob(request, env) {
     history: history.slice(-20),
     task: task ? publicTask(task) : null,
   };
-  await env.DASHBOARD_DATA.put(JOB_PREFIX + job.id, JSON.stringify(job), { expirationTtl: 86_400 });
-  await env.DASHBOARD_DATA.put(CHAT_QUEUE_KEY, JSON.stringify(job), { expirationTtl: 86_400 });
-  return json({ id: job.id, status: job.status }, 202);
-}
-
-async function activeChatJob(env) {
-  const [queued, busyId] = await Promise.all([
-    env.DASHBOARD_DATA.get(CHAT_QUEUE_KEY, "json"),
-    env.DASHBOARD_DATA.get(CHAT_BUSY_KEY, "json"),
-  ]);
-  const ids = [...new Set([queued?.id, busyId].filter(id => typeof id === "string"))];
-  const jobs = await Promise.all(ids.map(id => env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json")));
-  return jobs.find(job => job?.kind === "chat" && ["queued", "running"].includes(job.status)) || null;
+  return chatStub(env).fetch(new Request("https://chat.internal/create", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(job),
+  }));
 }
 
 async function readAssistantJob(url, env) {
   const id = url.searchParams.get("id") || "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
-  const job = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
-  if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
-  return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "" });
+  return chatStub(env).fetch(`https://chat.internal/status?id=${encodeURIComponent(id)}`);
 }
 
 function bridgeAuthorized(request, env) {
@@ -231,23 +218,20 @@ async function takeBridgeJob(request, env) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const kind = new URL(request.url).searchParams.get("kind") === "summary" ? "summary" : "chat";
-  const queueKey = kind === "summary" ? SUMMARY_QUEUE_KEY : CHAT_QUEUE_KEY;
-  if (kind === "summary" && await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json")) {
+  if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next");
+  if (await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json")) {
     return json({ job: null });
   }
-  const job = await env.DASHBOARD_DATA.get(queueKey, "json");
+  const job = await env.DASHBOARD_DATA.get(SUMMARY_QUEUE_KEY, "json");
   if (!job || job.kind !== kind) return json({ job: null });
-  if (kind === "summary") {
-    await env.DASHBOARD_DATA.put(SUMMARY_BUSY_KEY, JSON.stringify({
-      id: job.id,
-      sourceHashes: job.sourceHashes,
-    }), { expirationTtl: 600 });
-  }
-  await env.DASHBOARD_DATA.delete(queueKey);
+  await env.DASHBOARD_DATA.put(SUMMARY_BUSY_KEY, JSON.stringify({
+    id: job.id,
+    sourceHashes: job.sourceHashes,
+  }), { expirationTtl: 600 });
+  await env.DASHBOARD_DATA.delete(SUMMARY_QUEUE_KEY);
   job.status = "running";
   job.startedAt = new Date().toISOString();
   await env.DASHBOARD_DATA.put(JOB_PREFIX + job.id, JSON.stringify(job), { expirationTtl: 86_400 });
-  if (kind === "chat") await env.DASHBOARD_DATA.put(CHAT_BUSY_KEY, JSON.stringify(job.id), { expirationTtl: 600 });
   return json({ job });
 }
 
@@ -258,14 +242,19 @@ async function completeBridgeJob(request, env) {
   if (parsed.error) return parsed.error;
   const { id, reply, error, summaries } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
+  const chatResponse = await chatStub(env).fetch(new Request("https://chat.internal/complete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, reply, error }),
+  }));
+  if (chatResponse.status !== 404) return chatResponse;
   const job = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
-  if (!job || job.status !== "running") return json({ error: "Trabajo no encontrado o no está activo." }, 404);
+  if (!job || job.kind !== "summary" || job.status !== "running") return json({ error: "Trabajo no encontrado o no está activo." }, 404);
 
   job.status = error ? "error" : "completed";
   job.error = typeof error === "string" ? error.slice(0, 1000) : "";
   job.completedAt = new Date().toISOString();
-  if (job.kind === "chat") job.reply = typeof reply === "string" ? reply.slice(0, 20_000) : "";
-  if (job.kind === "summary" && !error && Array.isArray(summaries)) {
+  if (!error && Array.isArray(summaries)) {
     const current = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
     const stored = await env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
     const currentTasks = new Map((current?.tasks || []).map(task => [String(task.id), task]));
@@ -286,12 +275,82 @@ async function completeBridgeJob(request, env) {
     await env.DASHBOARD_DATA.put(SUMMARY_KEY, JSON.stringify(stored));
   }
   await env.DASHBOARD_DATA.put(JOB_PREFIX + id, JSON.stringify(job), { expirationTtl: 86_400 });
-  if (job.kind === "chat") await env.DASHBOARD_DATA.delete(CHAT_BUSY_KEY);
-  if (job.kind === "summary") {
-    const running = await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json");
-    if (running?.id === id) await env.DASHBOARD_DATA.delete(SUMMARY_BUSY_KEY);
-  }
+  const running = await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json");
+  if (running?.id === id) await env.DASHBOARD_DATA.delete(SUMMARY_BUSY_KEY);
   return json({ ok: true });
+}
+
+// Chat needs immediate, strongly consistent hand-off between the browser and VM.
+// Snapshot and Cata summaries remain in Workers KV, where eventual consistency is acceptable.
+export class DashboardChatQueue extends DurableObject {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const storage = this.ctx.storage.kv;
+
+    if (url.pathname === "/create" && request.method === "POST") {
+      const job = await request.json();
+      if (job?.kind !== "chat" || !/^[0-9a-f-]{36}$/i.test(job.id || "")) {
+        return json({ error: "Consulta inválida." }, 400);
+      }
+      const currentId = storage.get("current");
+      const active = currentId ? storage.get(`job:${currentId}`) : null;
+      const age = Date.now() - Date.parse(active?.startedAt || active?.createdAt || "");
+      if (active && ["queued", "running"].includes(active.status) && age < 600_000) {
+        if (active.message === job.message && String(active.task?.id ?? "") === String(job.task?.id ?? "")) {
+          return json({ id: active.id, status: active.status }, 202);
+        }
+        return json({ error: "Hermes ya está atendiendo una consulta. Espera un momento y vuelve a intentar." }, 429);
+      }
+      if (active && ["queued", "running"].includes(active.status)) {
+        active.status = "error";
+        active.error = "La consulta anterior expiró. Vuelve a intentarlo.";
+        active.completedAt = new Date().toISOString();
+        storage.put(`job:${active.id}`, active);
+      }
+      for (const [key, oldJob] of storage.list({ prefix: "job:" })) {
+        if (Date.now() - Date.parse(oldJob.completedAt || oldJob.createdAt || "") > 86_400_000) {
+          storage.delete(key);
+        }
+      }
+      storage.put(`job:${job.id}`, job);
+      storage.put("current", job.id);
+      return json({ id: job.id, status: "queued" }, 202);
+    }
+
+    if (url.pathname === "/status" && request.method === "GET") {
+      const id = url.searchParams.get("id") || "";
+      const job = storage.get(`job:${id}`);
+      if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
+      return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "" });
+    }
+
+    if (url.pathname === "/next" && request.method === "GET") {
+      const currentId = storage.get("current");
+      const job = currentId ? storage.get(`job:${currentId}`) : null;
+      if (!job || job.status !== "queued") return json({ job: null });
+      job.status = "running";
+      job.startedAt = new Date().toISOString();
+      storage.put(`job:${job.id}`, job);
+      return json({ job });
+    }
+
+    if (url.pathname === "/complete" && request.method === "POST") {
+      const { id, reply, error } = await request.json();
+      const job = storage.get(`job:${id}`);
+      if (!job || job.status !== "running" || storage.get("current") !== id) {
+        return json({ error: "Trabajo no encontrado o no está activo." }, 404);
+      }
+      job.status = error ? "error" : "completed";
+      job.error = typeof error === "string" ? error.slice(0, 1000) : "";
+      job.reply = typeof reply === "string" ? reply.slice(0, 20_000) : "";
+      job.completedAt = new Date().toISOString();
+      storage.put(`job:${id}`, job);
+      storage.delete("current");
+      return json({ ok: true });
+    }
+
+    return json({ error: "Ruta interna no encontrada." }, 404);
+  }
 }
 
 export default {

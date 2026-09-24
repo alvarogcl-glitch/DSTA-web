@@ -79,8 +79,10 @@ El dashboard no conecta el navegador directamente con Hermes. El puente local
 consulta el Worker mediante HTTPS saliente cada cinco segundos, toma las
 solicitudes pendientes y ejecuta Hermes en la VM. No requiere publicar puertos
 de Hermes ni crear un túnel entrante. Las conversaciones se mantienen en la
-pestaña abierta del navegador; no se guardan en Workers KV de forma permanente
-(las respuestas de cola expiran a las 24 horas).
+pestaña abierta del navegador. La cola y las respuestas recientes del chat se
+guardan en un Durable Object de Cloudflare para evitar los retrasos de
+propagación de Workers KV; los trabajos terminados se purgan pasado un día.
+El snapshot de Vikunja y los resúmenes siguen en Workers KV.
 
 El chat invoca Hermes con los toolsets `vikunja-dashboard` y `cronjob`, sin
 acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone seis

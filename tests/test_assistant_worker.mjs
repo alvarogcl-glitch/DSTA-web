@@ -1,54 +1,78 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
-const worker = (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)).default;
-
-const JOB_PREFIX = 'dsta-ai-job-v1:';
-const QUEUE_KEY = 'dsta-ai-chat-queue-v1';
-const BUSY_KEY = 'dsta-ai-chat-busy-v1';
+const source = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8')
+  .replace('import { DurableObject } from "cloudflare:workers";',
+    'class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }');
+const { default: worker, DashboardChatQueue } = await import(
+  `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+);
 const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 
-function environment(entries = []) {
-  const values = new Map(entries);
+function environment() {
+  const snapshotValues = new Map();
+  const queueValues = new Map();
+  const chat = new DashboardChatQueue({
+    storage: {
+      kv: {
+        get(key) { return queueValues.get(key); },
+        put(key, value) { queueValues.set(key, structuredClone(value)); },
+        delete(key) { queueValues.delete(key); },
+        list({ prefix }) { return [...queueValues.entries()].filter(([key]) => key.startsWith(prefix)); },
+      },
+    },
+  }, {});
   return {
     DASHBOARD_USER: 'admin',
     DASHBOARD_PASSWORD: 'password',
     INGEST_TOKEN: 'ingest',
     DSTA_BRIDGE_TOKEN: 'bridge',
+    CHAT_STATE: { getByName() { return { fetch(request) {
+      return chat.fetch(typeof request === 'string' ? new Request(request) : request);
+    } }; } },
     DASHBOARD_DATA: {
-      async get(key) { return values.get(key) ?? null; },
-      async put(key, value) { values.set(key, JSON.parse(value)); },
-      async delete(key) { values.delete(key); },
+      async get(key) { return snapshotValues.get(key) ?? null; },
+      async put(key, value) { snapshotValues.set(key, JSON.parse(value)); },
+      async delete(key) { snapshotValues.delete(key); },
     },
-    values,
   };
 }
 
-async function submit(env, message = 'hola') {
-  const request = new Request('https://example.com/api/assistant', {
-    method: 'POST',
-    headers: { authorization: auth, 'content-type': 'application/json' },
-    body: JSON.stringify({ message }),
+async function call(env, method, path, body, authorization = auth) {
+  const request = new Request(`https://example.com${path}`, {
+    method,
+    headers: { authorization, 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
   });
   const response = await worker.fetch(request, env);
   return { status: response.status, body: await response.json() };
 }
 
-const oldId = 'd2228b81-07db-4c0e-9ff5-4c8d60e9bdf7';
-const completed = { id: oldId, kind: 'chat', status: 'completed', message: 'hola' };
-const stale = environment([[BUSY_KEY, oldId], [JOB_PREFIX + oldId, completed]]);
-const next = await submit(stale);
-assert.equal(next.status, 202, 'a stale busy key must not block a new request');
-assert.notEqual(next.body.id, oldId);
+const env = environment();
+const first = await call(env, 'POST', '/api/assistant', { message: 'hola' });
+assert.equal(first.status, 202);
+assert.equal(first.body.status, 'queued');
 
-const queued = { id: oldId, kind: 'chat', status: 'queued', message: 'hola', task: null };
-const duplicate = environment([[QUEUE_KEY, queued], [JOB_PREFIX + oldId, queued]]);
-const resumed = await submit(duplicate);
-assert.equal(resumed.status, 202);
-assert.equal(resumed.body.id, oldId, 'a duplicate submission must resume its original job');
+const duplicate = await call(env, 'POST', '/api/assistant', { message: 'hola' });
+assert.equal(duplicate.body.id, first.body.id, 'a duplicate resumes the same job');
+const other = await call(env, 'POST', '/api/assistant', { message: 'otra consulta' });
+assert.equal(other.status, 429, 'a different request waits for the active job');
 
-const other = await submit(duplicate, 'otra consulta');
-assert.equal(other.status, 429, 'a distinct request still waits for the active job');
+const claimed = await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge');
+assert.equal(claimed.body.job.id, first.body.id);
+assert.equal(claimed.body.job.status, 'running');
+const empty = await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge');
+assert.equal(empty.body.job, null);
 
-console.log('assistant worker queue checks passed');
+const done = await call(env, 'POST', '/api/bridge/complete',
+  { id: first.body.id, reply: 'Hola, Álvaro.' }, 'Bearer bridge');
+assert.equal(done.body.ok, true);
+const status = await call(env, 'GET', `/api/assistant?id=${first.body.id}`);
+assert.equal(status.body.status, 'completed');
+assert.equal(status.body.reply, 'Hola, Álvaro.');
+
+const next = await call(env, 'POST', '/api/assistant', { message: 'otra consulta' });
+assert.equal(next.status, 202);
+assert.notEqual(next.body.id, first.body.id);
+
+console.log('assistant Durable Object queue checks passed');
