@@ -181,9 +181,13 @@ async function createAssistantJob(request, env) {
       typeof item.content !== "string" || item.content.length > 4_000)) {
     return json({ error: "Historial de conversación inválido." }, 400);
   }
-  const busy = await env.DASHBOARD_DATA.get(CHAT_QUEUE_KEY, "json") ||
-    await env.DASHBOARD_DATA.get(CHAT_BUSY_KEY, "json");
-  if (busy) return json({ error: "Hermes ya está atendiendo una consulta. Espera un momento y vuelve a intentar." }, 429);
+  const active = await activeChatJob(env);
+  if (active) {
+    if (active.message === message.trim() && String(active.task?.id ?? "") === String(taskId ?? "")) {
+      return json({ id: active.id, status: active.status }, 202);
+    }
+    return json({ error: "Hermes ya está atendiendo una consulta. Espera un momento y vuelve a intentar." }, 429);
+  }
   const snapshot = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
   const task = taskId === null ? null : snapshot?.tasks?.find(item => String(item.id) === String(taskId));
   if (taskId !== null && !task) return json({ error: "La tarea seleccionada ya no está en el snapshot actual." }, 404);
@@ -199,6 +203,16 @@ async function createAssistantJob(request, env) {
   await env.DASHBOARD_DATA.put(JOB_PREFIX + job.id, JSON.stringify(job), { expirationTtl: 86_400 });
   await env.DASHBOARD_DATA.put(CHAT_QUEUE_KEY, JSON.stringify(job), { expirationTtl: 86_400 });
   return json({ id: job.id, status: job.status }, 202);
+}
+
+async function activeChatJob(env) {
+  const [queued, busyId] = await Promise.all([
+    env.DASHBOARD_DATA.get(CHAT_QUEUE_KEY, "json"),
+    env.DASHBOARD_DATA.get(CHAT_BUSY_KEY, "json"),
+  ]);
+  const ids = [...new Set([queued?.id, busyId].filter(id => typeof id === "string"))];
+  const jobs = await Promise.all(ids.map(id => env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json")));
+  return jobs.find(job => job?.kind === "chat" && ["queued", "running"].includes(job.status)) || null;
 }
 
 async function readAssistantJob(url, env) {

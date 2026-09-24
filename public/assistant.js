@@ -26,7 +26,15 @@
   const messagesEl = $('#dsta-assistant-messages');
   const contextEl = $('#dsta-assistant-context');
   const history = [];
+  const pendingKey = 'dsta-assistant-pending-v1';
   let waiting = false;
+
+  function savePending(value) {
+    try {
+      if (value) sessionStorage.setItem(pendingKey, JSON.stringify(value));
+      else sessionStorage.removeItem(pendingKey);
+    } catch (_) { /* El chat sigue funcionando si el navegador bloquea el almacenamiento. */ }
+  }
 
   function selectedTask() {
     const id = typeof inspection !== 'undefined' && inspection?.taskId;
@@ -57,7 +65,7 @@
   }
 
   async function waitForReply(id) {
-    const deadline = Date.now() + 300_000;
+    const deadline = Date.now() + 360_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 2000));
       const response = await fetch(`/api/assistant?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
@@ -68,6 +76,27 @@
       status.textContent = result.status === 'running' ? 'Hermes está consultando o ejecutando la acción…' : 'Solicitud en cola para Hermes…';
     }
     throw new Error('La consulta excedió el tiempo de espera. Puedes volver a intentarlo.');
+  }
+
+  async function finishPending(id, message, replyBubble) {
+    try {
+      const reply = await waitForReply(id);
+      replyBubble.textContent = reply;
+      replyBubble.classList.remove('pending');
+      history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+      if (history.length > 20) history.splice(0, history.length - 20);
+      status.textContent = 'Listo. Puedes continuar la conversación.';
+      savePending(null);
+    } catch (error) {
+      replyBubble.textContent = error.message;
+      replyBubble.classList.remove('pending');
+      status.textContent = 'No se completó la solicitud.';
+      if (!error.message.includes('excedió el tiempo')) savePending(null);
+    } finally {
+      waiting = false;
+      send.disabled = false;
+      input.focus();
+    }
   }
 
   async function submitMessage(event) {
@@ -90,17 +119,13 @@
       });
       const queued = await response.json();
       if (!response.ok) throw new Error(queued.error || 'No se pudo enviar la consulta.');
-      const reply = await waitForReply(queued.id);
-      replyBubble.textContent = reply;
-      replyBubble.classList.remove('pending');
-      history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
-      if (history.length > 20) history.splice(0, history.length - 20);
-      status.textContent = 'Listo. Puedes continuar la conversación.';
+      savePending({ id: queued.id, message });
+      await finishPending(queued.id, message, replyBubble);
     } catch (error) {
       replyBubble.textContent = error.message;
       replyBubble.classList.remove('pending');
       status.textContent = 'No se completó la solicitud.';
-    } finally {
+      input.value = message;
       waiting = false;
       send.disabled = false;
       input.focus();
@@ -116,6 +141,19 @@
       $('#dsta-assistant-form').requestSubmit();
     }
   });
+
+  try {
+    const pending = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
+    if (pending && /^[0-9a-f-]{36}$/i.test(pending.id) && typeof pending.message === 'string') {
+      waiting = true;
+      send.disabled = true;
+      openPanel(true);
+      addMessage('user', pending.message);
+      const replyBubble = addMessage('assistant', 'Recuperando la respuesta de Hermes…', true);
+      status.textContent = 'Retomando la consulta pendiente…';
+      void finishPending(pending.id, pending.message, replyBubble);
+    }
+  } catch (_) { savePending(null); }
 
   function renderCataSummaries() {
     const summaries = window.__dstaAiSummaries || {};
