@@ -25,6 +25,7 @@ USER_AGENT = "DSTA-Hermes-Bridge/1.0"
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
 DEFAULT_DASHBOARD_URL = "https://dsta-web.alvaro-gcl.workers.dev"
 DEFAULT_HERMES_CLI = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "Python" / "Python312" / "Scripts" / "hermes.exe"
+HERMES_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -97,6 +98,7 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=HERMES_CREATION_FLAGS,
         timeout=300,
         check=False,
     )
@@ -136,6 +138,7 @@ def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path,
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=HERMES_CREATION_FLAGS,
         timeout=180,
         check=False,
     )
