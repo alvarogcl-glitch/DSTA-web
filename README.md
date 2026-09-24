@@ -73,6 +73,71 @@ python tools/publish_dashboard.py `
   --ingest-token-file C:\Users\admin\AppData\Local\hermes\cache\vikunja-dashboard-ingest-token.txt
 ```
 
+## Copiloto Hermes
+
+El dashboard no conecta el navegador directamente con Hermes. El puente local
+consulta el Worker mediante HTTPS saliente cada cinco segundos, toma las
+solicitudes pendientes y ejecuta Hermes en la VM. No requiere publicar puertos
+de Hermes ni crear un túnel entrante. Las conversaciones se mantienen en la
+pestaña abierta del navegador; no se guardan en Workers KV de forma permanente
+(las respuestas de cola expiran a las 24 horas).
+
+El chat invoca Hermes con los toolsets `vikunja-dashboard` y `cronjob`, sin
+acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone seis
+operaciones acotadas: consultar proyectos/tareas, editar campos, completar una
+tarea, actualizar su campo estructurado de dependencia y añadir comentarios.
+Puede programar un recordatorio cuando se lo pidas y le indiques cuándo. Los
+resúmenes automáticos de Cata usan el modelo local
+`qwen3.5:4b` de Ollama, sin herramientas de escritura. Solo se recalculan para
+tareas cuyo contenido cambió y se descartan si la tarea vuelve a cambiar antes
+de terminar el resumen.
+
+### Activación
+
+1. El MCP `vikunja-dashboard` ya está registrado en esta VM y separado del MCP
+   general de Telegram. Si se instala la VM desde cero, regístralo así:
+
+   ```powershell
+   hermes mcp add vikunja-dashboard `
+     --command C:\Users\admin\AppData\Local\Programs\Python\Python312\python.exe `
+     --args C:\Users\admin\Documents\Codex\2026-09-22\hola\work\DSTA-web\tools\vikunja_dashboard_mcp.py
+   ```
+
+2. Genera un secreto aleatorio de al menos 32 bytes:
+
+   ```powershell
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+
+3. Guarda ese mismo valor como secreto cifrado `DSTA_BRIDGE_TOKEN` en **Workers
+   & Pages → dsta-web → Settings → Variables and Secrets** y como variable
+   `DSTA_BRIDGE_TOKEN` en `C:\Users\admin\AppData\Local\hermes\.env`. No lo
+   guardes en el repositorio.
+
+4. La URL del Worker y las rutas de Hermes y Ollama ya tienen valores
+   predeterminados para esta VM. Si cambian, configura estas variables locales:
+
+   ```dotenv
+   HERMES_CLI=C:\Users\admin\AppData\Local\Programs\Python\Python312\Scripts\hermes.exe
+   DSTA_OLLAMA_URL=http://127.0.0.1:11434
+   DSTA_SUMMARY_MODEL=qwen3.5:4b
+   ```
+
+5. Despliega el Worker actualizado desde `main` y ejecuta el puente en la VM:
+
+   ```powershell
+   python C:\Users\admin\Documents\Codex\2026-09-22\hola\work\DSTA-web\tools\hermes_bridge.py `
+     --env-file C:\Users\admin\AppData\Local\hermes\.env
+   ```
+
+   Mantén el proceso activo para recibir consultas y procesar resúmenes. Después
+   de validar la conexión, configúralo en el Programador de tareas de Windows
+   para iniciarse al iniciar sesión en la VM.
+
+Sin `DSTA_BRIDGE_TOKEN`, el dashboard y la publicación de Vikunja siguen
+funcionando; el chat informa que el puente no está configurado y no se generan
+resúmenes automáticos.
+
 En operación normal, el script consulta Vikunja cada 30 segundos. Solo escribe en KV si cambian los datos o cada cinco minutos como pulso de actividad, manteniéndose dentro de los límites del plan gratuito.
 
 ## Desarrollo local
