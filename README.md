@@ -121,6 +121,15 @@ vuelve a cambiar antes de terminar el resumen.
 2. Para desplegar con Wrangler, contrastar el Account ID de `npx wrangler whoami`
    con `account_id` en `wrangler.jsonc`; no intentar desplegar con otra cuenta
    ni cambiar el ID del proyecto para forzar acceso.
+   En esta VM, un proceso ya abierto puede conservar un `CLOUDFLARE_API_TOKEN`
+   heredado y **distinto** del token actualizado en las variables de usuario de
+   Windows. Si Wrangler muestra la cuenta equivocada, leer el valor vigente de
+   `HKCU\Environment\CLOUDFLARE_API_TOKEN` solo dentro del proceso de despliegue
+   y pasar ese valor como variable de entorno al proceso hijo, junto con
+   `CLOUDFLARE_ACCOUNT_ID` igual al `account_id` del proyecto. Validar antes
+   con una consulta de solo lectura a la API de despliegues de la cuenta
+   correcta (HTTP 200). No imprimir el token, guardarlo en Git ni editar la
+   variable global para un despliegue puntual.
 3. Verificar por separado que el Worker sirve los assets nuevos y la ruta
    `/api/bridge/snapshot` responde **401 JSON** ante un POST sin token válido
    (la versión anterior responde 401 de autenticación básica en texto plano).
@@ -130,6 +139,9 @@ vuelve a cambiar antes de terminar el resumen.
    `/api/bridge/snapshot` debe estar desplegada antes de probar una acción real;
    de lo contrario el chat conservará su respuesta, pero advertirá que no pudo
    actualizar el portafolio de inmediato.
+5. Confirmar por la API de Cloudflare que la versión recién publicada está al
+   **100 %** en el último despliegue; un `401` JSON de la ruta nueva confirma
+   además su presencia sin escribir datos de producción.
 
 ### Activación
 
