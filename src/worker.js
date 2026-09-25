@@ -122,8 +122,10 @@ async function enqueueChangedCataTasks(env, tasks) {
   await env.DASHBOARD_DATA.put(SUMMARY_QUEUE_KEY, JSON.stringify(job), { expirationTtl: 86_400 });
 }
 
-async function receiveSnapshot(request, env) {
-  if (!ingestAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+async function receiveSnapshot(request, env, fromBridge = false) {
+  if (!(fromBridge ? bridgeAuthorized(request, env) : ingestAuthorized(request, env))) {
+    return json({ error: "No autorizado" }, 401);
+  }
   const parsed = await readJson(request, 2_000_000);
   if (parsed.error) return parsed.error;
   const snapshot = parsed.body;
@@ -245,12 +247,12 @@ async function completeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 100_000);
   if (parsed.error) return parsed.error;
-  const { id, reply, error, summaries } = parsed.body || {};
+  const { id, reply, error, summaries, refreshError, snapshotTimestamp } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
   const chatResponse = await chatStub(env).fetch(new Request("https://chat.internal/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, reply, error }),
+    body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const job = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
@@ -326,7 +328,8 @@ export class DashboardChatQueue extends DurableObject {
       const id = url.searchParams.get("id") || "";
       const job = storage.get(`job:${id}`);
       if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
-      return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "" });
+      return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "",
+        refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "" });
     }
 
     if (url.pathname === "/next" && request.method === "GET") {
@@ -340,7 +343,7 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/complete" && request.method === "POST") {
-      const { id, reply, error } = await request.json();
+      const { id, reply, error, refreshError, snapshotTimestamp } = await request.json();
       const job = storage.get(`job:${id}`);
       if (!job || job.status !== "running" || storage.get("current") !== id) {
         return json({ error: "Trabajo no encontrado o no está activo." }, 404);
@@ -348,6 +351,8 @@ export class DashboardChatQueue extends DurableObject {
       job.status = error ? "error" : "completed";
       job.error = typeof error === "string" ? error.slice(0, 1000) : "";
       job.reply = typeof reply === "string" ? reply.slice(0, 20_000) : "";
+      job.refreshError = typeof refreshError === "string" ? refreshError.slice(0, 300) : "";
+      job.snapshotTimestamp = typeof snapshotTimestamp === "string" ? snapshotTimestamp.slice(0, 40) : "";
       job.completedAt = new Date().toISOString();
       storage.put(`job:${id}`, job);
       storage.delete("current");
@@ -371,6 +376,10 @@ export default {
       return receiveSnapshot(request, env);
     }
 
+    if (url.pathname === "/api/bridge/snapshot") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return receiveSnapshot(request, env, true);
+    }
     if (url.pathname === "/api/bridge/next") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return takeBridgeJob(request, env);

@@ -16,9 +16,16 @@ import shutil
 import subprocess
 import sys
 import time
+import importlib.util
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+_publisher_spec = importlib.util.spec_from_file_location(
+    "dsta_publish_dashboard", Path(__file__).with_name("publish_dashboard.py"))
+_publisher = importlib.util.module_from_spec(_publisher_spec)
+_publisher_spec.loader.exec_module(_publisher)
+fetch_dashboard = _publisher.fetch_dashboard
 
 POLL_SECONDS = 5
 USER_AGENT = "DSTA-Hermes-Bridge/1.0"
@@ -181,7 +188,8 @@ def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path,
 
 
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
-               summaries: list[dict] | None = None, error: str = "") -> None:
+               summaries: list[dict] | None = None, error: str = "",
+               refresh_error: str = "", snapshot_timestamp: str = "") -> None:
     payload: dict = {"id": job["id"]}
     if error:
         payload["error"] = error
@@ -189,6 +197,10 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
         payload["summaries"] = summaries or []
     else:
         payload["reply"] = reply
+        if refresh_error:
+            payload["refreshError"] = refresh_error
+        if snapshot_timestamp:
+            payload["snapshotTimestamp"] = snapshot_timestamp
     request_json(
         f"{base_url}/api/bridge/complete",
         token=token,
@@ -199,7 +211,8 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
 
 
 def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_home: Path,
-                hermes_provider: str, hermes_model: str) -> None:
+                hermes_provider: str, hermes_model: str, vikunja_token: str = "",
+                vikunja_url: str = "http://127.0.0.1:3456") -> None:
     try:
         if job.get("kind") == "summary":
             summaries = run_summarizer(job, hermes_cli, hermes_home,
@@ -207,7 +220,20 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             finish_job(base_url, token, job, summaries=summaries)
         else:
             reply = run_hermes(job, hermes_cli, hermes_home, hermes_provider, hermes_model)
-            finish_job(base_url, token, job, reply=reply)
+            refresh_error = ""
+            snapshot_timestamp = ""
+            try:
+                if not vikunja_token:
+                    raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
+                snapshot = fetch_dashboard(vikunja_url, vikunja_token)
+                request_json(f"{base_url}/api/bridge/snapshot", token=token,
+                             method="POST", payload=snapshot, timeout=40)
+                snapshot_timestamp = snapshot["timestamp"]
+            except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
+                refresh_error = "No se pudo actualizar el portafolio inmediatamente; usa Actualizar ahora o espera la sincronización."
+                print(f"Actualización inmediata falló ({type(error).__name__})", file=sys.stderr, flush=True)
+            finish_job(base_url, token, job, reply=reply, refresh_error=refresh_error,
+                       snapshot_timestamp=snapshot_timestamp)
         print(f"{job.get('kind')} completado", flush=True)
     except Exception as error:
         safe_error = "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
@@ -224,6 +250,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
     values = load_env_file(env_path)
     dashboard_url = setting("DSTA_DASHBOARD_URL", values, DEFAULT_DASHBOARD_URL).rstrip("/")
     bridge_token = setting("DSTA_BRIDGE_TOKEN", values)
+    vikunja_token = setting("VIKUNJA_API_TOKEN", values)
+    vikunja_url = setting("VIKUNJA_URL", values, "http://127.0.0.1:3456").rstrip("/")
     hermes_cli = setting("HERMES_CLI", values, str(DEFAULT_HERMES_CLI) if DEFAULT_HERMES_CLI.exists() else "hermes")
     hermes_provider = setting("DSTA_HERMES_PROVIDER", values, "openai-codex")
     hermes_model = setting("DSTA_HERMES_MODEL", values, "gpt-6-luna")
@@ -243,7 +271,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 chat_job = result.get("job")
                 if chat_job:
                     process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                hermes_provider, hermes_model)
+                                hermes_provider, hermes_model, vikunja_token, vikunja_url)
                     if once:
                         return 0
                     continue

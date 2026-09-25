@@ -71,7 +71,7 @@
       const response = await fetch(`/api/assistant?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo consultar el estado de Hermes.');
-      if (result.status === 'completed') return result.reply;
+      if (result.status === 'completed') return result;
       if (result.status === 'error') throw new Error(result.error || 'Hermes no pudo completar la consulta.');
       status.textContent = result.status === 'running' ? 'Hermes está consultando o ejecutando la acción…' : 'Solicitud en cola para Hermes…';
     }
@@ -80,12 +80,16 @@
 
   async function finishPending(id, message, replyBubble) {
     try {
-      const reply = await waitForReply(id);
+      const result = await waitForReply(id);
+      const reply = result.reply;
       replyBubble.textContent = reply;
       replyBubble.classList.remove('pending');
       history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
       if (history.length > 20) history.splice(0, history.length - 20);
-      status.textContent = 'Listo. Puedes continuar la conversación.';
+      status.textContent = result.refreshError || 'Listo. Puedes continuar la conversación.';
+      window.dispatchEvent(new CustomEvent('dsta-snapshot-ready', {
+        detail: { timestamp: result.snapshotTimestamp || '' },
+      }));
       savePending(null);
     } catch (error) {
       replyBubble.textContent = error.message;

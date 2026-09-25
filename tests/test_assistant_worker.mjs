@@ -46,7 +46,10 @@ async function call(env, method, path, body, authorization = auth) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const response = await worker.fetch(request, env);
-  return { status: response.status, body: await response.json() };
+  const text = await response.text();
+  let result;
+  try { result = JSON.parse(text); } catch { result = { error: text }; }
+  return { status: response.status, body: result };
 }
 
 const env = environment();
@@ -66,11 +69,22 @@ const empty = await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer
 assert.equal(empty.body.job, null);
 
 const done = await call(env, 'POST', '/api/bridge/complete',
-  { id: first.body.id, reply: 'Hola, Álvaro.' }, 'Bearer bridge');
+  { id: first.body.id, reply: 'Hola, Álvaro.', refreshError: 'No se pudo actualizar.', snapshotTimestamp: '2026-09-25T14:00:00Z' }, 'Bearer bridge');
 assert.equal(done.body.ok, true);
 const status = await call(env, 'GET', `/api/assistant?id=${first.body.id}`);
 assert.equal(status.body.status, 'completed');
 assert.equal(status.body.reply, 'Hola, Álvaro.');
+assert.equal(status.body.refreshError, 'No se pudo actualizar.');
+assert.equal(status.body.snapshotTimestamp, '2026-09-25T14:00:00Z');
+
+const freshSnapshot = { timestamp: '2026-09-25T14:00:00Z', projects: [{ id: 3, title: 'LT1' }], tasks: [{ id: 15, title: 'Nueva', project_id: 3 }] };
+const acceptedSnapshot = await call(env, 'POST', '/api/bridge/snapshot', freshSnapshot, 'Bearer bridge');
+assert.equal(acceptedSnapshot.status, 202);
+const deniedSnapshot = await call(env, 'POST', '/api/bridge/snapshot', freshSnapshot, 'Bearer wrong');
+assert.equal(deniedSnapshot.status, 401);
+const latest = await call(env, 'GET', '/api/dashboard');
+assert.equal(latest.body.tasks[0].title, 'Nueva');
+assert.equal(latest.body.timestamp, freshSnapshot.timestamp);
 
 const next = await call(env, 'POST', '/api/assistant', { message: 'otra consulta' });
 assert.equal(next.status, 202);

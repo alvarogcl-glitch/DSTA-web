@@ -16,15 +16,14 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 ## Generación de minutas
 
-- Mantener presionada durante 650 ms una tarjeta LT/TR genera una minuta con la
-  fecha local y únicamente las tareas abiertas de esa línea.
-- **Generar minuta de portafolio** incluye una sección para cada línea activa
-  bajo PMO-DSTA, incluso las creadas posteriormente.
+- Mantener presionada durante 650 ms una tarjeta LT/TR la selecciona o deselecciona.
+  El clic normal sigue abriendo su inspector; `Mayús+Enter` alterna la selección
+  desde teclado. La selección sobrevive a los refrescos y descarta líneas archivadas.
+- **Generar minuta** se habilita al seleccionar al menos una línea; incluye solo
+  las LT/TR elegidas, con sus tareas abiertas, en el orden del portafolio.
 - **Generar minuta Cata 1-1** incorpora únicamente los temas pendientes
   vinculados explícitamente a Cata.
-- El texto generado se puede editar en el panel lateral y copiar al
-  portapapeles. Como alternativa de teclado, `Mayús+Enter` sobre una LT/TR abre
-  su minuta.
+- El texto generado se puede editar en el panel lateral y copiar al portapapeles.
 
 ## Configuración de Cloudflare
 
@@ -102,6 +101,14 @@ Vikunja; el MCP no expone borrado permanente. La página toma los proyectos
 activos directamente bajo PMO-DSTA, sin exigir una cantidad o catálogo fijo.
 El publicador actualiza el snapshot cada 30 segundos y la interfaz lo relee
 con la misma frecuencia.
+Al terminar una solicitud del copiloto, el puente consulta nuevamente Vikunja y
+publica un snapshot por el endpoint autenticado `/api/bridge/snapshot` antes de
+marcar el chat como completado. El navegador solicita inmediatamente el nuevo
+snapshot y espera hasta recibir al menos la marca de tiempo publicada. Esto evita
+esperar el siguiente ciclo de 30 segundos para acciones del copiloto (no cubre
+ediciones hechas fuera de él). Si Vikunja, la publicación o la propagación de KV
+fallan, se informa el problema y se conservan los datos previos; no se simula
+una actualización exitosa. El puente requiere `VIKUNJA_API_TOKEN` local.
 Puede programar un recordatorio cuando se lo pidas y le indiques cuándo. Los
 resúmenes automáticos de Cata usan Hermes en una sesión aislada sin herramientas.
 Solo se recalculan para

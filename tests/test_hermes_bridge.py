@@ -42,6 +42,31 @@ class HermesWindowTests(unittest.TestCase):
         self.assertEqual(len(summaries), 1)
         expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         self.assertEqual(run.call_args.kwargs["creationflags"], expected)
+    def test_chat_rebuilds_snapshot_before_reporting_completion(self):
+        job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
+        snapshot = {"timestamp": "2026-09-25T14:00:00Z", "projects": [], "tasks": []}
+        events = []
+        with patch.object(bridge, "run_hermes", return_value="Tarea creada"), \
+             patch.object(bridge, "fetch_dashboard", return_value=snapshot), \
+             patch.object(bridge, "request_json", side_effect=lambda url, **kw: events.append((url, kw.get("payload"))) or {"ok": True}):
+            bridge.process_job(job, "https://example.com", "bridge", "hermes", Path.cwd(),
+                               "openai-codex", "gpt-6-luna", vikunja_token="vikunja")
+        self.assertEqual(events[0][0], "https://example.com/api/bridge/snapshot")
+        self.assertEqual(events[0][1], snapshot)
+        self.assertEqual(events[1][0], "https://example.com/api/bridge/complete")
+        self.assertEqual(events[1][1]["reply"], "Tarea creada")
+        self.assertEqual(events[1][1]["snapshotTimestamp"], snapshot["timestamp"])
+
+    def test_failed_snapshot_does_not_hide_successful_action(self):
+        job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
+        events = []
+        with patch.object(bridge, "run_hermes", return_value="Tarea creada"), \
+             patch.object(bridge, "fetch_dashboard", side_effect=OSError("offline")), \
+             patch.object(bridge, "request_json", side_effect=lambda url, **kw: events.append(kw.get("payload")) or {"ok": True}):
+            bridge.process_job(job, "https://example.com", "bridge", "hermes", Path.cwd(),
+                               "openai-codex", "gpt-6-luna", vikunja_token="vikunja")
+        self.assertEqual(events[0]["reply"], "Tarea creada")
+        self.assertTrue(events[0]["refreshError"])
 
 
 if __name__ == "__main__":
