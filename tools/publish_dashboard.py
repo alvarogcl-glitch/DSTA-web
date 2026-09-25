@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -76,19 +75,13 @@ def description_field(description: str, name: str) -> str:
 
 def fetch_dashboard(base_url: str, token: str) -> dict:
     projects = pages(base_url, "/api/v1/projects", token)
-    scope = [
-        project
-        for project in projects
-        if project.get("parent_project_id") == 2
-        and (
-            re.match(r"^LT[1-7]\b", project.get("title", ""))
-            or project.get("title", "").startswith("Transversal")
-        )
-    ]
-    if len(scope) != 8:
-        raise RuntimeError(
-            f"Cobertura PMO inesperada: {len(scope)} proyectos LT/TR; no se publica información parcial"
-        )
+    if not any(int(project.get("id") or 0) == 2 for project in projects):
+        raise RuntimeError("No se encontró la raíz PMO-DSTA; no se publica información parcial")
+    scope = sorted(
+        (project for project in projects
+         if int(project.get("parent_project_id") or 0) == 2 and not project.get("is_archived")),
+        key=lambda project: (float(project.get("position") or 0), str(project.get("title") or "").casefold()),
+    )
 
     tasks: list[dict] = []
     project_summary: list[dict] = []

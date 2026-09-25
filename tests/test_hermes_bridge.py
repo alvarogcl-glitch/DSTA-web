@@ -28,7 +28,8 @@ class HermesWindowTests(unittest.TestCase):
         prompt = run.call_args.args[0][-1]
         self.assertIn("pmo_create_task", prompt)
         self.assertIn("pmo_create_project", prompt)
-        self.assertIn("no crees una línea LT/TR duplicada", prompt)
+        self.assertIn("pmo_merge_projects", prompt)
+        self.assertIn("no una lista fija LT1-LT7", prompt)
 
     def test_summaries_hide_console(self):
         output = '{"summaries":[{"id":1,"summary":"Pendiente","nextAction":"","attention":"normal"}]}'

@@ -141,15 +141,94 @@ class CreateProjectTests(unittest.TestCase):
                 dashboard_mcp.pmo_create_project("LT3 - Estrategia")
         mocked.assert_called_once_with("GET", "/api/v1/projects")
 
-    def test_create_project_rejects_duplicate_and_invalid_line(self):
+    def test_create_project_rejects_duplicate_code_and_accepts_new_line(self):
         projects = [{"id": 2, "title": "PMO-DSTA", "parent_project_id": 0},
                     {"id": 13, "title": "LT3 — Estrategia", "parent_project_id": 2}]
         with patch.object(dashboard_mcp, "request", return_value=projects) as mocked:
             with self.assertRaisesRegex(ValueError, "ya existe"):
                 dashboard_mcp.pmo_create_project("LT3 — Otra iniciativa")
-            with self.assertRaisesRegex(ValueError, "LT1-LT7 o Transversal"):
-                dashboard_mcp.pmo_create_project("LT9 - Inventada")
-        mocked.assert_called_once_with("GET", "/api/v1/projects")
+        created = {"id": 19, "title": "LT9 - Nueva", "parent_project_id": 2}
+        with patch.object(dashboard_mcp, "request", side_effect=[projects, created, created]):
+            self.assertTrue(dashboard_mcp.pmo_create_project("LT9 - Nueva")["verified"])
+
+
+def sample_project(project_id=13, title="LT3 - Estrategia"):
+    return {"id": project_id, "title": title, "description": "Contexto", "parent_project_id": 2,
+            "is_archived": False, "hex_color": "#123456", "identifier": "LT3", "position": 2.0,
+            "is_favorite": True, "background_blur_hash": "hash", "background_information": None}
+
+
+class PortfolioStructureTests(unittest.TestCase):
+    def test_rename_preserves_project_settings(self):
+        current = sample_project()
+        updated = {**current, "title": "LT9 - Estrategia"}
+        with patch.object(dashboard_mcp, "request", side_effect=[[
+            {"id": 2, "title": "PMO-DSTA"}, current], current, updated, updated]) as mocked:
+            result = dashboard_mcp.pmo_update_project(13, title="LT9 - Estrategia")
+        self.assertTrue(result["verified"])
+        payload = mocked.call_args_list[2].kwargs["json"]
+        self.assertEqual(payload["description"], "Contexto")
+        self.assertEqual(payload["hex_color"], "#123456")
+        self.assertTrue(payload["is_favorite"])
+        self.assertEqual(payload["parent_project_id"], 2)
+
+    def test_move_preserves_task_fields_and_verifies_destination(self):
+        source, target = sample_project(), sample_project(19, "LT9 - Nueva")
+        current = sample_task()
+        current["project_id"] = 13
+        moved = {**current, "project_id": 19}
+        with patch.object(dashboard_mcp, "request", side_effect=[
+            [source, target], current, [source, target], moved, moved]) as mocked:
+            result = dashboard_mcp.pmo_move_task(17, 19)
+        self.assertEqual(result["task"]["project_id"], 19)
+        payload = mocked.call_args_list[3].kwargs["json"]
+        self.assertEqual(payload["description"], current["description"])
+        self.assertEqual(payload["reminders"], current["reminders"])
+
+    def test_archive_rejects_nonempty_line(self):
+        source = sample_project()
+        with patch.object(dashboard_mcp, "request", side_effect=[
+            [source], [{"id": 17}]]) as mocked:
+            with self.assertRaisesRegex(ValueError, "aún tiene tareas"):
+                dashboard_mcp.pmo_archive_project(13)
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_restore_archived_line_keeps_its_id_and_settings(self):
+        archived = {**sample_project(), "is_archived": True}
+        restored = {**archived, "is_archived": False}
+        with patch.object(dashboard_mcp, "request", side_effect=[
+            archived, [sample_project(19, "LT9 - Nueva")], restored, restored]) as mocked:
+            result = dashboard_mcp.pmo_restore_project(13)
+        self.assertEqual(result["project"]["id"], 13)
+        self.assertFalse(mocked.call_args_list[2].kwargs["json"]["is_archived"])
+        self.assertEqual(mocked.call_args_list[2].kwargs["json"]["description"], "Contexto")
+
+    def test_merge_failure_keeps_source_active(self):
+        source, target = sample_project(), sample_project(19, "LT9 - Nueva")
+        with patch.object(dashboard_mcp, "pmo_projects", return_value=[source, target]), \
+             patch.object(dashboard_mcp, "project_tasks", return_value=[{"id": 17}, {"id": 18}]), \
+             patch.object(dashboard_mcp, "pmo_move_task", side_effect=[{"verified": True}, RuntimeError("falló")]), \
+             patch.object(dashboard_mcp, "archive_empty_line") as archive:
+            with self.assertRaisesRegex(RuntimeError, "Fusión incompleta"):
+                dashboard_mcp.pmo_merge_projects(13, 19)
+        archive.assert_not_called()
+
+    def test_merge_archives_only_after_all_moves(self):
+        source, target = sample_project(), sample_project(19, "LT9 - Nueva")
+        events = []
+        def move(task_id, destination):
+            events.append(("move", task_id))
+            return {"verified": True}
+        def archive(project_id, projects):
+            events.append(("archive", project_id))
+            return {"project": {**source, "is_archived": True}}
+        with patch.object(dashboard_mcp, "pmo_projects", return_value=[source, target]), \
+             patch.object(dashboard_mcp, "project_tasks", return_value=[{"id": 17}, {"id": 18}]), \
+             patch.object(dashboard_mcp, "pmo_move_task", side_effect=move), \
+             patch.object(dashboard_mcp, "archive_empty_line", side_effect=archive):
+            result = dashboard_mcp.pmo_merge_projects(13, 19)
+        self.assertEqual(events, [("move", 17), ("move", 18), ("archive", 13)])
+        self.assertEqual(result["moved_task_ids"], [17, 18])
 
 
 if __name__ == "__main__":

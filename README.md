@@ -18,8 +18,8 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 - Mantener presionada durante 650 ms una tarjeta LT/TR genera una minuta con la
   fecha local y únicamente las tareas abiertas de esa línea.
-- **Generar minuta de portafolio** distribuye las tareas abiertas entre DeID,
-  ICT, AER, Academias TI y temas generales/transversales.
+- **Generar minuta de portafolio** incluye una sección para cada línea activa
+  bajo PMO-DSTA, incluso las creadas posteriormente.
 - **Generar minuta Cata 1-1** incorpora únicamente los temas pendientes
   vinculados explícitamente a Cata.
 - El texto generado se puede editar en el panel lateral y copiar al
@@ -87,13 +87,21 @@ El snapshot de Vikunja y los resúmenes siguen en Workers KV.
 El chat invoca Hermes con los toolsets `vikunja-dashboard` y `cronjob`, sin
 acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone
 operaciones acotadas para consultar proyectos/tareas, crear tareas estructuradas
-en una LT/TR existente, crear proyectos LT1-LT7/Transversal bajo PMO-DSTA,
-editar campos, completar tareas, actualizar su campo estructurado de dependencia
-y añadir comentarios. Las nuevas tareas incluyen Responsable, Fecha objetivo,
+en una línea existente, crear líneas bajo PMO-DSTA, renombrarlas, modificar su
+descripción, mover tareas entre líneas, fusionar líneas, archivar líneas vacías
+y restaurar líneas archivadas.
+También puede editar campos, completar tareas, actualizar su dependencia y
+añadir comentarios. Las nuevas tareas incluyen Responsable, Fecha objetivo,
 Dependencia, Criterio de cierre, `SOURCE` y `ACTION_KEY`; lo no especificado queda
 como `Por confirmar`. Cada creación se relee desde Vikunja antes de confirmar al
-usuario. La creación de proyectos rechaza líneas existentes y cualquier nombre
-fuera de LT1-LT7/Transversal; no hay operaciones de borrado en el MCP.
+usuario. Se rechazan títulos o códigos LT/TR duplicados. La fusión mueve y
+verifica cada tarea antes de archivar el proyecto de origen. Ante un fallo
+intermedio, el origen sigue activo y la respuesta indica los IDs ya movidos.
+El archivo de una línea vacía conserva su información y configuración en
+Vikunja; el MCP no expone borrado permanente. La página toma los proyectos
+activos directamente bajo PMO-DSTA, sin exigir una cantidad o catálogo fijo.
+El publicador actualiza el snapshot cada 30 segundos y la interfaz lo relee
+con la misma frecuencia.
 Puede programar un recordatorio cuando se lo pidas y le indiques cuándo. Los
 resúmenes automáticos de Cata usan Hermes en una sesión aislada sin herramientas.
 Solo se recalculan para
