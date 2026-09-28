@@ -294,7 +294,11 @@ def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path,
                   vikunja_url: str) -> None:
     """Hourly: export new Granola minutes, analyse each and publish it to the dashboard inbox."""
     try:
-        minute_inbox.run_sync(hermes_home)
+        try:
+            minute_inbox.run_sync(hermes_home)
+        except Exception as error:  # e.g. Granola rate limit: still process what is already queued
+            print(f"Exportación Granola falló; se procesa la cola existente ({error})"[:500],
+                  file=sys.stderr, flush=True)
         pending = minute_inbox.pending_items()
         if not pending:
             return
