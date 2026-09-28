@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -309,6 +310,22 @@ def pmo_list_tasks(project_id: int | None = None, limit: int = 100) -> dict[str,
 
 
 @mcp.tool()
+def pmo_open_tasks() -> dict[str, Any]:
+    """Compact list of every open task in the active PMO-DSTA lines, with the start of its description."""
+    lines = [project for project in pmo_projects() if is_pmo_line(project)]
+    tasks = []
+    for project in lines:
+        for task in project_tasks(int(project["id"])):
+            if task.get("done"):
+                continue
+            tasks.append({"id": task["id"], "project_id": project["id"], "line": project["title"],
+                          "title": task.get("title", ""),
+                          "description": str(task.get("description") or "")[:1200]})
+    return {"lines": [{"id": project["id"], "title": project["title"]} for project in lines],
+            "open_tasks": tasks}
+
+
+@mcp.tool()
 def pmo_create_task(
     project_id: int,
     title: str,
@@ -394,5 +411,17 @@ def pmo_add_comment(task_id: int, comment: str) -> dict[str, Any]:
     return request("PUT", f"/api/v1/tasks/{task_id}/comments", json={"comment": comment})
 
 
+READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_open_tasks"}
+
+
+def restrict_to_read_only() -> None:
+    """`--read-only` exposes only query tools (used to analyse minutes before any write)."""
+    for tool in list(mcp._tool_manager.list_tools()):
+        if tool.name not in READ_ONLY_TOOLS:
+            mcp.remove_tool(tool.name)
+
+
 if __name__ == "__main__":
+    if "--read-only" in sys.argv:
+        restrict_to_read_only()
     mcp.run(transport="stdio")

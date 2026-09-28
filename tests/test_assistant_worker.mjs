@@ -96,4 +96,33 @@ env.legacyValues.set(`dsta-ai-job-v1:${legacyId}`,
 const legacy = await call(env, 'GET', `/api/assistant?id=${legacyId}`);
 assert.equal(legacy.body.reply, 'Respuesta anterior');
 
+// Bandeja de minutas Granola
+const minute = { id: 'abc-123', digest: 'd1', titulo: 'Reunión Directores', detectadaEn: '2026-09-28T22:00:00Z',
+  estado: 'por_revisar', vista: false, acciones: [{ id: 'a1', tipo: 'crear', estado: 'propuesta' }] };
+assert.equal((await call(env, 'POST', '/api/bridge/minute', minute, 'Bearer wrong')).status, 401);
+assert.equal((await call(env, 'POST', '/api/bridge/minute', minute, 'Bearer bridge')).status, 200);
+assert.equal((await call(env, 'GET', '/api/minutes', null, 'Bearer bridge')).status, 401, 'browser routes need basic auth');
+let inbox = await call(env, 'GET', '/api/minutes');
+assert.equal(inbox.body.minutes[0].titulo, 'Reunión Directores');
+assert.equal(inbox.body.minutes[0].vista, false);
+await call(env, 'POST', '/api/minutes/seen', { id: 'abc-123' });
+await call(env, 'POST', '/api/bridge/minute', minute, 'Bearer bridge');
+inbox = await call(env, 'GET', '/api/minutes');
+assert.equal(inbox.body.minutes[0].vista, true, 'a re-published record with the same digest stays seen');
+
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'borrar' }] })).status, 400);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { sql: 'x' } }] })).status, 400);
+const decided = await call(env, 'POST', '/api/minutes/decide',
+  { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { titulo: 'Coordinar FACh', project_id: 3 } }] });
+assert.equal(decided.status, 202);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'rechazar' }] })).status, 409,
+  'only one pending decision per minute');
+const withDecision = await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge');
+assert.equal(withDecision.body.decision.minuteId, 'abc-123');
+assert.deepEqual(withDecision.body.decision.decisions[0].edits, { titulo: 'Coordinar FACh', project_id: 3 });
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge')).body.decision, null, 'a decision is handed out once');
+await call(env, 'POST', '/api/bridge/decision-done', { id: withDecision.body.decision.id, error: '' }, 'Bearer bridge');
+inbox = await call(env, 'GET', '/api/minutes');
+assert.equal(inbox.body.minutes[0].aplicando, false);
+
 console.log('assistant Durable Object queue checks passed');

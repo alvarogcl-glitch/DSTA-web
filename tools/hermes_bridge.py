@@ -19,6 +19,7 @@ import tempfile
 import time
 import importlib.util
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -27,6 +28,9 @@ _publisher_spec = importlib.util.spec_from_file_location(
 _publisher = importlib.util.module_from_spec(_publisher_spec)
 _publisher_spec.loader.exec_module(_publisher)
 fetch_dashboard = _publisher.fetch_dashboard
+_inbox_spec = importlib.util.spec_from_file_location("dsta_minute_inbox", Path(__file__).with_name("minute_inbox.py"))
+minute_inbox = importlib.util.module_from_spec(_inbox_spec)
+_inbox_spec.loader.exec_module(minute_inbox)
 
 POLL_SECONDS = 5
 USER_AGENT = "DSTA-Hermes-Bridge/1.0"
@@ -80,6 +84,9 @@ FALLBACK_MARKER = "Fallback activated"
 HERMES_TIMEOUT_SECONDS = 180
 CLAUDE_TIMEOUT_SECONDS = 150
 CODEX_RETRY_SECONDS = 600
+ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
+ANALYSIS_TIMEOUT_SECONDS = 420
+GRANOLA_FIRST_CHECK_SECONDS = 60
 CLAUDE_PROMPT_NOTE = ("\n\nNota: respondes como respaldo de Codex. En este modo no puedes programar "
                       "recordatorios; si te lo piden, indícalo.")
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Codex no disponible)."
@@ -185,16 +192,16 @@ def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
     return process.returncode, stdout, fell_back
 
 
-def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
-               provider: str, model: str) -> str:
+def ask_hermes(prompt: str, hermes_cli: str, hermes_home: Path, provider: str, model: str,
+               toolsets: str, max_turns: int = 12, timeout: int = 0) -> str:
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     child_env["PYTHONIOENCODING"] = "utf-8"
     returncode, stdout, fell_back = run_watched(
         [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
-         "--model", model, "--toolsets", CHAT_TOOLSETS,
-         "--max-turns", "12", "--query", chat_prompt(job)],
-        cwd=hermes_home, env=child_env, timeout=HERMES_TIMEOUT_SECONDS,
+         "--model", model, "--toolsets", toolsets,
+         "--max-turns", str(max_turns), "--query", prompt],
+        cwd=hermes_home, env=child_env, timeout=timeout or HERMES_TIMEOUT_SECONDS,
         log_path=hermes_home / "logs" / "agent.log",
     )
     if fell_back:
@@ -207,25 +214,31 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
     return answer[:20_000]
 
 
-def claude_mcp_config(hermes_home: Path) -> Path:
+def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
+               provider: str, model: str) -> str:
+    return ask_hermes(chat_prompt(job), hermes_cli, hermes_home, provider, model, CHAT_TOOLSETS)
+
+
+def claude_mcp_config(hermes_home: Path, read_only: bool = False) -> Path:
     """Same scoped MCP servers as the Hermes chat, for the Claude backup."""
     tools = Path(__file__).resolve().parent
+    vikunja_args = [str(tools / "vikunja_dashboard_mcp.py")] + (["--read-only"] if read_only else [])
     config = {"mcpServers": {
-        "vikunja-dashboard": {"command": sys.executable, "args": [str(tools / "vikunja_dashboard_mcp.py")]},
+        "vikunja-dashboard": {"command": sys.executable, "args": vikunja_args},
         "dsta-minutas": {"command": sys.executable, "args": [str(tools / "minutas_mcp.py")]},
     }}
-    path = hermes_home / "cache" / "dsta-claude-mcp.json"
+    path = hermes_home / "cache" / f"dsta-claude-mcp{'-readonly' if read_only else ''}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     return path
 
 
-def run_claude(job: dict, claude_cli: str, hermes_home: Path, model: str) -> str:
-    """Answer with Claude Code headless: only the dashboard MCP tools, no shell, files or web."""
-    prompt = chat_prompt(job) + CLAUDE_PROMPT_NOTE
+def ask_claude(prompt: str, claude_cli: str, hermes_home: Path, model: str,
+               read_only: bool = False, timeout: int = 0) -> str:
+    """Claude Code headless with only the dashboard MCP tools: no shell, files or web."""
     result = subprocess.run(
-        [claude_cli, "-p", "--mcp-config", str(claude_mcp_config(hermes_home)), "--strict-mcp-config",
-         "--tools", "", "--allowedTools", "mcp__vikunja-dashboard,mcp__dsta-minutas",
+        [claude_cli, "-p", "--mcp-config", str(claude_mcp_config(hermes_home, read_only)),
+         "--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__vikunja-dashboard,mcp__dsta-minutas",
          "--model", model, "--output-format", "text"],
         input=prompt,
         cwd=str(hermes_home),
@@ -234,25 +247,28 @@ def run_claude(job: dict, claude_cli: str, hermes_home: Path, model: str) -> str
         encoding="utf-8",
         errors="replace",
         creationflags=HERMES_CREATION_FLAGS,
-        timeout=CLAUDE_TIMEOUT_SECONDS,
+        timeout=timeout or CLAUDE_TIMEOUT_SECONDS,
         check=False,
     )
     answer = clean_reply(result.stdout or "")
     if result.returncode != 0 or not answer:
         raise RuntimeError("Ni Codex ni el respaldo Claude pudieron completar la consulta.")
-    return answer[:20_000] + BACKUP_NOTE
+    return answer[:20_000]
+
+
+def run_claude(job: dict, claude_cli: str, hermes_home: Path, model: str) -> str:
+    return ask_claude(chat_prompt(job) + CLAUDE_PROMPT_NOTE, claude_cli, hermes_home, model) + BACKUP_NOTE
 
 
 _codex_retry_at = 0.0
 
 
-def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, model: str,
-                claude_cli: str = "", claude_model: str = "sonnet") -> str:
+def codex_or_claude(with_codex: Callable[[], str], with_claude: Callable[[], str], claude_cli: str) -> str:
     """Codex through Hermes first; Claude only when Codex is unavailable (plan B)."""
     global _codex_retry_at
     if time.monotonic() >= _codex_retry_at:
         try:
-            return run_hermes(job, hermes_cli, hermes_home, provider, model)
+            return with_codex()
         except CodexUnavailable as error:
             if not claude_cli:
                 raise RuntimeError(str(error)) from error
@@ -260,7 +276,76 @@ def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, mo
             print(f"Codex no disponible ({error}); responde Claude", file=sys.stderr, flush=True)
     if not claude_cli:
         raise RuntimeError("Hermes no pudo completar la consulta.")
-    return run_claude(job, claude_cli, hermes_home, claude_model)
+    return with_claude()
+
+
+def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, model: str,
+                claude_cli: str = "", claude_model: str = "sonnet") -> str:
+    return codex_or_claude(
+        lambda: run_hermes(job, hermes_cli, hermes_home, provider, model),
+        lambda: run_claude(job, claude_cli, hermes_home, claude_model),
+        claude_cli,
+    )
+
+
+def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path, provider: str,
+                  model: str, claude_cli: str, claude_model: str, vikunja_token: str,
+                  vikunja_url: str) -> None:
+    """Hourly: export new Granola minutes, analyse each and publish it to the dashboard inbox."""
+    try:
+        manifest = minute_inbox.run_sync(hermes_home)
+        pending = manifest.get("pending_review") or []
+        if not pending:
+            return
+        vk = minute_inbox.load_vikunja()
+        ask = lambda prompt: codex_or_claude(
+            lambda: ask_hermes(prompt, hermes_cli, hermes_home, provider, model, ANALYSIS_TOOLSETS,
+                               max_turns=20, timeout=ANALYSIS_TIMEOUT_SECONDS),
+            lambda: ask_claude(prompt, claude_cli, hermes_home, claude_model, read_only=True,
+                               timeout=ANALYSIS_TIMEOUT_SECONDS),
+            claude_cli,
+        )
+        for item in pending:
+            try:
+                record = minute_inbox.process_item(item, ask, vk, inbox_store(hermes_home))
+                push_minute(base_url, token, record)
+                print(f"Minuta analizada: {record['titulo']} ({record['estado']})", flush=True)
+            except Exception as error:  # the item stays pending and is retried next hour
+                print(f"Minuta no procesada ({type(error).__name__}: {error})", file=sys.stderr, flush=True)
+        publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+    except Exception as error:
+        print(f"Revisión de Granola falló ({type(error).__name__}: {error})", file=sys.stderr, flush=True)
+
+
+def inbox_store(hermes_home: Path) -> Path:
+    return hermes_home / "cache" / "dsta-minute-inbox.json"
+
+
+def push_minute(base_url: str, token: str, record: dict) -> None:
+    request_json(f"{base_url}/api/bridge/minute", token=token, method="POST", payload=record, timeout=40)
+
+
+def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str) -> str:
+    if not vikunja_token:
+        raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
+    snapshot = fetch_dashboard(vikunja_url, vikunja_token)
+    request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
+    return snapshot["timestamp"]
+
+
+def process_decision(decision: dict, base_url: str, token: str, hermes_home: Path,
+                     vikunja_token: str, vikunja_url: str) -> None:
+    """Apply the approvals/rejections the user sent from the dashboard inbox."""
+    error = ""
+    try:
+        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision, minute_inbox.load_vikunja())
+        push_minute(base_url, token, record)
+        publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+    except Exception as failure:
+        error = f"No se pudieron aplicar las decisiones: {failure}"[:300]
+        print(f"Decisión de minuta falló ({type(failure).__name__})", file=sys.stderr, flush=True)
+    request_json(f"{base_url}/api/bridge/decision-done", token=token, method="POST",
+                 payload={"id": decision.get("id"), "error": error}, timeout=40)
 
 
 def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path,
@@ -357,12 +442,7 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             refresh_error = ""
             snapshot_timestamp = ""
             try:
-                if not vikunja_token:
-                    raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
-                snapshot = fetch_dashboard(vikunja_url, vikunja_token)
-                request_json(f"{base_url}/api/bridge/snapshot", token=token,
-                             method="POST", payload=snapshot, timeout=40)
-                snapshot_timestamp = snapshot["timestamp"]
+                snapshot_timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 refresh_error = "No se pudo actualizar el portafolio inmediatamente; usa Actualizar ahora o espera la sincronización."
                 print(f"Actualización inmediata falló ({type(error).__name__})", file=sys.stderr, flush=True)
@@ -391,6 +471,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
     hermes_model = setting("DSTA_HERMES_MODEL", values, "gpt-6-luna")
     claude_cli = setting("DSTA_CLAUDE_CLI", values, str(DEFAULT_CLAUDE_CLI) if DEFAULT_CLAUDE_CLI.exists() else "")
     claude_model = setting("DSTA_CLAUDE_MODEL", values, "sonnet")
+    granola_every = int(setting("DSTA_GRANOLA_INTERVAL_SECONDS", values, "3600"))
     if not dashboard_url.startswith("https://"):
         raise RuntimeError("DSTA_DASHBOARD_URL debe usar HTTPS")
     if not bridge_token:
@@ -400,11 +481,27 @@ def run(*, once: bool, env_file: Path | None) -> int:
 
     print("Puente Hermes listo; el canal usa solicitudes HTTPS salientes."
           + (" Respaldo Claude activo." if claude_cli else " Sin respaldo Claude."), flush=True)
-    with ThreadPoolExecutor(max_workers=1) as summaries:
+    for record in minute_inbox.load_store(inbox_store(hermes_home))["minutes"].values():
+        try:
+            push_minute(dashboard_url, bridge_token, record)
+        except (HTTPError, URLError, OSError, ValueError):
+            break
+    with ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola:
         summary_future: Future | None = None
+        granola_future: Future | None = None
+        next_granola = time.monotonic() + GRANOLA_FIRST_CHECK_SECONDS
         while True:
             try:
+                if granola_every > 0 and time.monotonic() >= next_granola and (
+                        granola_future is None or granola_future.done()):
+                    next_granola = time.monotonic() + granola_every
+                    granola_future = granola.submit(
+                        granola_cycle, dashboard_url, bridge_token, hermes_cli, hermes_home, hermes_provider,
+                        hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url)
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
+                if result.get("decision"):
+                    process_decision(result["decision"], dashboard_url, bridge_token, hermes_home,
+                                     vikunja_token, vikunja_url)
                 chat_job = result.get("job")
                 if chat_job:
                     process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,

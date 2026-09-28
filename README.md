@@ -28,6 +28,32 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
   seleccionado; sin selección incluyen todos los pendientes del panel.
 - El texto generado se puede editar en el panel lateral y copiar al portapapeles.
 
+## Bandeja de minutas Granola (🔔)
+
+Cada hora el puente ejecuta el exportador de Hermes (`granola-pmo-summary-sync.py`):
+copia las minutas nuevas en `pmo-dsta/07_reuniones` y `Minutas 2026` y las deja en la
+cola durable `04_reportes/granola-reconciliation-queue.json`. Cada minuta pendiente se
+analiza en una sesión de solo lectura (Hermes/Codex con `vikunja-readonly` y
+`dsta-minutas`; Claude como respaldo) que devuelve un plan JSON de acciones:
+actualizar, registrar nota, completar, crear o mover tareas.
+
+- `tools/minute_inbox.py` aplica automáticamente solo las acciones marcadas como
+  evidentes **y** de confianza alta (nunca `mover`), relee cada tarea en Vikunja y
+  deja el resto como propuestas. Las notas se agregan a la bitácora de la descripción
+  (`Actualización/Nota/Cierre AAAA-MM-DD: … (Fuente: Granola …)`). Las creaciones usan
+  `ACTION_KEY granola-<source_id>-<título>` y se rechazan si ya existe una tarea
+  abierta con el mismo título en la línea.
+- El reporte queda en `04_reportes/granola-reconciliation-reports/` y la cola se
+  marca `awaiting_user` (con propuestas) o `processed`, igual que el cron de Hermes.
+- El dashboard muestra una campana con el número de minutas nuevas o por revisar.
+  En cada minuta se ve lo aplicado automáticamente y las propuestas, que se pueden
+  editar, aprobar o rechazar. Las decisiones viajan por el Durable Object junto a la
+  consulta que el puente ya hace cada 5 segundos (sin solicitudes adicionales) y el
+  puente las aplica y publica un snapshot nuevo.
+- El estado de la bandeja vive en la VM (`hermes/cache/dsta-minute-inbox.json`); el
+  Worker solo lo refleja. `DSTA_GRANOLA_INTERVAL_SECONDS` cambia la frecuencia
+  (0 la desactiva).
+
 ## Configuración de Cloudflare
 
 La integración Git debe usar:

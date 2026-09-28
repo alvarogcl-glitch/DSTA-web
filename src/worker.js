@@ -287,6 +287,61 @@ async function completeBridgeJob(request, env) {
   return json({ ok: true });
 }
 
+// Granola minutes inbox: the VM owns each record; the Durable Object mirrors it for the
+// browser and queues the user's decisions until the bridge applies them.
+const MINUTE_ID = /^[\w-]{1,80}$/;
+const MINUTE_ACTION_ID = /^a\d{1,3}$/;
+const MINUTE_EDIT_KEYS = new Set(["task_id", "project_id", "titulo", "nota", "responsable", "fecha_objetivo",
+  "dependencia", "criterio_cierre"]);
+
+function validDecision(body) {
+  const { minuteId, decisions } = body || {};
+  if (typeof minuteId !== "string" || !MINUTE_ID.test(minuteId)) return null;
+  if (!Array.isArray(decisions) || !decisions.length || decisions.length > 25) return null;
+  const clean = [];
+  for (const item of decisions) {
+    if (!item || !MINUTE_ACTION_ID.test(String(item.actionId || ""))) return null;
+    if (!["aprobar", "rechazar"].includes(item.decision)) return null;
+    const edits = {};
+    for (const [key, value] of Object.entries(item.edits || {})) {
+      if (!MINUTE_EDIT_KEYS.has(key) || !["string", "number"].includes(typeof value)) return null;
+      if (String(value).length > 1500) return null;
+      edits[key] = value;
+    }
+    clean.push({ actionId: item.actionId, decision: item.decision, edits });
+  }
+  return { minuteId, decisions: clean };
+}
+
+function forwardToChatObject(env, path, body) {
+  return chatStub(env).fetch(new Request(`https://chat.internal${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+}
+
+async function bridgeMinuteRoute(request, env, path) {
+  if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
+  if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+  const parsed = await readJson(request, 400_000);
+  if (parsed.error) return parsed.error;
+  return forwardToChatObject(env, path, parsed.body);
+}
+
+async function browserMinuteRoute(request, env, path) {
+  const parsed = await readJson(request, 60_000);
+  if (parsed.error) return parsed.error;
+  if (path === "/minutes/decide") {
+    const decision = validDecision(parsed.body);
+    if (!decision) return json({ error: "Decisión inválida." }, 400);
+    return forwardToChatObject(env, path, decision);
+  }
+  const id = String(parsed.body?.id || "");
+  if (!MINUTE_ID.test(id)) return json({ error: "Identificador inválido." }, 400);
+  return forwardToChatObject(env, path, { id });
+}
+
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
 // Snapshot and Cata summaries remain in Workers KV, where eventual consistency is acceptable.
 export class DashboardChatQueue extends DurableObject {
@@ -333,13 +388,73 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/next" && request.method === "GET") {
+      // The bridge already polls for chat; pending minute decisions ride on the same request.
+      const decision = this.takeDecision();
       const currentId = storage.get("current");
       const job = currentId ? storage.get(`job:${currentId}`) : null;
-      if (!job || job.status !== "queued") return json({ job: null });
+      if (!job || job.status !== "queued") return json({ job: null, decision });
       job.status = "running";
       job.startedAt = new Date().toISOString();
       storage.put(`job:${job.id}`, job);
-      return json({ job });
+      return json({ job, decision });
+    }
+
+    if (url.pathname === "/minutes/upsert" && request.method === "POST") {
+      const record = await request.json();
+      if (!record || !MINUTE_ID.test(String(record.id || "")) || !Array.isArray(record.acciones)) {
+        return json({ error: "Minuta inválida." }, 400);
+      }
+      const previous = storage.get(`minute:${record.id}`);
+      record.vista = Boolean(record.vista) || Boolean(previous && previous.digest === record.digest && previous.vista);
+      record.aplicando = [...storage.list({ prefix: "decision:" })]
+        .some(([, decision]) => decision.minuteId === record.id);
+      storage.put(`minute:${record.id}`, record);
+      const minutes = [...storage.list({ prefix: "minute:" })]
+        .sort(([, a], [, b]) => String(b.detectadaEn).localeCompare(String(a.detectadaEn)));
+      for (const [key] of minutes.slice(60)) storage.delete(key);
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/minutes/list" && request.method === "GET") {
+      const minutes = [...storage.list({ prefix: "minute:" })].map(([, record]) => record)
+        .sort((a, b) => String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, 30);
+      return json({ minutes });
+    }
+
+    if (url.pathname === "/minutes/seen" && request.method === "POST") {
+      const { id } = await request.json();
+      const record = storage.get(`minute:${id}`);
+      if (!record) return json({ error: "Minuta no encontrada." }, 404);
+      record.vista = true;
+      storage.put(`minute:${id}`, record);
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/minutes/decide" && request.method === "POST") {
+      const decision = await request.json();
+      const record = storage.get(`minute:${decision.minuteId}`);
+      if (!record) return json({ error: "Minuta no encontrada." }, 404);
+      if (record.aplicando) return json({ error: "Ya se están aplicando decisiones de esta minuta." }, 409);
+      const id = crypto.randomUUID();
+      storage.put(`decision:${id}`, { ...decision, id, status: "queued", createdAt: new Date().toISOString() });
+      record.aplicando = true;
+      record.vista = true;
+      storage.put(`minute:${record.id}`, record);
+      return json({ ok: true, id }, 202);
+    }
+
+    if (url.pathname === "/minutes/decision-done" && request.method === "POST") {
+      const { id, error } = await request.json();
+      const decision = storage.get(`decision:${id}`);
+      if (!decision) return json({ error: "Decisión no encontrada." }, 404);
+      storage.delete(`decision:${id}`);
+      const record = storage.get(`minute:${decision.minuteId}`);
+      if (record) {
+        record.aplicando = false;
+        record.errorDecision = typeof error === "string" ? error.slice(0, 300) : "";
+        storage.put(`minute:${record.id}`, record);
+      }
+      return json({ ok: true });
     }
 
     if (url.pathname === "/complete" && request.method === "POST") {
@@ -360,6 +475,20 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
+  takeDecision() {
+    const storage = this.ctx.storage.kv;
+    for (const [key, decision] of storage.list({ prefix: "decision:" })) {
+      const stalled = decision.status === "running" && Date.now() - Date.parse(decision.startedAt || "") > 300_000;
+      if (decision.status === "queued" || stalled) {
+        decision.status = "running";
+        decision.startedAt = new Date().toISOString();
+        storage.put(key, decision);
+        return decision;
+      }
+    }
+    return null;
   }
 }
 
@@ -389,7 +518,25 @@ export default {
       return completeBridgeJob(request, env);
     }
 
+    if (url.pathname === "/api/bridge/minute") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return bridgeMinuteRoute(request, env, "/minutes/upsert");
+    }
+    if (url.pathname === "/api/bridge/decision-done") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return bridgeMinuteRoute(request, env, "/minutes/decision-done");
+    }
+
     if (!basicAuthorized(request, env)) return requestAuthentication();
+
+    if (url.pathname === "/api/minutes") {
+      if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
+      return chatStub(env).fetch("https://chat.internal/minutes/list");
+    }
+    if (url.pathname === "/api/minutes/seen" || url.pathname === "/api/minutes/decide") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return browserMinuteRoute(request, env, url.pathname.replace("/api", ""));
+    }
 
     if (url.pathname === "/api/dashboard") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
