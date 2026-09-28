@@ -143,7 +143,8 @@ def analysis_prompt(minute_id: str, title: str, meeting_date: str) -> str:
         "(ponlos en antecedentes si aportan contexto). Si la reunión no tiene relación con PMO-DSTA, no "
         "propongas acciones.\n\n"
         "Redacta cada nota como texto final para la bitácora, sin prefijos de fecha ni «Minuta …» "
-        "(la fecha y la fuente se agregan solas).\n\n"
+        "(la fecha y la fuente se agregan solas). Sé concreto: máximo 15 acciones, nota de hasta 300 "
+        "caracteres, evidencia de hasta 160 y sin comillas dobles dentro de los textos.\n\n"
         "Responde SOLO con JSON válido, sin texto adicional, con esta forma:\n"
         '{"resumen":"2-3 frases","acciones":[{"tipo":"actualizar","evidente":true,"confianza":"alta",'
         '"task_id":63,"project_id":null,"titulo":"","nota":"avance a registrar","responsable":"",'
@@ -193,11 +194,24 @@ def normalize_action(raw: dict[str, Any], index: int) -> dict[str, Any] | None:
     }
 
 
+def loads_lenient(text: str) -> Any:
+    """json.loads that escapes stray double quotes inside strings (e.g. quoted phrases in evidence)."""
+    for _ in range(200):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            quote = text.rfind('"', 0, error.pos)
+            if "delimiter" not in error.msg or quote <= 0 or text[quote - 1] == "\\":
+                raise
+            text = text[:quote] + '\\"' + text[quote + 1:]
+    raise ValueError("No se pudo reparar el JSON del análisis.")
+
+
 def parse_plan(output: str) -> dict[str, Any]:
     start, end = output.find("{"), output.rfind("}")
     if start < 0 or end < start:
         raise ValueError("El análisis no devolvió JSON.")
-    decoded = json.loads(output[start:end + 1])
+    decoded = loads_lenient(output[start:end + 1])
     actions = [normalize_action(item, index + 1) for index, item in enumerate(decoded.get("acciones") or [])
                if isinstance(item, dict)]
     return {

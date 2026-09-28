@@ -154,8 +154,15 @@ class MinuteInboxTests(unittest.TestCase):
         with patch.object(inbox, "QUEUE_PATH", queue):
             self.assertEqual([item["file"] for item in inbox.pending_items()], [name])
 
+    def test_stray_quotes_inside_texts_are_repaired(self):
+        output = '{"resumen":"ok","acciones":[{"tipo":"comentar","evidente":false,"task_id":9,' \
+                 '"nota":"Nelson dijo "en standby" hasta octubre","evidencia":"el "robot""}]}'
+        action = inbox.parse_plan(output)["acciones"][0]
+        self.assertEqual(action["nota"], 'Nelson dijo "en standby" hasta octubre')
+        self.assertEqual(action["evidencia"], 'el "robot"')
+
     def test_invalid_model_output_is_retried_once(self):
-        answers = iter(['{"acciones": [ {"tipo": "comentar" "x"} ]}', json.dumps({"resumen": "ok", "acciones": []})])
+        answers = iter(['{"acciones": [ {"tipo": "comentar", } ]}', json.dumps({"resumen": "ok", "acciones": []})])
         prompts = []
         record = inbox.process_item(self.item, lambda prompt: prompts.append(prompt) or next(answers), self.vk, self.store)
         self.assertEqual(record["resumen"], "ok")
