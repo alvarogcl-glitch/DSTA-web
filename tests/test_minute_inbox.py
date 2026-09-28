@@ -154,7 +154,12 @@ class MinuteInboxTests(unittest.TestCase):
         with patch.object(inbox, "QUEUE_PATH", queue):
             self.assertEqual([item["file"] for item in inbox.pending_items()], [name])
 
-    def test_invalid_model_output_is_an_error(self):
+    def test_invalid_model_output_is_retried_once(self):
+        answers = iter(['{"acciones": [ {"tipo": "comentar" "x"} ]}', json.dumps({"resumen": "ok", "acciones": []})])
+        prompts = []
+        record = inbox.process_item(self.item, lambda prompt: prompts.append(prompt) or next(answers), self.vk, self.store)
+        self.assertEqual(record["resumen"], "ok")
+        self.assertIn("no fue JSON válido", prompts[1])
         with self.assertRaises(ValueError):
             inbox.process_item(self.item, lambda prompt: "no hay json", self.vk, self.store)
 

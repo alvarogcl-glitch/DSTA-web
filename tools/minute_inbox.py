@@ -152,6 +152,11 @@ def analysis_prompt(minute_id: str, title: str, meeting_date: str) -> str:
     )
 
 
+RETRY_NOTE = ("\n\nIMPORTANTE: el intento anterior no fue JSON válido. Devuelve únicamente JSON válido, "
+              "escapa las comillas dobles dentro de los textos (o usa comillas simples) y limita la "
+              "evidencia a una cita breve.")
+
+
 def text_field(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
@@ -325,7 +330,11 @@ def write_report(record: dict[str, Any]) -> str:
 def process_item(item: dict[str, Any], ask_model: Callable[[str], str], vk, store: Path) -> dict[str, Any]:
     minute_id, title = minute_ref(item)
     date = iso_meeting_date(item.get("meeting_date", ""))
-    plan = parse_plan(ask_model(analysis_prompt(minute_id, title, item.get("meeting_date", ""))))
+    prompt = analysis_prompt(minute_id, title, item.get("meeting_date", ""))
+    try:
+        plan = parse_plan(ask_model(prompt))
+    except ValueError:  # includes JSONDecodeError: long plans occasionally break quoting
+        plan = parse_plan(ask_model(prompt + RETRY_NOTE))
     record = {
         "id": item["source_id"], "sourceId": item["source_id"], "digest": item["digest"],
         "titulo": title, "fecha": date, "minuta": minute_id, "detectadaEn": now(),
