@@ -16,13 +16,16 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 ## Generación de minutas
 
-- Mantener presionada durante 650 ms una tarjeta LT/TR la selecciona o deselecciona.
-  El clic normal sigue abriendo su inspector; `Mayús+Enter` alterna la selección
-  desde teclado. La selección sobrevive a los refrescos y descarta líneas archivadas.
-- **Generar minuta** se habilita al seleccionar al menos una línea; incluye solo
-  las LT/TR elegidas, con sus tareas abiertas, en el orden del portafolio.
-- **Generar minuta Cata 1-1** incorpora únicamente los temas pendientes
-  vinculados explícitamente a Cata.
+- Mantener presionada durante 650 ms una tarjeta activa el **modo selección** de su
+  panel (Portafolio, Tareas con fechas próximas o Cata 1-1) y la marca. Con el modo
+  activo, un clic simple suma o quita otras tarjetas del mismo panel sin abrir el
+  inspector. Un clic en un espacio vacío, en otra sección o `Esc` sale del modo; la
+  selección se conserva. `Mayús+Enter` alterna la selección desde teclado. La
+  selección sobrevive a los refrescos y descarta elementos que ya no aparecen.
+- **Generar minuta** del portafolio requiere al menos una LT/TR; incluye sus tareas
+  abiertas en el orden del portafolio.
+- **Generar minuta Cata 1-1** y **Generar minuta** de fechas próximas usan solo lo
+  seleccionado; sin selección incluyen todos los pendientes del panel.
 - El texto generado se puede editar en el panel lateral y copiar al portapapeles.
 
 ## Configuración de Cloudflare
@@ -83,8 +86,13 @@ guardan en un Durable Object de Cloudflare para evitar los retrasos de
 propagación de Workers KV; los trabajos terminados se purgan pasado un día.
 El snapshot de Vikunja y los resúmenes siguen en Workers KV.
 
-El chat invoca Hermes con los toolsets `vikunja-dashboard` y `cronjob`, sin
-acceso a terminal, archivos o navegador. El MCP `vikunja-dashboard` expone
+El chat invoca Hermes con los toolsets `vikunja-dashboard`, `dsta-minutas` y
+`cronjob`, sin acceso a terminal, archivos generales o navegador. `dsta-minutas`
+(`tools/minutas_mcp.py`) solo lista, busca y lee las minutas Markdown exportadas
+de Granola en `pmo-dsta/Minutas 2026` y `pmo-dsta/07_reuniones` (configurable con
+`DSTA_MINUTAS_DIRS`); no escribe ni lee fuera de esas carpetas. El puente limpia
+de la respuesta el panel de razonamiento, etiquetas `<think>` y códigos de terminal
+antes de enviarla al chat. El MCP `vikunja-dashboard` expone
 operaciones acotadas para consultar proyectos/tareas, crear tareas estructuradas
 en una línea existente, crear líneas bajo PMO-DSTA, renombrarlas, modificar su
 descripción, mover tareas entre líneas, fusionar líneas, archivar líneas vacías
@@ -152,6 +160,14 @@ vuelve a cambiar antes de terminar el resumen.
    hermes mcp add vikunja-dashboard `
      --command C:\Users\admin\AppData\Local\Programs\Python\Python312\python.exe `
      --args C:\Users\admin\Documents\Codex\2026-09-22\hola\work\DSTA-web\tools\vikunja_dashboard_mcp.py
+   ```
+
+   El MCP de minutas se registra igual:
+
+   ```powershell
+   hermes mcp add dsta-minutas `
+     --command C:\Users\admin\AppData\Local\Programs\Python\Python312\python.exe `
+     --args C:\Users\admin\Documents\Codex\2026-09-22\hola\work\DSTA-web\tools\minutas_mcp.py
    ```
 
 2. Genera un secreto aleatorio de al menos 32 bytes:

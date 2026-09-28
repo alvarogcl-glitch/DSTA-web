@@ -57,6 +57,25 @@ class HermesWindowTests(unittest.TestCase):
         self.assertEqual(events[1][1]["reply"], "Tarea creada")
         self.assertEqual(events[1][1]["snapshotTimestamp"], snapshot["timestamp"])
 
+    def test_reply_hides_reasoning_panel_and_terminal_codes(self):
+        stdout = (
+            "\x1b[2;3m┌─ Reasoning ─────────────┐\x1b[0m\n"
+            "\x1b[2;3mEl usuario pregunta por LT1.\x1b[0m\n"
+            "\x1b[2;3m1. Consultar Vikunja\nEl usuario pregunta por LT1.\x1b[0m\n"
+            "<think>paso interno</think>\n"
+            "LT1 tiene 10 tareas abiertas.\n\n"
+            "Session ID: 20260928_181932_451e42\n"
+        )
+        self.assertEqual(bridge.clean_reply(stdout), "LT1 tiene 10 tareas abiertas.")
+
+    def test_chat_can_read_meeting_minutes(self):
+        completed = subprocess.CompletedProcess([], 0, stdout="Hola")
+        with patch.object(bridge.subprocess, "run", return_value=completed) as run:
+            bridge.run_hermes({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")
+        args = run.call_args.args[0]
+        self.assertIn("dsta-minutas", args[args.index("--toolsets") + 1])
+        self.assertIn("minutas_buscar", args[-1])
+
     def test_failed_snapshot_does_not_hide_successful_action(self):
         job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
         events = []
