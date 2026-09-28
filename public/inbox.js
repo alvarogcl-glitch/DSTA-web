@@ -50,6 +50,10 @@
   const currentProjects = () => (typeof projects !== 'undefined' && Array.isArray(projects) ? projects : []);
   const pending = minute => minute.acciones.filter(a => !a.auto && ['propuesta', 'error'].includes(a.estado));
   const attention = minute => minute.estado === 'por_revisar' || !minute.vista;
+  // Una minuta sale de la bandeja cuando ya no tiene nada por decidir (y ya fue vista).
+  const inInbox = minute => attention(minute) || minute.aplicando || minute.id === openId;
+  const awaiting = new Set(); // minutas con decisiones enviadas, para avisar el resultado
+  let notice = '';
 
   function draftFor(minuteId, actionId) {
     drafts[minuteId] ??= {};
@@ -146,7 +150,8 @@
     const focused = panel.contains(document.activeElement) && document.activeElement.matches('input:not([type=radio]),textarea,select');
     if (focused) return; // no reescribir mientras se edita un campo
     body.innerHTML = (loadError ? `<p class="dsta-inbox-error">${esc(loadError)}</p>` : '') +
-      (minutes.map(minuteCard).join('') || '<p class="muted">Aún no hay minutas procesadas. Granola se revisa cada hora.</p>');
+      (notice ? `<p class="dsta-inbox-notice" role="status">${esc(notice)}</p>` : '') +
+      (minutes.filter(inInbox).map(minuteCard).join('') || '<p class="muted">Sin minutas pendientes. Granola se revisa cada hora.</p>');
   }
 
   async function load() {
@@ -159,6 +164,15 @@
       if (text !== lastPayload) {
         lastPayload = text;
         minutes = payload.minutes || [];
+        for (const id of [...awaiting]) {
+          const minute = minutes.find(item => item.id === id);
+          if (!minute || minute.aplicando) continue;
+          awaiting.delete(id);
+          const left = pending(minute).length;
+          notice = left ? `Decisiones aplicadas en «${minute.titulo}»; quedan ${left} por decidir.`
+            : `«${minute.titulo}» quedó procesada y salió de la bandeja.`;
+          if (!left && openId === id) openId = '';
+        }
       }
     } catch (error) {
       loadError = error.message;
@@ -179,9 +193,9 @@
   }
 
   async function markSeen(minute) {
+    render();
     if (minute.vista) return;
     minute.vista = true;
-    render();
     try {
       await fetch('/api/minutes/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: minute.id }) });
     } catch (_) { /* se reintenta al volver a abrirla */ }
@@ -207,6 +221,7 @@
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'No se pudo enviar la decisión.');
       delete drafts[minuteId];
+      awaiting.add(minuteId);
     } catch (error) {
       minute.aplicando = false;
       loadError = error.message;

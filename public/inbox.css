@@ -38,3 +38,4 @@
 .dsta-inbox-choice input{min-width:0;flex:none;width:auto;margin:0;padding:0}
 .dsta-inbox-field input{flex:none}
 body:has(#dsta-inbox:not([hidden])) #dsta-assistant{display:none}
+.dsta-inbox-notice{margin:0;padding:9px 12px;border-radius:8px;background:#1c3430;color:#dce9f3}
