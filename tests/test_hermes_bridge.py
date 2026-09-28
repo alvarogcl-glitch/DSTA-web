@@ -3,6 +3,9 @@
 import importlib.util
 import os
 import subprocess
+import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,15 +19,20 @@ SPEC.loader.exec_module(bridge)
 
 class HermesWindowTests(unittest.TestCase):
     def test_chat_hides_console(self):
-        completed = subprocess.CompletedProcess([], 0, stdout="Hola")
-        with patch.object(bridge.subprocess, "run", return_value=completed) as run:
+        with patch.object(bridge.subprocess, "Popen", wraps=subprocess.Popen) as popen, \
+             tempfile.TemporaryDirectory() as home:
+            bridge.run_watched([sys.executable, "-c", "print('Hola')"], cwd=Path(home), env=os.environ.copy(),
+                               timeout=30, log_path=Path(home) / "agent.log")
+        expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        self.assertEqual(popen.call_args.kwargs["creationflags"], expected)
+
+    def test_chat_prompt_lists_scoped_tools(self):
+        with patch.object(bridge, "run_watched", return_value=(0, "Hola", False)) as run:
             self.assertEqual(
                 bridge.run_hermes({"message": "hola"}, "hermes", Path.cwd(),
                                   "openai-codex", "gpt-6-luna"),
                 "Hola",
             )
-        expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        self.assertEqual(run.call_args.kwargs["creationflags"], expected)
         prompt = run.call_args.args[0][-1]
         self.assertIn("pmo_create_task", prompt)
         self.assertIn("pmo_create_project", prompt)
@@ -69,12 +77,50 @@ class HermesWindowTests(unittest.TestCase):
         self.assertEqual(bridge.clean_reply(stdout), "LT1 tiene 10 tareas abiertas.")
 
     def test_chat_can_read_meeting_minutes(self):
-        completed = subprocess.CompletedProcess([], 0, stdout="Hola")
-        with patch.object(bridge.subprocess, "run", return_value=completed) as run:
+        with patch.object(bridge, "run_watched", return_value=(0, "Hola", False)) as run:
             bridge.run_hermes({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")
         args = run.call_args.args[0]
         self.assertIn("dsta-minutas", args[args.index("--toolsets") + 1])
         self.assertIn("minutas_buscar", args[-1])
+
+    def test_watcher_stops_hermes_when_it_switches_to_local_model(self):
+        with tempfile.TemporaryDirectory() as home:
+            log = Path(home) / "agent.log"
+            log.write_text("línea previa\n", encoding="utf-8")
+            script = (f"import time; open(r'{log}','a').write('Fallback activated: gpt-6-luna -> qwen\\n'); "
+                      "time.sleep(60)")
+            started = time.monotonic()
+            code, _, fell_back = bridge.run_watched([sys.executable, "-c", script], cwd=Path(home),
+                                                    env=os.environ.copy(), timeout=90, log_path=log)
+        self.assertTrue(fell_back)
+        self.assertLess(time.monotonic() - started, 20)
+
+    def test_claude_answers_when_codex_is_unavailable(self):
+        bridge._codex_retry_at = 0.0
+        completed = subprocess.CompletedProcess([], 0, stdout="LT1 tiene 10 tareas abiertas.")
+        with patch.object(bridge, "run_hermes", side_effect=bridge.CodexUnavailable("402")) as hermes, \
+             patch.object(bridge.subprocess, "run", return_value=completed) as run, \
+             tempfile.TemporaryDirectory() as home:
+            first = bridge.answer_chat({"message": "LT1"}, "hermes", Path(home), "openai-codex", "gpt-6-luna",
+                                       "claude.exe", "sonnet")
+            second = bridge.answer_chat({"message": "LT2"}, "hermes", Path(home), "openai-codex", "gpt-6-luna",
+                                        "claude.exe", "sonnet")
+        self.assertTrue(first.startswith("LT1 tiene 10 tareas abiertas."))
+        self.assertIn("Respondido por Claude", first)
+        self.assertTrue(second)
+        self.assertEqual(hermes.call_count, 1, "Codex is not retried during the cooldown")
+        args = run.call_args.args[0]
+        self.assertEqual(args[args.index("--tools") + 1], "")
+        self.assertIn("--strict-mcp-config", args)
+        self.assertEqual(args[args.index("--allowedTools") + 1], "mcp__vikunja-dashboard,mcp__dsta-minutas")
+        self.assertIn("LT2", run.call_args.kwargs["input"])
+        bridge._codex_retry_at = 0.0
+
+    def test_codex_failure_without_claude_reports_error(self):
+        bridge._codex_retry_at = 0.0
+        with patch.object(bridge, "run_hermes", side_effect=bridge.CodexUnavailable("402")):
+            with self.assertRaises(RuntimeError):
+                bridge.answer_chat({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")
 
     def test_failed_snapshot_does_not_hide_successful_action(self):
         job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}

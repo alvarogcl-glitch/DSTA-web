@@ -92,7 +92,9 @@ El chat invoca Hermes con los toolsets `vikunja-dashboard`, `dsta-minutas` y
 de Granola en `pmo-dsta/Minutas 2026` y `pmo-dsta/07_reuniones` (configurable con
 `DSTA_MINUTAS_DIRS`); no escribe ni lee fuera de esas carpetas. El puente limpia
 de la respuesta el panel de razonamiento, etiquetas `<think>` y códigos de terminal
-antes de enviarla al chat. El MCP `vikunja-dashboard` expone
+antes de enviarla al chat.
+
+Si Codex no está disponible (error, 402, tiempo agotado o cambio de Hermes al modelo local, detectado por la línea `Fallback activated` en `logs/agent.log`), el puente corta ese intento y responde con **Claude Code headless** (`claude -p`) como respaldo: mismos MCP `vikunja-dashboard` y `dsta-minutas`, `--strict-mcp-config`, sin herramientas integradas (`--tools ""`), sin terminal, archivos ni web, y sin recordatorios. La respuesta termina con «Respondido por Claude (respaldo)». Tras un fallo, Codex se reintenta a los 10 minutos. Usa el plan de Claude de la sesión Windows del usuario; `DSTA_CLAUDE_CLI` y `DSTA_CLAUDE_MODEL` (por defecto `sonnet`) lo configuran. Los resúmenes de Cata siguen solo con Hermes. El MCP `vikunja-dashboard` expone
 operaciones acotadas para consultar proyectos/tareas, crear tareas estructuradas
 en una línea existente, crear líneas bajo PMO-DSTA, renombrarlas, modificar su
 descripción, mover tareas entre líneas, fusionar líneas, archivar líneas vacías

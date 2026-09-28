@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import importlib.util
 from pathlib import Path
@@ -75,6 +76,14 @@ ANSI_DIM_BLOCK = re.compile(r"\x1b\[2;3m.*?\x1b\[0m", re.DOTALL)
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 THINK_BLOCK = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
 BOX_LINE = re.compile(r"^[ \t]*[┌└│╭╰].*$", re.MULTILINE)
+FALLBACK_MARKER = "Fallback activated"
+HERMES_TIMEOUT_SECONDS = 180
+CLAUDE_TIMEOUT_SECONDS = 150
+CODEX_RETRY_SECONDS = 600
+CLAUDE_PROMPT_NOTE = ("\n\nNota: respondes como respaldo de Codex. En este modo no puedes programar "
+                      "recordatorios; si te lo piden, indícalo.")
+BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Codex no disponible)."
+DEFAULT_CLAUDE_CLI = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
 
 
 def clean_reply(stdout: str) -> str:
@@ -87,15 +96,14 @@ def clean_reply(stdout: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
-               provider: str, model: str) -> str:
+def chat_prompt(job: dict) -> str:
     history = job.get("history") or []
     transcript = "\n".join(
         f"{('Tú' if item.get('role') == 'user' else 'Hermes')}: {item.get('content', '')}"
         for item in history[-10:]
     )
     task_context = json.dumps(job.get("task"), ensure_ascii=False) if job.get("task") else "Sin tarea seleccionada."
-    prompt = (
+    return (
         "Eres el copiloto de gestión PMO-DSTA del usuario y debes responder en español. "
         "Tienes disponible el conjunto MCP vikunja-dashboard para consultar y modificar tareas y "
         "líneas del portafolio PMO-DSTA, además de completar tareas y añadir comentarios. "
@@ -128,29 +136,131 @@ def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
         f"Conversación reciente:\n{transcript or '(inicio de conversación)'}\n\n"
         f"Nueva solicitud del usuario:\n{job.get('message', '')}"
     )
+
+
+class CodexUnavailable(RuntimeError):
+    """Hermes could not answer with Codex (error, timeout or switch to the local fallback model)."""
+
+
+def kill_tree(process: subprocess.Popen) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True,
+                       creationflags=HERMES_CREATION_FLAGS, check=False)
+    else:
+        process.kill()
+
+
+def log_mentions_fallback(log_path: Path, offset: int) -> bool:
+    try:
+        size = log_path.stat().st_size
+        with log_path.open("rb") as log:
+            log.seek(offset if size >= offset else 0)
+            return FALLBACK_MARKER in log.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
+                log_path: Path) -> tuple[int, str, bool]:
+    """Run Hermes and stop it as soon as its log shows the switch to the local fallback model."""
+    offset = log_path.stat().st_size if log_path.exists() else 0
+    with tempfile.TemporaryFile() as output:
+        process = subprocess.Popen(args, cwd=str(cwd), env=env, stdout=output,
+                                   stderr=subprocess.DEVNULL, creationflags=HERMES_CREATION_FLAGS)
+        deadline = time.monotonic() + timeout
+        fell_back = timed_out = False
+        while process.poll() is None:
+            fell_back = log_mentions_fallback(log_path, offset)
+            timed_out = time.monotonic() > deadline
+            if fell_back or timed_out:
+                kill_tree(process)
+                break
+            time.sleep(1)
+        process.wait()
+        fell_back = fell_back or log_mentions_fallback(log_path, offset)
+        output.seek(0)
+        stdout = output.read().decode("utf-8", errors="replace")
+    if timed_out and not fell_back:
+        raise CodexUnavailable("Hermes excedió el tiempo de respuesta.")
+    return process.returncode, stdout, fell_back
+
+
+def run_hermes(job: dict, hermes_cli: str, hermes_home: Path,
+               provider: str, model: str) -> str:
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     child_env["PYTHONIOENCODING"] = "utf-8"
-    result = subprocess.run(
+    returncode, stdout, fell_back = run_watched(
         [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
          "--model", model, "--toolsets", CHAT_TOOLSETS,
-         "--max-turns", "12", "--query", prompt],
+         "--max-turns", "12", "--query", chat_prompt(job)],
+        cwd=hermes_home, env=child_env, timeout=HERMES_TIMEOUT_SECONDS,
+        log_path=hermes_home / "logs" / "agent.log",
+    )
+    if fell_back:
+        raise CodexUnavailable("Codex no respondió y Hermes cambió al modelo local.")
+    if returncode != 0:
+        raise CodexUnavailable("Hermes no pudo completar la consulta.")
+    answer = clean_reply(stdout)
+    if not answer:
+        raise CodexUnavailable("Hermes terminó sin devolver una respuesta.")
+    return answer[:20_000]
+
+
+def claude_mcp_config(hermes_home: Path) -> Path:
+    """Same scoped MCP servers as the Hermes chat, for the Claude backup."""
+    tools = Path(__file__).resolve().parent
+    config = {"mcpServers": {
+        "vikunja-dashboard": {"command": sys.executable, "args": [str(tools / "vikunja_dashboard_mcp.py")]},
+        "dsta-minutas": {"command": sys.executable, "args": [str(tools / "minutas_mcp.py")]},
+    }}
+    path = hermes_home / "cache" / "dsta-claude-mcp.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return path
+
+
+def run_claude(job: dict, claude_cli: str, hermes_home: Path, model: str) -> str:
+    """Answer with Claude Code headless: only the dashboard MCP tools, no shell, files or web."""
+    prompt = chat_prompt(job) + CLAUDE_PROMPT_NOTE
+    result = subprocess.run(
+        [claude_cli, "-p", "--mcp-config", str(claude_mcp_config(hermes_home)), "--strict-mcp-config",
+         "--tools", "", "--allowedTools", "mcp__vikunja-dashboard,mcp__dsta-minutas",
+         "--model", model, "--output-format", "text"],
+        input=prompt,
         cwd=str(hermes_home),
-        env=child_env,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         creationflags=HERMES_CREATION_FLAGS,
-        timeout=300,
+        timeout=CLAUDE_TIMEOUT_SECONDS,
         check=False,
     )
-    if result.returncode != 0:
-        raise RuntimeError("Hermes no pudo completar la consulta. Revisa el estado del agente en la VM.")
     answer = clean_reply(result.stdout or "")
-    if not answer:
-        raise RuntimeError("Hermes terminó sin devolver una respuesta.")
-    return answer[:20_000]
+    if result.returncode != 0 or not answer:
+        raise RuntimeError("Ni Codex ni el respaldo Claude pudieron completar la consulta.")
+    return answer[:20_000] + BACKUP_NOTE
+
+
+_codex_retry_at = 0.0
+
+
+def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, model: str,
+                claude_cli: str = "", claude_model: str = "sonnet") -> str:
+    """Codex through Hermes first; Claude only when Codex is unavailable (plan B)."""
+    global _codex_retry_at
+    if time.monotonic() >= _codex_retry_at:
+        try:
+            return run_hermes(job, hermes_cli, hermes_home, provider, model)
+        except CodexUnavailable as error:
+            if not claude_cli:
+                raise RuntimeError(str(error)) from error
+            _codex_retry_at = time.monotonic() + CODEX_RETRY_SECONDS
+            print(f"Codex no disponible ({error}); responde Claude", file=sys.stderr, flush=True)
+    if not claude_cli:
+        raise RuntimeError("Hermes no pudo completar la consulta.")
+    return run_claude(job, claude_cli, hermes_home, claude_model)
 
 
 def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path,
@@ -234,14 +344,16 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
 
 def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_home: Path,
                 hermes_provider: str, hermes_model: str, vikunja_token: str = "",
-                vikunja_url: str = "http://127.0.0.1:3456") -> None:
+                vikunja_url: str = "http://127.0.0.1:3456", claude_cli: str = "",
+                claude_model: str = "sonnet") -> None:
     try:
         if job.get("kind") == "summary":
             summaries = run_summarizer(job, hermes_cli, hermes_home,
                                        hermes_provider, hermes_model)
             finish_job(base_url, token, job, summaries=summaries)
         else:
-            reply = run_hermes(job, hermes_cli, hermes_home, hermes_provider, hermes_model)
+            reply = answer_chat(job, hermes_cli, hermes_home, hermes_provider, hermes_model,
+                                claude_cli, claude_model)
             refresh_error = ""
             snapshot_timestamp = ""
             try:
@@ -277,6 +389,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
     hermes_cli = setting("HERMES_CLI", values, str(DEFAULT_HERMES_CLI) if DEFAULT_HERMES_CLI.exists() else "hermes")
     hermes_provider = setting("DSTA_HERMES_PROVIDER", values, "openai-codex")
     hermes_model = setting("DSTA_HERMES_MODEL", values, "gpt-6-luna")
+    claude_cli = setting("DSTA_CLAUDE_CLI", values, str(DEFAULT_CLAUDE_CLI) if DEFAULT_CLAUDE_CLI.exists() else "")
+    claude_model = setting("DSTA_CLAUDE_MODEL", values, "sonnet")
     if not dashboard_url.startswith("https://"):
         raise RuntimeError("DSTA_DASHBOARD_URL debe usar HTTPS")
     if not bridge_token:
@@ -284,7 +398,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
     if not Path(hermes_cli).exists() and not shutil.which(hermes_cli):
         raise RuntimeError("No se encontró Hermes CLI; define HERMES_CLI con su ruta completa")
 
-    print("Puente Hermes listo; el canal usa solicitudes HTTPS salientes.", flush=True)
+    print("Puente Hermes listo; el canal usa solicitudes HTTPS salientes."
+          + (" Respaldo Claude activo." if claude_cli else " Sin respaldo Claude."), flush=True)
     with ThreadPoolExecutor(max_workers=1) as summaries:
         summary_future: Future | None = None
         while True:
@@ -293,7 +408,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 chat_job = result.get("job")
                 if chat_job:
                     process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                hermes_provider, hermes_model, vikunja_token, vikunja_url)
+                                hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                                claude_cli, claude_model)
                     if once:
                         return 0
                     continue
