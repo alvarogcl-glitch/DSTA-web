@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import importlib.util
 from pathlib import Path
 from typing import Callable
@@ -293,8 +294,8 @@ def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path,
                   vikunja_url: str) -> None:
     """Hourly: export new Granola minutes, analyse each and publish it to the dashboard inbox."""
     try:
-        manifest = minute_inbox.run_sync(hermes_home)
-        pending = manifest.get("pending_review") or []
+        minute_inbox.run_sync(hermes_home)
+        pending = minute_inbox.pending_items()
         if not pending:
             return
         vk = minute_inbox.load_vikunja()
@@ -310,11 +311,12 @@ def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path,
                 record = minute_inbox.process_item(item, ask, vk, inbox_store(hermes_home))
                 push_minute(base_url, token, record)
                 print(f"Minuta analizada: {record['titulo']} ({record['estado']})", flush=True)
-            except Exception as error:  # the item stays pending and is retried next hour
-                print(f"Minuta no procesada ({type(error).__name__}: {error})", file=sys.stderr, flush=True)
+            except Exception:  # the item stays pending and is retried next hour
+                print(f"Minuta no procesada ({Path(item.get('file', '')).name}):\n{traceback.format_exc()}",
+                      file=sys.stderr, flush=True)
         publish_snapshot(base_url, token, vikunja_token, vikunja_url)
-    except Exception as error:
-        print(f"Revisión de Granola falló ({type(error).__name__}: {error})", file=sys.stderr, flush=True)
+    except Exception:
+        print(f"Revisión de Granola falló:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
 
 
 def inbox_store(hermes_home: Path) -> Path:
@@ -534,6 +536,11 @@ def run(*, once: bool, env_file: Path | None) -> int:
 
 
 def main() -> int:
+    if sys.stdout is None or sys.stderr is None:
+        # pythonw (scheduled task) has no console: keep the bridge's messages in a log file.
+        log_path = DEFAULT_HERMES_HOME / "logs" / "dsta-bridge.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(log_path, "a", encoding="utf-8", buffering=1)
     parser = argparse.ArgumentParser(description="Puente saliente entre el dashboard y Hermes")
     parser.add_argument("--once", action="store_true", help="Procesa una solicitud disponible y termina")
     parser.add_argument("--env-file", type=Path, help="Archivo local con la URL y el secreto del puente")

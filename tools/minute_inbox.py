@@ -90,6 +90,18 @@ def run_sync(hermes_home: Path) -> dict[str, Any]:
     return manifest
 
 
+QUEUE_PATH = PMO_ROOT / "04_reportes" / "granola-reconciliation-queue.json"
+
+
+def pending_items() -> list[dict[str, Any]]:
+    """Read the durable queue directly: the exporter's stdout garbles accented file names
+    (its child process decodes with the Windows code page)."""
+    if not QUEUE_PATH.exists():
+        return []
+    items = json.loads(QUEUE_PATH.read_text(encoding="utf-8")).get("items", {}).values()
+    return [item for item in items if item.get("status") in {"pending_review", "failed"}]
+
+
 def mark_queue(item: dict[str, Any], status: str, report: str) -> None:
     subprocess.run([sys.executable, str(QUEUE_TOOL), "mark", "--source-id", item["source_id"],
                     "--digest", item["digest"], "--status", status, "--report", report],

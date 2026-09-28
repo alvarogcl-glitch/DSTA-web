@@ -144,6 +144,16 @@ class MinuteInboxTests(unittest.TestCase):
         self.assertEqual(created["source"], "Granola abc-123")
         self.assertEqual(created["target_date"], "", "non ISO dates are dropped, never invented")
 
+    def test_pending_items_keep_accented_file_names(self):
+        queue = Path(self.tmp.name) / "queue.json"
+        name = str(Path(self.tmp.name) / "2026-09-28-reunión-con-maría.md")
+        queue.write_text(json.dumps({"items": {
+            "a": {"source_id": "a", "status": "pending_review", "file": name},
+            "b": {"source_id": "b", "status": "processed", "file": "x.md"},
+        }}, ensure_ascii=False), encoding="utf-8")
+        with patch.object(inbox, "QUEUE_PATH", queue):
+            self.assertEqual([item["file"] for item in inbox.pending_items()], [name])
+
     def test_invalid_model_output_is_an_error(self):
         with self.assertRaises(ValueError):
             inbox.process_item(self.item, lambda prompt: "no hay json", self.vk, self.store)
