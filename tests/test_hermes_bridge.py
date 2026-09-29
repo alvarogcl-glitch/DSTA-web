@@ -39,17 +39,34 @@ class HermesWindowTests(unittest.TestCase):
         self.assertIn("pmo_merge_projects", prompt)
         self.assertIn("no una lista fija LT1-LT7", prompt)
 
-    def test_summaries_hide_console(self):
+    def test_summaries_use_codex_without_tools(self):
+        bridge._codex_retry_at = 0.0
         output = '{"summaries":[{"id":1,"summary":"Pendiente","nextAction":"","attention":"normal"}]}'
-        completed = subprocess.CompletedProcess([], 0, stdout=output)
-        with patch.object(bridge.subprocess, "run", return_value=completed) as run:
+        with patch.object(bridge, "run_watched", return_value=(0, output, False)) as run:
             summaries = bridge.run_summarizer(
                 {"tasks": [{"id": 1, "title": "Tarea"}]}, "hermes", Path.cwd(),
                 "openai-codex", "gpt-6-luna",
             )
         self.assertEqual(len(summaries), 1)
-        expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        self.assertEqual(run.call_args.kwargs["creationflags"], expected)
+        self.assertIn("--safe-mode", run.call_args.args[0])
+
+    def test_summaries_fall_back_to_claude_without_tools(self):
+        bridge._codex_retry_at = 0.0
+        output = '```json\n{"summaries":[{"id":1,"summary":"Resumen Claude","attention":"seguimiento"}]}\n```'
+        completed = subprocess.CompletedProcess([], 0, stdout=output)
+        with patch.object(bridge, "run_watched", return_value=(1, "", True)),              patch.object(bridge.subprocess, "run", return_value=completed) as run,              tempfile.TemporaryDirectory() as home:
+            summaries = bridge.run_summarizer(
+                {"tasks": [{"id": 1, "title": "Tarea"}]}, "hermes", Path(home),
+                "openai-codex", "gpt-6-luna", "claude.exe", "sonnet",
+            )
+        self.assertEqual(summaries[0]["summary"], "Resumen Claude")
+        args = run.call_args.args[0]
+        self.assertEqual(args[args.index("--tools") + 1], "")
+        self.assertIn("--strict-mcp-config", args)
+        self.assertNotIn("--mcp-config", args)
+        self.assertIn("Tarea", run.call_args.kwargs["input"])
+        bridge._codex_retry_at = 0.0
+
     def test_chat_rebuilds_snapshot_before_reporting_completion(self):
         job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
         snapshot = {"timestamp": "2026-09-25T14:00:00Z", "projects": [], "tasks": []}
