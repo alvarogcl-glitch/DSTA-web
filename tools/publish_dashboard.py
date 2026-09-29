@@ -13,6 +13,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -166,6 +167,7 @@ def run(
 
     previous_hash = ""
     last_publish = 0.0
+    last_error = ""
     while True:
         try:
             snapshot = fetch_dashboard(vikunja_url, vikunja_token)
@@ -175,13 +177,22 @@ def run(
                 result = publish(f"{dashboard_url}/api/ingest", ingest_token, snapshot)
                 previous_hash = current_hash
                 last_publish = now
-                print(
-                    f"{snapshot['timestamp']} publicado: "
-                    f"{result.get('projects')} proyectos, {result.get('tasks')} tareas",
-                    flush=True,
-                )
-        except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
-            print(f"Error de sincronización: {error}", file=sys.stderr, flush=True)
+                if once or last_error:
+                    print(
+                        f"{snapshot['timestamp']} publicado: "
+                        f"{result.get('projects')} proyectos, {result.get('tasks')} tareas",
+                        flush=True,
+                    )
+                last_error = ""
+        except (HTTPError, URLError, OSError, ValueError, RuntimeError, HTTPException) as error:
+            message = str(error)
+            if isinstance(error, HTTPError):
+                message += " · " + error.read(300).decode("utf-8", errors="replace").strip()
+            # Log each distinct failure once; a stuck publisher must be visible, not spam the log.
+            if message != last_error or once:
+                stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                print(f"{stamp} Error de sincronización: {message}", file=sys.stderr, flush=True)
+            last_error = message
             if once:
                 return 1
         if once:
@@ -190,6 +201,12 @@ def run(
 
 
 def main() -> int:
+    if sys.stdout is None or sys.stderr is None:
+        # pythonw (scheduled task) has no console: keep failures in a log file.
+        local = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        log_path = local / "hermes" / "logs" / "dsta-publisher.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(log_path, "a", encoding="utf-8", buffering=1)
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Publica una vez y termina")
     parser.add_argument("--env-file", type=Path, help="Archivo local con variables de entorno")

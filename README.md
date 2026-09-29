@@ -1,6 +1,6 @@
 # DSTA-web
 
-Dashboard ejecutivo PMO-DSTA. La interfaz es HTML, CSS y JavaScript sin framework ni etapa de compilación. Un Cloudflare Worker protege el sitio, sirve los archivos estáticos y expone la API del dashboard. La VM consulta Vikunja y publica snapshots autenticados en Workers KV.
+Dashboard ejecutivo PMO-DSTA. La interfaz es HTML, CSS y JavaScript sin framework ni etapa de compilación. Un Cloudflare Worker protege el sitio, sirve los archivos estáticos y expone la API del dashboard. La VM consulta Vikunja y publica snapshots autenticados que el Worker guarda en un Durable Object.
 
 ## Estructura
 
@@ -8,7 +8,7 @@ Dashboard ejecutivo PMO-DSTA. La interfaz es HTML, CSS y JavaScript sin framewor
 public/index.html            Dashboard real
 src/worker.js                Autenticación, API y entrega de archivos
 tools/publish_dashboard.py   Sincronizador Vikunja → Cloudflare
-wrangler.jsonc               Worker, Static Assets y Workers KV
+wrangler.jsonc               Worker, Static Assets, Durable Object y Workers KV (heredado)
 package.json                 Wrangler y comandos del proyecto
 ```
 
@@ -110,7 +110,19 @@ de Hermes ni crear un túnel entrante. Las conversaciones se mantienen en la
 pestaña abierta del navegador. La cola y las respuestas recientes del chat se
 guardan en un Durable Object de Cloudflare para evitar los retrasos de
 propagación de Workers KV; los trabajos terminados se purgan pasado un día.
-El snapshot de Vikunja y los resúmenes siguen en Workers KV.
+El snapshot de Vikunja, los resúmenes de Cata y su cola también viven en ese
+Durable Object. Hasta el 29-09-2026 estaban en Workers KV, cuyo plan gratuito
+admite 1.000 escrituras al día: un resumen que fallaba se reencolaba en cada
+snapshot, el cupo se agotaba a media tarde y el dashboard quedaba congelado sin
+aviso. KV solo se lee como respaldo del último snapshot y para migrar una vez los
+resúmenes existentes. Un resumen fallido espera una hora antes de reintentarse,
+salvo que la tarea cambie. Si el snapshot tiene más de 10 minutos, el dashboard
+muestra **DESACTUALIZADO** en vez de **EN VIVO**. Bajo `pythonw`, el publicador
+registra cada error distinto en `hermes/logs/dsta-publisher.log`.
+
+El botón **Nueva sesión** del copiloto borra la conversación de la pestaña; como
+el historial solo viaja desde el navegador, la siguiente consulta parte sin el
+contexto anterior. Se deshabilita mientras hay una consulta en curso.
 
 El chat invoca Hermes con los toolsets `vikunja-dashboard`, `dsta-minutas` y
 `cronjob`, sin acceso a terminal, archivos generales o navegador. `dsta-minutas`
@@ -233,7 +245,7 @@ Sin `DSTA_BRIDGE_TOKEN`, el dashboard y la publicación de Vikunja siguen
 funcionando; el chat informa que el puente no está configurado y no se generan
 resúmenes automáticos.
 
-En operación normal, el script consulta Vikunja cada 30 segundos. Solo escribe en KV si cambian los datos o cada cinco minutos como pulso de actividad, manteniéndose dentro de los límites del plan gratuito.
+En operación normal, el script consulta Vikunja cada 30 segundos. Solo publica si cambian los datos o cada cinco minutos como pulso de actividad.
 
 ## Desarrollo local
 

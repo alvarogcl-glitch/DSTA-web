@@ -12,6 +12,19 @@ const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 function environment() {
   const snapshotValues = new Map();
   const queueValues = new Map();
+  const env = {
+    DASHBOARD_USER: 'admin',
+    DASHBOARD_PASSWORD: 'password',
+    INGEST_TOKEN: 'ingest',
+    DSTA_BRIDGE_TOKEN: 'bridge',
+    legacyValues: snapshotValues,
+    kvWrites: 0,
+    DASHBOARD_DATA: {
+      async get(key) { return snapshotValues.get(key) ?? null; },
+      async put(key, value) { env.kvWrites += 1; snapshotValues.set(key, JSON.parse(value)); },
+      async delete(key) { env.kvWrites += 1; snapshotValues.delete(key); },
+    },
+  };
   const chat = new DashboardChatQueue({
     storage: {
       kv: {
@@ -21,22 +34,14 @@ function environment() {
         list({ prefix }) { return [...queueValues.entries()].filter(([key]) => key.startsWith(prefix)); },
       },
     },
-  }, {});
-  return {
-    DASHBOARD_USER: 'admin',
-    DASHBOARD_PASSWORD: 'password',
-    INGEST_TOKEN: 'ingest',
-    DSTA_BRIDGE_TOKEN: 'bridge',
-    legacyValues: snapshotValues,
-    CHAT_STATE: { getByName() { return { fetch(request) {
-      return chat.fetch(typeof request === 'string' ? new Request(request) : request);
-    } }; } },
-    DASHBOARD_DATA: {
-      async get(key) { return snapshotValues.get(key) ?? null; },
-      async put(key, value) { snapshotValues.set(key, JSON.parse(value)); },
-      async delete(key) { snapshotValues.delete(key); },
-    },
-  };
+  }, env);
+  // Stub: fetch() plus RPC methods, which return structured clones like the real runtime.
+  const stub = new Proxy({}, { get(_, name) {
+    if (name === 'fetch') return request => chat.fetch(typeof request === 'string' ? new Request(request) : request);
+    return async (...args) => structuredClone(await chat[name](...args));
+  } });
+  env.CHAT_STATE = { getByName() { return stub; } };
+  return env;
 }
 
 async function call(env, method, path, body, authorization = auth) {
@@ -95,6 +100,28 @@ env.legacyValues.set(`dsta-ai-job-v1:${legacyId}`,
   { id: legacyId, kind: 'chat', status: 'completed', reply: 'Respuesta anterior' });
 const legacy = await call(env, 'GET', `/api/assistant?id=${legacyId}`);
 assert.equal(legacy.body.reply, 'Respuesta anterior');
+
+// Resúmenes de Cata: viven en el Durable Object y un fallo no se reintenta en cada snapshot.
+const cataSnapshot = { timestamp: '2026-09-25T15:00:00Z', projects: [{ id: 3, title: 'LT1' }],
+  tasks: [{ id: 21, title: 'Revisar con Cata el plan', project: 'LT1' }, { id: 22, title: 'Otra', project: 'LT1' }] };
+env.legacyValues.set('dsta-ai-summaries-v1', { 99: { sourceHash: 'x', summary: 'migrado' } });
+await call(env, 'POST', '/api/ingest', cataSnapshot, 'Bearer ingest');
+const summaryJob = (await call(env, 'GET', '/api/bridge/next?kind=summary', null, 'Bearer bridge')).body.job;
+assert.deepEqual(summaryJob.tasks.map(task => task.id), [21]);
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=summary', null, 'Bearer bridge')).body.job, null, 'one summary job at a time');
+await call(env, 'POST', '/api/bridge/complete', { id: summaryJob.id, error: 'Hermes no pudo generar los resúmenes.' }, 'Bearer bridge');
+await call(env, 'POST', '/api/ingest', cataSnapshot, 'Bearer ingest');
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=summary', null, 'Bearer bridge')).body.job, null,
+  'a failed summary waits before retrying the same task');
+const editedSnapshot = structuredClone(cataSnapshot);
+editedSnapshot.tasks[0].title = 'Revisar con Cata el plan v2';
+await call(env, 'POST', '/api/ingest', editedSnapshot, 'Bearer ingest');
+const retryJob = (await call(env, 'GET', '/api/bridge/next?kind=summary', null, 'Bearer bridge')).body.job;
+assert.equal(retryJob.tasks[0].title, 'Revisar con Cata el plan v2', 'an edited task is summarized again');
+await call(env, 'POST', '/api/bridge/complete', { id: retryJob.id, summaries: [{ id: 21, summary: 'Plan listo', attention: 'normal' }] }, 'Bearer bridge');
+const withSummary = await call(env, 'GET', '/api/dashboard');
+assert.equal(withSummary.body.aiSummaries['21'].summary, 'Plan listo');
+assert.equal(env.kvWrites, 0, 'the dashboard no longer writes to Workers KV');
 
 // Bandeja de minutas Granola
 const minute = { id: 'abc-123', digest: 'd1', titulo: 'Reunión Directores', detectadaEn: '2026-09-28T22:00:00Z',

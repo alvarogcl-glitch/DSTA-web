@@ -2,8 +2,10 @@ import { DurableObject } from "cloudflare:workers";
 
 const SNAPSHOT_KEY = "vikunja-dashboard-v1";
 const SUMMARY_KEY = "dsta-ai-summaries-v1";
-const SUMMARY_QUEUE_KEY = "dsta-ai-summary-queue-v1";
-const SUMMARY_BUSY_KEY = "dsta-ai-summary-busy-v1";
+// Snapshot, summaries and the summary queue live in the Durable Object. Workers KV (free
+// plan: 1,000 writes/day) ran out every afternoon and silently froze the dashboard; KV is
+// now only read once to migrate the summaries and as a fallback for the last snapshot.
+const SUMMARY_RETRY_MS = 3_600_000;
 const JOB_PREFIX = "dsta-ai-job-v1:";
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -83,45 +85,6 @@ function isCataTask(task) {
     .some(value => cataMention.test(String(value || "")));
 }
 
-async function enqueueChangedCataTasks(env, tasks) {
-  if (!env.DSTA_BRIDGE_TOKEN) return;
-  const cataTasks = tasks.filter(isCataTask).slice(0, 80);
-  const existing = await env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
-  const changed = [];
-  const sourceHashes = {};
-  for (const task of cataTasks) {
-    const sourceHash = await hash(task);
-    if (existing[String(task.id)]?.sourceHash === sourceHash) continue;
-    changed.push(task);
-    sourceHashes[String(task.id)] = sourceHash;
-  }
-  if (!changed.length) return;
-
-  const queued = await env.DASHBOARD_DATA.get(SUMMARY_QUEUE_KEY, "json");
-  if (queued && JSON.stringify(queued.sourceHashes) === JSON.stringify(sourceHashes)) return;
-  const running = await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json");
-  if (running && JSON.stringify(running.sourceHashes) === JSON.stringify(sourceHashes)) return;
-  const job = {
-    id: crypto.randomUUID(),
-    kind: "summary",
-    status: "queued",
-    createdAt: new Date().toISOString(),
-    sourceHashes,
-    tasks: changed.map(task => ({
-      id: task.id,
-      title: task.title,
-      done: task.done,
-      project: task.project,
-      owner: task.owner,
-      date: task.date,
-      dependency: task.dependency,
-      description: String(task.description || "").slice(0, 6000),
-    })),
-  };
-  await env.DASHBOARD_DATA.put(JOB_PREFIX + job.id, JSON.stringify(job), { expirationTtl: 86_400 });
-  await env.DASHBOARD_DATA.put(SUMMARY_QUEUE_KEY, JSON.stringify(job), { expirationTtl: 86_400 });
-}
-
 async function receiveSnapshot(request, env, fromBridge = false) {
   if (!(fromBridge ? bridgeAuthorized(request, env) : ingestAuthorized(request, env))) {
     return json({ error: "No autorizado" }, 401);
@@ -140,26 +103,19 @@ async function receiveSnapshot(request, env, fromBridge = false) {
     tasks: snapshot.tasks,
     stale: false,
   };
-  await env.DASHBOARD_DATA.put(SNAPSHOT_KEY, JSON.stringify(normalized));
-  await enqueueChangedCataTasks(env, normalized.tasks);
+  await chatStub(env).saveSnapshot(normalized);
   return json({ ok: true, projects: normalized.projects.length, tasks: normalized.tasks.length }, 202);
 }
 
 async function serveSnapshot(env) {
-  const snapshot = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
-  if (!snapshot) {
+  const dashboard = await chatStub(env).dashboard();
+  if (!dashboard) {
     return json({
       error: "El dashboard aún no ha recibido su primer snapshot desde Vikunja.",
       stale: true,
     }, 503);
   }
-  const storedSummaries = await env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
-  const aiSummaries = {};
-  await Promise.all(snapshot.tasks.map(async task => {
-    const record = storedSummaries[String(task.id)];
-    if (record?.sourceHash && record.sourceHash === await hash(task)) aiSummaries[String(task.id)] = record;
-  }));
-  return json({ ...snapshot, aiSummaries });
+  return json(dashboard);
 }
 
 function publicTask(task) {
@@ -187,7 +143,7 @@ async function createAssistantJob(request, env) {
       typeof item.content !== "string" || item.content.length > 4_000)) {
     return json({ error: "Historial de conversación inválido." }, 400);
   }
-  const snapshot = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
+  const snapshot = taskId === null ? null : await chatStub(env).snapshot();
   const task = taskId === null ? null : snapshot?.tasks?.find(item => String(item.id) === String(taskId));
   if (taskId !== null && !task) return json({ error: "La tarea seleccionada ya no está en el snapshot actual." }, 404);
   const job = {
@@ -226,20 +182,7 @@ async function takeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const kind = new URL(request.url).searchParams.get("kind") === "summary" ? "summary" : "chat";
   if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next");
-  if (await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json")) {
-    return json({ job: null });
-  }
-  const job = await env.DASHBOARD_DATA.get(SUMMARY_QUEUE_KEY, "json");
-  if (!job || job.kind !== kind) return json({ job: null });
-  await env.DASHBOARD_DATA.put(SUMMARY_BUSY_KEY, JSON.stringify({
-    id: job.id,
-    sourceHashes: job.sourceHashes,
-  }), { expirationTtl: 600 });
-  await env.DASHBOARD_DATA.delete(SUMMARY_QUEUE_KEY);
-  job.status = "running";
-  job.startedAt = new Date().toISOString();
-  await env.DASHBOARD_DATA.put(JOB_PREFIX + job.id, JSON.stringify(job), { expirationTtl: 86_400 });
-  return json({ job });
+  return json({ job: await chatStub(env).takeSummaryJob() });
 }
 
 async function completeBridgeJob(request, env) {
@@ -255,35 +198,8 @@ async function completeBridgeJob(request, env) {
     body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
-  const job = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
-  if (!job || job.kind !== "summary" || job.status !== "running") return json({ error: "Trabajo no encontrado o no está activo." }, 404);
-
-  job.status = error ? "error" : "completed";
-  job.error = typeof error === "string" ? error.slice(0, 1000) : "";
-  job.completedAt = new Date().toISOString();
-  if (!error && Array.isArray(summaries)) {
-    const current = await env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
-    const stored = await env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
-    const currentTasks = new Map((current?.tasks || []).map(task => [String(task.id), task]));
-    for (const item of summaries.slice(0, 80)) {
-      const taskId = String(item?.id ?? "");
-      const task = currentTasks.get(taskId);
-      const sourceHash = job.sourceHashes?.[taskId];
-      if (!task || !sourceHash || await hash(task) !== sourceHash) continue;
-      if (typeof item.summary !== "string" || !item.summary.trim()) continue;
-      stored[taskId] = {
-        sourceHash,
-        summary: item.summary.trim().slice(0, 700),
-        nextAction: typeof item.nextAction === "string" ? item.nextAction.trim().slice(0, 300) : "",
-        attention: ["normal", "seguimiento", "bloqueada"].includes(item.attention) ? item.attention : "normal",
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    await env.DASHBOARD_DATA.put(SUMMARY_KEY, JSON.stringify(stored));
-  }
-  await env.DASHBOARD_DATA.put(JOB_PREFIX + id, JSON.stringify(job), { expirationTtl: 86_400 });
-  const running = await env.DASHBOARD_DATA.get(SUMMARY_BUSY_KEY, "json");
-  if (running?.id === id) await env.DASHBOARD_DATA.delete(SUMMARY_BUSY_KEY);
+  const done = await chatStub(env).completeSummaryJob(id, Boolean(error), summaries);
+  if (!done) return json({ error: "Trabajo no encontrado o no está activo." }, 404);
   return json({ ok: true });
 }
 
@@ -475,6 +391,128 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
+  // Dashboard data (RPC from the Worker). Storage calls run synchronously after the awaits,
+  // so each read-modify-write completes without another request interleaving.
+  async snapshot() {
+    return this.ctx.storage.kv.get("data:snapshot") ?? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
+  }
+
+  async storedSummaries() {
+    const storage = this.ctx.storage.kv;
+    if (storage.get("data:summaries") === undefined) {
+      // One-time move of the summaries written while they lived in Workers KV.
+      const legacy = await this.env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
+      if (storage.get("data:summaries") === undefined) storage.put("data:summaries", legacy);
+    }
+    return storage.get("data:summaries");
+  }
+
+  async dashboard() {
+    const snapshot = await this.snapshot();
+    if (!snapshot) return null;
+    const stored = await this.storedSummaries();
+    const aiSummaries = {};
+    await Promise.all(snapshot.tasks.map(async task => {
+      const record = stored[String(task.id)];
+      if (record?.sourceHash && record.sourceHash === await hash(task)) aiSummaries[String(task.id)] = record;
+    }));
+    return { ...snapshot, aiSummaries };
+  }
+
+  async saveSnapshot(snapshot) {
+    this.ctx.storage.kv.put("data:snapshot", snapshot);
+    await this.enqueueChangedCataTasks(snapshot.tasks);
+  }
+
+  async enqueueChangedCataTasks(tasks) {
+    if (!this.env.DSTA_BRIDGE_TOKEN) return;
+    const cataTasks = tasks.filter(isCataTask).slice(0, 80);
+    const hashes = await Promise.all(cataTasks.map(hash));
+    const existing = await this.storedSummaries();
+    const storage = this.ctx.storage.kv;
+    // A task whose summary just failed waits an hour instead of retrying on every snapshot.
+    const failed = storage.get("data:summary-failed") || {};
+    const changed = [];
+    const sourceHashes = {};
+    cataTasks.forEach((task, index) => {
+      const id = String(task.id);
+      if (existing[id]?.sourceHash === hashes[index]) return;
+      if (failed[id]?.sourceHash === hashes[index] && Date.now() < failed[id].retryAt) return;
+      changed.push(task);
+      sourceHashes[id] = hashes[index];
+    });
+    if (!changed.length) return;
+    const same = record => record && JSON.stringify(record.sourceHashes) === JSON.stringify(sourceHashes);
+    if (same(storage.get("data:summary-queue")) || same(storage.get("data:summary-busy"))) return;
+    storage.put("data:summary-queue", {
+      id: crypto.randomUUID(),
+      kind: "summary",
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      sourceHashes,
+      tasks: changed.map(task => ({
+        id: task.id,
+        title: task.title,
+        done: task.done,
+        project: task.project,
+        owner: task.owner,
+        date: task.date,
+        dependency: task.dependency,
+        description: String(task.description || "").slice(0, 6000),
+      })),
+    });
+  }
+
+  takeSummaryJob() {
+    const storage = this.ctx.storage.kv;
+    const busy = storage.get("data:summary-busy");
+    if (busy && Date.now() - Date.parse(busy.startedAt) < 600_000) return null;
+    const job = storage.get("data:summary-queue");
+    if (!job) return null;
+    storage.delete("data:summary-queue");
+    if (Date.now() - Date.parse(job.createdAt) > 86_400_000) return null;
+    job.status = "running";
+    job.startedAt = new Date().toISOString();
+    storage.put("data:summary-busy", { id: job.id, sourceHashes: job.sourceHashes, startedAt: job.startedAt });
+    return job;
+  }
+
+  async completeSummaryJob(id, failedJob, summaries) {
+    const busy = this.ctx.storage.kv.get("data:summary-busy");
+    if (!busy || busy.id !== id) return false;
+    const snapshot = await this.snapshot();
+    const currentTasks = new Map((snapshot?.tasks || []).map(task => [String(task.id), task]));
+    const updates = {};
+    if (!failedJob && Array.isArray(summaries)) {
+      for (const item of summaries.slice(0, 80)) {
+        const taskId = String(item?.id ?? "");
+        const task = currentTasks.get(taskId);
+        const sourceHash = busy.sourceHashes?.[taskId];
+        if (!task || !sourceHash || await hash(task) !== sourceHash) continue;
+        if (typeof item.summary !== "string" || !item.summary.trim()) continue;
+        updates[taskId] = {
+          sourceHash,
+          summary: item.summary.trim().slice(0, 700),
+          nextAction: typeof item.nextAction === "string" ? item.nextAction.trim().slice(0, 300) : "",
+          attention: ["normal", "seguimiento", "bloqueada"].includes(item.attention) ? item.attention : "normal",
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+    const stored = await this.storedSummaries();
+    const storage = this.ctx.storage.kv;
+    const failed = Object.fromEntries(Object.entries(storage.get("data:summary-failed") || {})
+      .filter(([, record]) => Date.now() < record.retryAt));
+    for (const [taskId, sourceHash] of Object.entries(busy.sourceHashes || {})) {
+      if (updates[taskId]) delete failed[taskId];
+      else failed[taskId] = { sourceHash, retryAt: Date.now() + SUMMARY_RETRY_MS };
+    }
+    storage.put("data:summaries", { ...stored, ...updates });
+    storage.put("data:summary-failed", failed);
+    if (storage.get("data:summary-busy")?.id === id) storage.delete("data:summary-busy");
+    return true;
   }
 
   takeDecision() {

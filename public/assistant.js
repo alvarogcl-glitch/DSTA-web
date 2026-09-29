@@ -10,7 +10,7 @@
   widget.id = 'dsta-assistant';
   widget.innerHTML = '<button id="dsta-assistant-toggle" type="button" aria-expanded="false" aria-controls="dsta-assistant-panel">✦ Copiloto</button>' +
     '<section id="dsta-assistant-panel" aria-label="Copiloto Hermes" hidden>' +
-    '<header><div><span class="kicker">HERMES · PMO-DSTA</span><strong>Copiloto de gestión</strong></div><button id="dsta-assistant-close" type="button" aria-label="Cerrar copiloto">×</button></header>' +
+    '<header><div><span class="kicker">HERMES · PMO-DSTA</span><strong>Copiloto de gestión</strong></div><div class="dsta-assistant-actions"><button id="dsta-assistant-new" type="button" title="Borra la conversación: el copiloto parte sin el contexto anterior">Nueva sesión</button><button id="dsta-assistant-close" type="button" aria-label="Cerrar copiloto">×</button></div></header>' +
     '<div id="dsta-assistant-status" role="status">Consulta el portafolio o pide una acción en Vikunja.</div>' +
     '<div id="dsta-assistant-messages" aria-live="polite"></div>' +
     '<form id="dsta-assistant-form"><textarea id="dsta-assistant-input" rows="3" maxlength="4000" placeholder="Pregunta o indica una acción…" aria-label="Mensaje para Hermes"></textarea><div><small id="dsta-assistant-context"></small><button id="dsta-assistant-send" type="submit">Enviar</button></div></form>' +
@@ -25,6 +25,7 @@
   const status = $('#dsta-assistant-status');
   const messagesEl = $('#dsta-assistant-messages');
   const contextEl = $('#dsta-assistant-context');
+  const newSession = $('#dsta-assistant-new');
   const history = [];
   const pendingKey = 'dsta-assistant-pending-v1';
   let waiting = false;
@@ -53,6 +54,24 @@
       showContext();
       input.focus();
     }
+  }
+
+  function setWaiting(value) {
+    waiting = value;
+    send.disabled = value;
+    newSession.disabled = value;
+  }
+
+  // The conversation lives only in this tab (the history travels with each request), so
+  // clearing it here is enough for the copilot to start without the previous context.
+  function startNewSession() {
+    if (waiting) return;
+    history.length = 0;
+    messagesEl.replaceChildren();
+    status.textContent = 'Nueva sesión: el copiloto no recuerda la conversación anterior.';
+    input.value = '';
+    showContext();
+    input.focus();
   }
 
   function addMessage(role, content, pending = false) {
@@ -97,8 +116,7 @@
       status.textContent = 'No se completó la solicitud.';
       if (!error.message.includes('excedió el tiempo')) savePending(null);
     } finally {
-      waiting = false;
-      send.disabled = false;
+      setWaiting(false);
       input.focus();
     }
   }
@@ -107,8 +125,7 @@
     event.preventDefault();
     const message = input.value.trim();
     if (!message || waiting) return;
-    waiting = true;
-    send.disabled = true;
+    setWaiting(true);
     const task = selectedTask();
     const historyForRequest = history.slice(-20);
     addMessage('user', message);
@@ -130,14 +147,14 @@
       replyBubble.classList.remove('pending');
       status.textContent = 'No se completó la solicitud.';
       input.value = message;
-      waiting = false;
-      send.disabled = false;
+      setWaiting(false);
       input.focus();
     }
   }
 
   toggle.addEventListener('click', () => openPanel(panel.hidden));
   $('#dsta-assistant-close').addEventListener('click', () => openPanel(false));
+  newSession.addEventListener('click', startNewSession);
   $('#dsta-assistant-form').addEventListener('submit', submitMessage);
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -149,8 +166,7 @@
   try {
     const pending = JSON.parse(sessionStorage.getItem(pendingKey) || 'null');
     if (pending && /^[0-9a-f-]{36}$/i.test(pending.id) && typeof pending.message === 'string') {
-      waiting = true;
-      send.disabled = true;
+      setWaiting(true);
       openPanel(true);
       addMessage('user', pending.message);
       const replyBubble = addMessage('assistant', 'Recuperando la respuesta de Hermes…', true);
