@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,7 @@ import importlib.util
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 _publisher_spec = importlib.util.spec_from_file_location(
@@ -88,6 +90,31 @@ CODEX_RETRY_SECONDS = 600
 ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
 ANALYSIS_TIMEOUT_SECONDS = 420
 GRANOLA_FIRST_CHECK_SECONDS = 60
+VIKUNJA_CHECK_SECONDS = 300
+ENSURE_VIKUNJA = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "Vikunja" / "ensure-vikunja.ps1"
+
+
+def vikunja_listening(vikunja_url: str) -> bool:
+    parsed = urlparse(vikunja_url)
+    try:
+        with socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def ensure_vikunja(vikunja_url: str) -> None:
+    """Watchdog: Windows may close a hidden Vikunja (e.g. an app hang during an update); restart it."""
+    if urlparse(vikunja_url).hostname not in {"127.0.0.1", "localhost"} or vikunja_listening(vikunja_url):
+        return
+    if not ENSURE_VIKUNJA.exists():
+        print("Vikunja no responde y no se encontró ensure-vikunja.ps1", file=sys.stderr, flush=True)
+        return
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ENSURE_VIKUNJA)],
+                   capture_output=True, creationflags=HERMES_CREATION_FLAGS, timeout=60, check=False)
+    time.sleep(5)
+    state = "reiniciado" if vikunja_listening(vikunja_url) else "sigue sin responder tras intentar reiniciarlo"
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} Vikunja no respondía; {state}.", file=sys.stderr, flush=True)
 CLAUDE_PROMPT_NOTE = ("\n\nNota: respondes como respaldo de Codex. En este modo no puedes programar "
                       "recordatorios; si te lo piden, indícalo.")
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Codex no disponible)."
@@ -503,7 +530,11 @@ def run(*, once: bool, env_file: Path | None) -> int:
         summary_future: Future | None = None
         granola_future: Future | None = None
         next_granola = time.monotonic() + GRANOLA_FIRST_CHECK_SECONDS
+        next_vikunja_check = 0.0
         while True:
+            if time.monotonic() >= next_vikunja_check:
+                next_vikunja_check = time.monotonic() + VIKUNJA_CHECK_SECONDS
+                ensure_vikunja(vikunja_url)
             try:
                 if granola_every > 0 and time.monotonic() >= next_granola and (
                         granola_future is None or granola_future.done()):

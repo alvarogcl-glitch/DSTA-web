@@ -139,6 +139,22 @@ class HermesWindowTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 bridge.answer_chat({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")
 
+    def test_vikunja_watchdog_restarts_only_when_down(self):
+        with patch.object(bridge, "vikunja_listening", return_value=True), \
+             patch.object(bridge.subprocess, "run") as run:
+            bridge.ensure_vikunja("http://127.0.0.1:3456")
+        run.assert_not_called()
+        states = iter([False, True])
+        with patch.object(bridge, "vikunja_listening", side_effect=lambda url: next(states)), \
+             patch.object(bridge.subprocess, "run") as run, patch.object(bridge.time, "sleep"), \
+             patch.object(bridge, "ENSURE_VIKUNJA", Path(__file__)):
+            bridge.ensure_vikunja("http://127.0.0.1:3456")
+        self.assertIn(str(Path(__file__)), run.call_args.args[0])
+        with patch.object(bridge, "vikunja_listening", return_value=False), \
+             patch.object(bridge.subprocess, "run") as run:
+            bridge.ensure_vikunja("https://vikunja.example.com")
+        run.assert_not_called()  # never tries to start a remote Vikunja
+
     def test_failed_snapshot_does_not_hide_successful_action(self):
         job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
         events = []
