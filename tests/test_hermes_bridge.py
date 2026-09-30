@@ -139,6 +139,12 @@ class HermesWindowTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 bridge.answer_chat({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")
 
+    def test_summary_jobs_receive_the_claude_backup(self):
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        submit = source[source.index("summary_future = summaries.submit("):]
+        submit = submit[:submit.index(")") + 1]
+        self.assertIn("claude_cli", submit, "summary jobs must get claude_cli or the backup never runs")
+
     def test_vikunja_watchdog_restarts_only_when_down(self):
         with patch.object(bridge, "vikunja_listening", return_value=True), \
              patch.object(bridge.subprocess, "run") as run:

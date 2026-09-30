@@ -495,7 +495,7 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             finish_job(base_url, token, job, error=safe_error)
         except (HTTPError, URLError, OSError, ValueError):
             pass
-        print(f"{job.get('kind')} falló ({type(error).__name__})", file=sys.stderr, flush=True)
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {job.get('kind')} falló ({type(error).__name__}: {error})"[:600], file=sys.stderr, flush=True)
 
 
 def run(*, once: bool, env_file: Path | None) -> int:
@@ -561,11 +561,14 @@ def run(*, once: bool, env_file: Path | None) -> int:
                     if summary_job:
                         if once:
                             process_job(summary_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                        hermes_provider, hermes_model)
+                                        hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                                        claude_cli, claude_model)
                             return 0
+                        # Without claude_cli the Claude backup never runs and every summary fails while Codex is down.
                         summary_future = summaries.submit(
                             process_job, summary_job, dashboard_url, bridge_token, hermes_cli,
-                            hermes_home, hermes_provider, hermes_model,
+                            hermes_home, hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                            claude_cli, claude_model,
                         )
                 if once:
                     return 0
