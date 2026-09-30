@@ -188,18 +188,50 @@ async function takeBridgeJob(request, env) {
 async function completeBridgeJob(request, env) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
-  const parsed = await readJson(request, 100_000);
+  const parsed = await readJson(request, 400_000);
   if (parsed.error) return parsed.error;
-  const { id, reply, error, summaries, refreshError, snapshotTimestamp } = parsed.body || {};
+  const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
   const chatResponse = await chatStub(env).fetch(new Request("https://chat.internal/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp }),
+    body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes) }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const done = await chatStub(env).completeSummaryJob(id, Boolean(error), summaries);
   if (!done) return json({ error: "Trabajo no encontrado o no está activo." }, 404);
+  return json({ ok: true });
+}
+
+// Minutes the copilot cited as [título](minuta:<id>), so the browser can open them in place.
+function citedMinutes(minutes) {
+  if (!minutes || typeof minutes !== "object") return {};
+  const clean = {};
+  for (const [id, minute] of Object.entries(minutes).slice(0, 5)) {
+    if (id.length > 200 || typeof minute?.contenido !== "string") continue;
+    clean[id] = {
+      titulo: String(minute.titulo || "").slice(0, 200),
+      fecha: String(minute.fecha || "").slice(0, 10),
+      contenido: minute.contenido.slice(0, 60_000),
+    };
+  }
+  return clean;
+}
+
+// Status lights: availability of Vikunja and Granola as measured by the bridge on the VM.
+async function receiveHealth(request, env) {
+  if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
+  if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+  const parsed = await readJson(request, 10_000);
+  if (parsed.error) return parsed.error;
+  const health = {};
+  for (const name of ["vikunja", "granola"]) {
+    const item = parsed.body?.[name];
+    if (!item || typeof item.ok !== "boolean") continue;
+    health[name] = { ok: item.ok, detail: String(item.detail || "").slice(0, 120),
+      checkedAt: String(item.checkedAt || "").slice(0, 40) };
+  }
+  await chatStub(env).saveHealth(health);
   return json({ ok: true });
 }
 
@@ -300,7 +332,8 @@ export class DashboardChatQueue extends DurableObject {
       const job = storage.get(`job:${id}`);
       if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
       return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "",
-        refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "" });
+        refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "",
+        minutes: job.minutes || {} });
     }
 
     if (url.pathname === "/next" && request.method === "GET") {
@@ -374,7 +407,7 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/complete" && request.method === "POST") {
-      const { id, reply, error, refreshError, snapshotTimestamp } = await request.json();
+      const { id, reply, error, refreshError, snapshotTimestamp, minutes } = await request.json();
       const job = storage.get(`job:${id}`);
       if (!job || job.status !== "running" || storage.get("current") !== id) {
         return json({ error: "Trabajo no encontrado o no está activo." }, 404);
@@ -384,6 +417,7 @@ export class DashboardChatQueue extends DurableObject {
       job.reply = typeof reply === "string" ? reply.slice(0, 20_000) : "";
       job.refreshError = typeof refreshError === "string" ? refreshError.slice(0, 300) : "";
       job.snapshotTimestamp = typeof snapshotTimestamp === "string" ? snapshotTimestamp.slice(0, 40) : "";
+      job.minutes = minutes && typeof minutes === "object" ? minutes : {};
       job.completedAt = new Date().toISOString();
       storage.put(`job:${id}`, job);
       storage.delete("current");
@@ -418,7 +452,15 @@ export class DashboardChatQueue extends DurableObject {
       const record = stored[String(task.id)];
       if (record?.sourceHash && record.sourceHash === await hash(task)) aiSummaries[String(task.id)] = record;
     }));
-    return { ...snapshot, aiSummaries };
+    return { ...snapshot, aiSummaries, health: this.ctx.storage.kv.get("data:health") || {} };
+  }
+
+  saveHealth(health) {
+    const storage = this.ctx.storage.kv;
+    const current = storage.get("data:health") || {};
+    const receivedAt = new Date().toISOString();
+    for (const [name, item] of Object.entries(health)) current[name] = { ...item, receivedAt };
+    storage.put("data:health", current);
   }
 
   async saveSnapshot(snapshot) {
@@ -556,6 +598,10 @@ export default {
       return completeBridgeJob(request, env);
     }
 
+    if (url.pathname === "/api/bridge/health") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return receiveHealth(request, env);
+    }
     if (url.pathname === "/api/bridge/minute") {
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
       return bridgeMinuteRoute(request, env, "/minutes/upsert");

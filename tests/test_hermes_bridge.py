@@ -145,6 +145,38 @@ class HermesWindowTests(unittest.TestCase):
         submit = submit[:submit.index(")") + 1]
         self.assertIn("claude_cli", submit, "summary jobs must get claude_cli or the backup never runs")
 
+    def test_cited_minutes_are_attached_only_when_they_exist(self):
+        with tempfile.TemporaryDirectory() as folder:
+            minute = Path(folder) / "2026-09-28-directores.md"
+            minute.write_text('---\nsource: "granola"\n---\n\n# Reunión Directores\n\n- ENAER\n', encoding="utf-8")
+            with patch.object(bridge.minutas, "minute_files", return_value={"Minutas 2026/d.md": minute}):
+                cited = bridge.cited_minutes("Ver [Directores](minuta:Minutas 2026/d.md) y [Otra](minuta:no/existe.md).")
+        self.assertEqual(list(cited), ["Minutas 2026/d.md"])
+        self.assertEqual(cited["Minutas 2026/d.md"]["titulo"], "Reunión Directores")
+        self.assertEqual(cited["Minutas 2026/d.md"]["fecha"], "2026-09-28")
+        self.assertTrue(cited["Minutas 2026/d.md"]["contenido"].startswith("# Reunión Directores"))
+
+    def test_granola_check_reads_the_connection_test(self):
+        ok = subprocess.CompletedProcess([], 0, stdout="✓ Connected (1985ms)")
+        auth = subprocess.CompletedProcess([], 1, stdout="MCP OAuth requires browser authorization")
+        with patch.object(bridge.subprocess, "run", return_value=ok):
+            self.assertEqual(bridge.check_granola("hermes", Path.cwd()), (True, "Conectado"))
+        with patch.object(bridge.subprocess, "run", return_value=auth):
+            healthy, detail = bridge.check_granola("hermes", Path.cwd())
+        self.assertFalse(healthy)
+        self.assertIn("hermes mcp login granola", detail)
+
+    def test_health_reports_changes_and_heartbeats_only(self):
+        sent = []
+        monitor = bridge.HealthMonitor("https://example.com", "bridge", "http://127.0.0.1:3456", "hermes", Path.cwd())
+        with patch.object(bridge, "request_json", side_effect=lambda url, **kw: sent.append(kw["payload"]) or {}):
+            monitor.set("vikunja", True, "Respondiendo")
+            monitor.publish()
+            monitor.publish()  # sin cambios: no se reenvía
+            monitor.set("vikunja", False, "No responde")
+            monitor.publish()
+        self.assertEqual([item["vikunja"]["ok"] for item in sent], [True, False])
+
     def test_vikunja_watchdog_restarts_only_when_down(self):
         with patch.object(bridge, "vikunja_listening", return_value=True), \
              patch.object(bridge.subprocess, "run") as run:

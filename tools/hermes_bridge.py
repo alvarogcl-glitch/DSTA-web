@@ -31,6 +31,9 @@ _publisher_spec = importlib.util.spec_from_file_location(
 _publisher = importlib.util.module_from_spec(_publisher_spec)
 _publisher_spec.loader.exec_module(_publisher)
 fetch_dashboard = _publisher.fetch_dashboard
+_minutes_spec = importlib.util.spec_from_file_location("dsta_minutas", Path(__file__).with_name("minutas_mcp.py"))
+minutas = importlib.util.module_from_spec(_minutes_spec)
+_minutes_spec.loader.exec_module(minutas)
 _inbox_spec = importlib.util.spec_from_file_location("dsta_minute_inbox", Path(__file__).with_name("minute_inbox.py"))
 minute_inbox = importlib.util.module_from_spec(_inbox_spec)
 _inbox_spec.loader.exec_module(minute_inbox)
@@ -90,7 +93,11 @@ CODEX_RETRY_SECONDS = 600
 ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
 ANALYSIS_TIMEOUT_SECONDS = 420
 GRANOLA_FIRST_CHECK_SECONDS = 60
-VIKUNJA_CHECK_SECONDS = 300
+VIKUNJA_CHECK_SECONDS = 60
+GRANOLA_CHECK_SECONDS = 900
+HEALTH_HEARTBEAT_SECONDS = 300
+MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
+MAX_CITED_MINUTES = 5
 ENSURE_VIKUNJA = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "Vikunja" / "ensure-vikunja.ps1"
 
 
@@ -115,6 +122,72 @@ def ensure_vikunja(vikunja_url: str) -> None:
     time.sleep(5)
     state = "reiniciado" if vikunja_listening(vikunja_url) else "sigue sin responder tras intentar reiniciarlo"
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} Vikunja no respondía; {state}.", file=sys.stderr, flush=True)
+def check_granola(hermes_cli: str, hermes_home: Path) -> tuple[bool, str]:
+    """`hermes mcp test granola` measures the real OAuth connection and also refreshes its token,
+    which the non-interactive exporter cannot do on its own."""
+    env = {**os.environ, "HERMES_HOME": str(hermes_home), "PYTHONIOENCODING": "utf-8"}
+    try:
+        result = subprocess.run([hermes_cli, "mcp", "test", "granola"], cwd=str(hermes_home), env=env,
+                                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                creationflags=HERMES_CREATION_FLAGS, timeout=90, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "La prueba de conexión no respondió"
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode == 0 and "Connected" in output:
+        return True, "Conectado"
+    if "auth" in output.lower():
+        return False, "Requiere reautorizar: hermes mcp login granola"
+    return False, "Sin conexión con Granola"
+
+
+class HealthMonitor:
+    """Real availability of Vikunja and Granola, reported to the dashboard status lights."""
+
+    def __init__(self, base_url: str, token: str, vikunja_url: str, hermes_cli: str, hermes_home: Path):
+        self.base_url, self.token, self.vikunja_url = base_url, token, vikunja_url
+        self.hermes_cli, self.hermes_home = hermes_cli, hermes_home
+        self.state: dict[str, dict] = {}
+        self.last_sent = ""
+        self.last_sent_at = 0.0
+
+    def set(self, name: str, ok: bool, detail: str) -> None:
+        self.state[name] = {"ok": ok, "detail": detail, "checkedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+
+    def check_vikunja(self) -> None:
+        ensure_vikunja(self.vikunja_url)
+        ok = vikunja_listening(self.vikunja_url)
+        self.set("vikunja", ok, "Respondiendo" if ok else "No responde")
+
+    def check_granola(self) -> None:
+        self.set("granola", *check_granola(self.hermes_cli, self.hermes_home))
+
+    def publish(self) -> None:
+        signature = json.dumps({name: item["ok"] for name, item in self.state.items()}, sort_keys=True)
+        if signature == self.last_sent and time.monotonic() - self.last_sent_at < HEALTH_HEARTBEAT_SECONDS:
+            return
+        try:
+            request_json(f"{self.base_url}/api/bridge/health", token=self.token, method="POST",
+                         payload={name: dict(item) for name, item in self.state.items()}, timeout=20)
+            self.last_sent, self.last_sent_at = signature, time.monotonic()
+        except (HTTPError, URLError, OSError, ValueError):
+            pass  # the dashboard marks the lights as stale when reports stop
+
+
+def cited_minutes(reply: str) -> dict[str, dict]:
+    """Full text of the minutes the copilot linked as [título](minuta:<id>)."""
+    files = minutas.minute_files()
+    cited: dict[str, dict] = {}
+    for minute_id in MINUTE_LINK.findall(reply):
+        minute_id = minute_id.strip()
+        path = files.get(minute_id)
+        if not path or minute_id in cited or len(cited) >= MAX_CITED_MINUTES:
+            continue
+        text = minutas.read_text(path)
+        item = minutas.summary_item(minute_id, path, text)
+        cited[minute_id] = {"titulo": item["titulo"], "fecha": item["fecha"], "contenido": text[:60_000]}
+    return cited
+
+
 CLAUDE_PROMPT_NOTE = ("\n\nNota: respondes como respaldo de Codex. En este modo no puedes programar "
                       "recordatorios; si te lo piden, indícalo.")
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Codex no disponible)."
@@ -166,7 +239,10 @@ def chat_prompt(job: dict) -> str:
         "Granola; cita la minuta y su fecha. Vikunja sigue siendo la fuente oficial del estado de "
         "las tareas. Si no encuentras la minuta, dilo; no la reconstruyas. "
         "Responde directo con el resultado final: sin mostrar razonamiento, planes, pasos numerados "
-        "del proceso, comandos ni comentarios sobre las herramientas que usaste.\n\n"
+        "del proceso, comandos ni comentarios sobre las herramientas que usaste. "
+        "Cuando menciones una minuta específica, escríbela como enlace markdown con su id exacto de "
+        "dsta-minutas, por ejemplo [Reunión Directores (28-09-2026)](minuta:Minutas 2026/2026-09-28-reunión-directores-28-09-2026.md); "
+        "el usuario podrá abrirla desde el dashboard.\n\n"
         f"Tarea que estaba abierta en el dashboard: {task_context}\n\n"
         f"Conversación reciente:\n{transcript or '(inicio de conversación)'}\n\n"
         f"Nueva solicitud del usuario:\n{job.get('message', '')}"
@@ -319,9 +395,11 @@ def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, mo
 
 def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path, provider: str,
                   model: str, claude_cli: str, claude_model: str, vikunja_token: str,
-                  vikunja_url: str) -> None:
+                  vikunja_url: str, health: "HealthMonitor | None" = None) -> None:
     """Hourly: export new Granola minutes, analyse each and publish it to the dashboard inbox."""
     try:
+        if health:
+            health.check_granola()  # refreshes the OAuth token the exporter needs
         try:
             minute_inbox.run_sync(hermes_home)
         except Exception as error:  # e.g. Granola rate limit: still process what is already queued
@@ -446,7 +524,8 @@ def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path, provider: str,
 
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                summaries: list[dict] | None = None, error: str = "",
-               refresh_error: str = "", snapshot_timestamp: str = "") -> None:
+               refresh_error: str = "", snapshot_timestamp: str = "",
+               minutes: dict | None = None) -> None:
     payload: dict = {"id": job["id"]}
     if error:
         payload["error"] = error
@@ -454,6 +533,8 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
         payload["summaries"] = summaries or []
     else:
         payload["reply"] = reply
+        if minutes:
+            payload["minutes"] = minutes
         if refresh_error:
             payload["refreshError"] = refresh_error
         if snapshot_timestamp:
@@ -486,8 +567,12 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 refresh_error = "No se pudo actualizar el portafolio inmediatamente; usa Actualizar ahora o espera la sincronización."
                 print(f"Actualización inmediata falló ({type(error).__name__})", file=sys.stderr, flush=True)
+            try:
+                minutes = cited_minutes(reply)
+            except OSError:
+                minutes = {}
             finish_job(base_url, token, job, reply=reply, refresh_error=refresh_error,
-                       snapshot_timestamp=snapshot_timestamp)
+                       snapshot_timestamp=snapshot_timestamp, minutes=minutes)
         print(f"{job.get('kind')} completado", flush=True)
     except Exception as error:
         safe_error = "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
@@ -526,22 +611,30 @@ def run(*, once: bool, env_file: Path | None) -> int:
             push_minute(dashboard_url, bridge_token, record)
         except (HTTPError, URLError, OSError, ValueError):
             break
-    with ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola:
+    with ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
+            ThreadPoolExecutor(max_workers=1) as checks:
         summary_future: Future | None = None
         granola_future: Future | None = None
         next_granola = time.monotonic() + GRANOLA_FIRST_CHECK_SECONDS
         next_vikunja_check = 0.0
+        next_granola_check = 0.0
+        granola_check: Future | None = None
+        health = HealthMonitor(dashboard_url, bridge_token, vikunja_url, hermes_cli, hermes_home)
         while True:
             if time.monotonic() >= next_vikunja_check:
                 next_vikunja_check = time.monotonic() + VIKUNJA_CHECK_SECONDS
-                ensure_vikunja(vikunja_url)
+                health.check_vikunja()
+                health.publish()
+            if time.monotonic() >= next_granola_check and (granola_check is None or granola_check.done()):
+                next_granola_check = time.monotonic() + GRANOLA_CHECK_SECONDS
+                granola_check = checks.submit(lambda: (health.check_granola(), health.publish()))
             try:
                 if granola_every > 0 and time.monotonic() >= next_granola and (
                         granola_future is None or granola_future.done()):
                     next_granola = time.monotonic() + granola_every
                     granola_future = granola.submit(
                         granola_cycle, dashboard_url, bridge_token, hermes_cli, hermes_home, hermes_provider,
-                        hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url)
+                        hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url, health)
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
                 if result.get("decision"):
                     process_decision(result["decision"], dashboard_url, bridge_token, hermes_home,

@@ -152,4 +152,30 @@ await call(env, 'POST', '/api/bridge/decision-done', { id: withDecision.body.dec
 inbox = await call(env, 'GET', '/api/minutes');
 assert.equal(inbox.body.minutes[0].aplicando, false);
 
+// Semáforos de disponibilidad
+assert.equal((await call(env, 'POST', '/api/bridge/health', { vikunja: { ok: true } }, 'Bearer wrong')).status, 401);
+await call(env, 'POST', '/api/bridge/health',
+  { vikunja: { ok: true, detail: 'Respondiendo', checkedAt: '2026-09-30T14:00:00-0300' }, granola: { ok: false, detail: 'Requiere reautorizar' }, otro: { ok: true } }, 'Bearer bridge');
+let health = (await call(env, 'GET', '/api/dashboard')).body.health;
+assert.equal(health.vikunja.ok, true);
+assert.equal(health.granola.detail, 'Requiere reautorizar');
+assert.ok(health.granola.receivedAt, 'the Worker stamps when it heard from the bridge');
+assert.equal(health.otro, undefined, 'only known services are stored');
+await call(env, 'POST', '/api/bridge/health', { granola: { ok: true, detail: 'Conectado' } }, 'Bearer bridge');
+health = (await call(env, 'GET', '/api/dashboard')).body.health;
+assert.equal(health.granola.ok, true);
+assert.equal(health.vikunja.ok, true, 'a partial report keeps the other service');
+
+// Minutas citadas por el copiloto
+await call(env, 'POST', '/api/bridge/complete', { id: next.body.id, reply: 'listo' }, 'Bearer bridge');
+const cite =await call(env, 'POST', '/api/assistant', { message: '¿qué se habló de ENAER?' });
+const citeJob = (await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge')).body.job;
+assert.equal(citeJob.id, cite.body.id);
+await call(env, 'POST', '/api/bridge/complete', { id: citeJob.id,
+  reply: 'Ver [Directores](minuta:Minutas 2026/x.md).',
+  minutes: { 'Minutas 2026/x.md': { titulo: 'Reunión Directores', fecha: '2026-09-28', contenido: '# Reunión Directores\n- ENAER' } } }, 'Bearer bridge');
+const citeStatus = await call(env, 'GET', `/api/assistant?id=${cite.body.id}`);
+assert.equal(citeStatus.body.minutes['Minutas 2026/x.md'].titulo, 'Reunión Directores');
+assert.match(citeStatus.body.minutes['Minutas 2026/x.md'].contenido, /ENAER/);
+
 console.log('assistant Durable Object queue checks passed');
