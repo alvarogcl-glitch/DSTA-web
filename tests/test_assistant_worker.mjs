@@ -139,6 +139,8 @@ assert.equal(inbox.body.minutes[0].vista, true, 'a re-published record with the 
 
 assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'borrar' }] })).status, 400);
 assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { sql: 'x' } }] })).status, 400);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'instruccion', instruccion: '  ' }] })).status, 400,
+  'an instruction needs text');
 const decided = await call(env, 'POST', '/api/minutes/decide',
   { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { titulo: 'Coordinar FACh', project_id: 3 } }] });
 assert.equal(decided.status, 202);

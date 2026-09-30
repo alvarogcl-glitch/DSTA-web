@@ -10,16 +10,6 @@
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const LABELS = { actualizar: 'Actualizar tarea', comentar: 'Registrar nota', completar: 'Completar tarea', crear: 'Crear tarea', mover: 'Mover tarea' };
-  const FIELDS = {
-    actualizar: ['task_id', 'nota', 'responsable', 'fecha_objetivo', 'dependencia'],
-    comentar: ['task_id', 'nota'],
-    completar: ['task_id', 'nota'],
-    crear: ['project_id', 'titulo', 'nota', 'responsable', 'fecha_objetivo', 'dependencia', 'criterio_cierre'],
-    mover: ['task_id', 'project_id'],
-  };
-  const FIELD_LABELS = { task_id: 'Tarea (ID)', project_id: 'Línea', titulo: 'Título', nota: 'Texto para la bitácora', responsable: 'Responsable',
-    fecha_objetivo: 'Fecha objetivo', dependencia: 'Dependencia', criterio_cierre: 'Criterio de cierre' };
-
   const bell = document.createElement('button');
   bell.type = 'button';
   bell.id = 'dsta-inbox-toggle';
@@ -43,7 +33,7 @@
   let lastPayload = '';
   let openId = '';
   let loadError = '';
-  const drafts = {}; // minuteId -> actionId -> { decision, edits }
+  const drafts = {}; // minuteId -> actionId -> { decision, instruccion }
   let pollTimer = null;
 
   const currentTasks = () => (typeof tasks !== 'undefined' && Array.isArray(tasks) ? tasks : []);
@@ -57,8 +47,28 @@
 
   function draftFor(minuteId, actionId) {
     drafts[minuteId] ??= {};
-    drafts[minuteId][actionId] ??= { decision: '', edits: {} };
+    drafts[minuteId][actionId] ??= { decision: '', instruccion: '' };
     return drafts[minuteId][actionId];
+  }
+
+  // Una instrucción escrita manda sobre Aprobar/Rechazar.
+  function chosenDecision(minuteId, action) {
+    const draft = draftFor(minuteId, action.id);
+    if (draft.instruccion.trim()) return 'instruccion';
+    return action.auto ? '' : draft.decision;
+  }
+
+  function decidable(minute) {
+    return [...pending(minute), ...minute.acciones.filter(a => a.auto)];
+  }
+
+  function instructionBox(minute, action, placeholder) {
+    const draft = draftFor(minute.id, action.id);
+    return `<textarea rows="2" data-instr="${esc(minute.id + '|' + action.id)}" placeholder="${esc(placeholder)}">${esc(draft.instruccion)}</textarea>`;
+  }
+
+  function previousInstructions(action) {
+    return (action.instrucciones || []).map(item => `<p class="dsta-inbox-instr-done">Tu instrucción: «${esc(item.texto)}» → ${esc(item.resultado)}</p>`).join('');
   }
 
   function taskLabel(id) {
@@ -69,23 +79,6 @@
   function lineLabel(id) {
     const project = currentProjects().find(item => String(item.id) === String(id));
     return project ? project.title : (id ? `Línea ${id}` : 'Sin línea indicada');
-  }
-
-  function fieldInput(minute, action, field) {
-    const draft = draftFor(minute.id, action.id);
-    const value = draft.edits[field] ?? action[field] ?? '';
-    const name = `${minute.id}|${action.id}|${field}`;
-    let control;
-    if (field === 'project_id') {
-      control = `<select data-edit="${esc(name)}"><option value="">Elegir línea…</option>` +
-        currentProjects().map(p => `<option value="${esc(p.id)}"${String(p.id) === String(value) ? ' selected' : ''}>${esc(p.title)}</option>`).join('') + '</select>';
-    } else if (field === 'nota' || field === 'criterio_cierre') {
-      control = `<textarea rows="3" data-edit="${esc(name)}">${esc(value)}</textarea>`;
-    } else {
-      const type = field === 'fecha_objetivo' ? 'date' : field === 'task_id' ? 'number' : 'text';
-      control = `<input type="${type}" data-edit="${esc(name)}" value="${esc(value)}">`;
-    }
-    return `<label class="dsta-inbox-field"><span>${FIELD_LABELS[field]}</span>${control}</label>`;
   }
 
   function target(action) {
@@ -104,8 +97,9 @@
       ${action.evidencia ? `<blockquote>${esc(action.evidencia)}</blockquote>` : ''}
       ${action.motivo ? `<p class="muted">Por qué requiere tu revisión: ${esc(action.motivo)}</p>` : ''}
       ${action.estado === 'error' ? `<p class="dsta-inbox-error">${esc(action.resultado)}</p>` : ''}
-      <details${Object.keys(draft.edits).length ? ' open' : ''}><summary>Editar antes de aprobar</summary>${(FIELDS[action.tipo] || []).map(field => fieldInput(minute, action, field)).join('')}</details>
+      ${previousInstructions(action)}
       <div class="dsta-inbox-choice" role="radiogroup" aria-label="Decisión">${choice('aprobar')}${choice('rechazar')}${choice('')}</div>
+      <label class="dsta-inbox-field"><span>O indica qué hacer</span>${instructionBox(minute, action, 'Ej: créala en LT2 con responsable Nelson y fecha 15-10 · agrégalo como antecedente en #63 · no corresponde')}</label>
     </article>`;
   }
 
@@ -114,20 +108,21 @@
     const proposals = pending(minute);
     const automatic = minute.acciones.filter(a => a.auto);
     const resolved = minute.acciones.filter(a => !a.auto && !['propuesta', 'error'].includes(a.estado));
-    const chosen = proposals.filter(a => draftFor(minute.id, a.id).decision).length;
+    const chosen = decidable(minute).filter(a => chosenDecision(minute.id, a)).length;
     const chip = minute.estado === 'por_revisar' ? '<span class="dsta-inbox-chip todo">Nueva minuta por procesar</span>' : '<span class="dsta-inbox-chip done">Procesada</span>';
     let detail = '';
     if (open) {
       detail = `<div class="dsta-inbox-detail">
         ${minute.resumen ? `<p>${esc(minute.resumen)}</p>` : ''}
         <h4>Aplicado automáticamente · ${automatic.length}</h4>
-        ${automatic.length ? '<ul class="dsta-inbox-done">' + automatic.map(a => `<li><b>${esc(a.resultado)}</b>${a.nota ? `<br><span>${esc(a.nota)}</span>` : ''}</li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
+        ${automatic.length ? '<ul class="dsta-inbox-done">' + automatic.map(a => `<li><b>${esc(a.resultado)}</b>${a.nota ? `<br><span>${esc(a.nota)}</span>` : ''}${previousInstructions(a)}
+          <details class="dsta-inbox-modify"${draftFor(minute.id, a.id).instruccion ? ' open' : ''}><summary>Modificar</summary>${instructionBox(minute, a, 'Ej: cambia el responsable a Nelson · elimina esta tarea · agrega que falta la firma')}</details></li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
         <h4>Propuestas para tu revisión · ${proposals.length}</h4>
         ${proposals.map(action => proposal(minute, action)).join('') || '<p class="muted">Sin propuestas pendientes.</p>'}
         ${resolved.length ? `<details><summary>Resueltas · ${resolved.length}</summary><ul class="dsta-inbox-done">${resolved.map(a => `<li>${esc(LABELS[a.tipo])}: ${esc(a.resultado)}</li>`).join('')}</ul></details>` : ''}
         ${minute.antecedentes?.length ? `<details><summary>Antecedentes · ${minute.antecedentes.length}</summary><ul>${minute.antecedentes.map(item => `<li>${esc(item)}</li>`).join('')}</ul></details>` : ''}
         ${minute.errorDecision ? `<p class="dsta-inbox-error">${esc(minute.errorDecision)}</p>` : ''}
-        ${proposals.length ? `<div class="dsta-inbox-submit"><button type="button" data-submit="${esc(minute.id)}"${chosen && !minute.aplicando ? '' : ' disabled'}>${minute.aplicando ? 'Aplicando en Vikunja…' : `Enviar decisiones (${chosen})`}</button></div>` : ''}
+        ${decidable(minute).length ? `<div class="dsta-inbox-submit"><button type="button" data-submit="${esc(minute.id)}"${chosen && !minute.aplicando ? '' : ' disabled'}>${minute.aplicando ? 'Aplicando en Vikunja… (las instrucciones pueden tardar 1-2 min)' : `Enviar (${chosen})`}</button></div>` : ''}
         <p class="muted dsta-inbox-source">Copia guardada: ${esc(minute.minuta)}</p>
       </div>`;
     }
@@ -138,6 +133,8 @@
         <small>${esc(minute.fecha || '')} · ${automatic.length} aplicadas · ${proposals.length} por revisar</small>
       </button>${detail}</section>`;
   }
+
+  const processedCount = () => minutes.filter(m => !inInbox(m)).length;
 
   function render() {
     const count = minutes.filter(attention).length;
@@ -151,7 +148,8 @@
     if (focused) return; // no reescribir mientras se edita un campo
     body.innerHTML = (loadError ? `<p class="dsta-inbox-error">${esc(loadError)}</p>` : '') +
       (notice ? `<p class="dsta-inbox-notice" role="status">${esc(notice)}</p>` : '') +
-      (minutes.filter(inInbox).map(minuteCard).join('') || '<p class="muted">Sin minutas pendientes. Granola se revisa cada hora.</p>');
+      (minutes.filter(inInbox).map(minuteCard).join('') || '<p class="muted">Sin minutas pendientes. Granola se revisa cada hora.</p>') +
+      (processedCount() ? `<details class="dsta-inbox-history"><summary>Minutas procesadas · ${processedCount()}</summary>${minutes.filter(m => !inInbox(m)).map(minuteCard).join('')}</details>` : '');
   }
 
   async function load() {
@@ -204,14 +202,12 @@
   async function submit(minuteId) {
     const minute = minutes.find(item => item.id === minuteId);
     if (!minute) return;
-    const decisions = pending(minute).map(action => {
-      const draft = draftFor(minuteId, action.id);
-      if (!draft.decision) return null;
-      const edits = {};
-      for (const [field, value] of Object.entries(draft.edits)) {
-        if (String(value) !== String(action[field] ?? '')) edits[field] = field.endsWith('_id') && value !== '' ? Number(value) : value;
-      }
-      return { actionId: action.id, decision: draft.decision, edits };
+    const decisions = decidable(minute).map(action => {
+      const decision = chosenDecision(minuteId, action);
+      if (!decision) return null;
+      const item = { actionId: action.id, decision, edits: {} };
+      if (decision === 'instruccion') item.instruccion = draftFor(minuteId, action.id).instruccion.trim();
+      return item;
     }).filter(Boolean);
     if (!decisions.length) return;
     minute.aplicando = true;
@@ -248,9 +244,9 @@
     const button = panel.querySelector(`[data-submit="${CSS.escape(minuteId)}"]`);
     const minute = minutes.find(item => item.id === minuteId);
     if (!button || !minute || minute.aplicando) return;
-    const chosen = pending(minute).filter(a => draftFor(minuteId, a.id).decision).length;
+    const chosen = decidable(minute).filter(a => chosenDecision(minuteId, a)).length;
     button.disabled = chosen === 0;
-    button.textContent = `Enviar decisiones (${chosen})`;
+    button.textContent = `Enviar (${chosen})`;
   }
 
   body.addEventListener('change', event => {
@@ -261,16 +257,10 @@
     updateSubmit(minuteId);
   });
   body.addEventListener('input', event => {
-    const field = event.target.closest('[data-edit]');
-    if (!field) return;
-    const [minuteId, actionId, name] = field.dataset.edit.split('|');
-    const draft = draftFor(minuteId, actionId);
-    draft.edits[name] = field.value;
-    if (!draft.decision) {
-      draft.decision = 'aprobar'; // editar implica querer aplicarla
-      const radio = panel.querySelector(`[data-decision="${CSS.escape(minuteId + '|' + actionId)}"][value="aprobar"]`);
-      if (radio) radio.checked = true;
-    }
+    const box = event.target.closest('[data-instr]');
+    if (!box) return;
+    const [minuteId, actionId] = box.dataset.instr.split('|');
+    draftFor(minuteId, actionId).instruccion = box.value;
     updateSubmit(minuteId);
   });
 

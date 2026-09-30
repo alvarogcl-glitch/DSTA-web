@@ -39,3 +39,8 @@
 .dsta-inbox-field input{flex:none}
 body:has(#dsta-inbox:not([hidden])) #dsta-assistant{display:none}
 .dsta-inbox-notice{margin:0;padding:9px 12px;border-radius:8px;background:#1c3430;color:#dce9f3}
+.dsta-inbox-modify{margin-top:4px}.dsta-inbox-modify summary{cursor:pointer;color:#68d391;font-size:12px}
+.dsta-inbox-modify textarea,.dsta-inbox-action textarea{width:100%;min-width:0;margin-top:6px;resize:vertical}
+.dsta-inbox-instr-done{margin:4px 0 0;padding:6px 9px;border-left:3px solid #68d391;background:#1c3430;color:#dce9f3;font-size:12px}
+.dsta-inbox-history{margin-top:6px}.dsta-inbox-history>summary{cursor:pointer;color:#9bacbd;padding:6px 2px}
+.dsta-inbox-history .dsta-inbox-minute{margin-top:10px}

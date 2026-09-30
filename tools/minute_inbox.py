@@ -249,6 +249,18 @@ def set_field(description: str, name: str, value: str) -> str:
     return f"{name}: {value}\n" + "\n".join(lines)
 
 
+def field_value(description: str, name: str) -> str | None:
+    for line in description.replace("\r", "").split("\n"):
+        if line.lower().startswith(name.lower() + ":"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def without_line(description: str, name: str) -> str:
+    return "\n".join(line for line in description.replace("\r", "").split("\n")
+                     if not line.lower().startswith(name.lower() + ":"))
+
+
 def with_entry(description: str, heading: str, date: str, note: str, source: str) -> str:
     entry = f"{heading} {date}: {note} (Fuente: {source})"
     return f"{description.rstrip()}\n\n{entry}" if description.strip() else entry
@@ -275,6 +287,7 @@ def execute(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
             source=f"Granola {minute['sourceId']}",
             action_key=f"granola-{minute['sourceId']}-{wanted}",
         )
+        action["creada_id"] = created["task"]["id"]
         return f"Creada #{created['task']['id']} · {action['titulo']}"
 
     task_id = action["task_id"]
@@ -288,9 +301,12 @@ def execute(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
         return f"Movida #{task_id} a la línea {action['project_id']}"
 
     description = str(current.get("description") or "")
+    # What this action changes is remembered so an instruction can undo it later.
+    action["antes"] = {"campos": {}, "done": bool(current.get("done")), "title": current.get("title", "")}
     for name, key in (("Responsable", "responsable"), ("Fecha objetivo", "fecha_objetivo"),
                       ("Dependencia", "dependencia")):
         if action[key]:
+            action["antes"]["campos"][name] = field_value(description, name)
             description = set_field(description, name, action[key])
     # Notes go to the description log (not Vikunja comments) so the dashboard shows them.
     heading = {"completar": "Cierre", "comentar": "Nota"}.get(operation, "Actualización")
@@ -316,6 +332,103 @@ def apply_action(action: dict[str, Any], minute: dict[str, Any], vk) -> None:
     except Exception as error:  # the error is shown to the user next to the action
         action["resultado"] = f"No se aplicó: {error}"[:400]
         action["estado"] = "error"
+
+
+def undo(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
+    """Revert what this minute's action did: delete the task it created, or remove its log
+    entries and restore the fields, title and state it changed."""
+    source = f"Granola {minute['sourceId']}"
+    created = re.match(r"Creada #(\d+)", action.get("resultado") or "")
+    if action.get("tipo") == "crear" and not action.get("creada_id") and created:
+        action["creada_id"] = int(created.group(1))  # records made before creada_id was stored
+    if action.get("creada_id"):
+        task_id = action["creada_id"]
+        task = vk.request("GET", f"/api/v1/tasks/{task_id}")
+        if f"granola-{minute['sourceId']}" not in str(task.get("description") or ""):
+            raise ValueError(f"#{task_id} no fue creada por esta minuta; no se elimina.")
+        vk.request("DELETE", f"/api/v1/tasks/{task_id}")
+        action["creada_id"] = None
+        return f"Eliminada #{task_id} (creada por esta minuta)"
+    task_id = action.get("task_id")
+    if not task_id or action["estado"] != "aplicada":
+        raise ValueError("Esta acción no modificó ninguna tarea que deshacer.")
+    if action["tipo"] == "mover":
+        raise ValueError("Para revertir un movimiento, indica a qué línea volver.")
+    current = vk.request("GET", f"/api/v1/tasks/{task_id}")
+    lines = str(current.get("description") or "").replace("\r", "").split("\n")
+    description = "\n".join(line for line in lines if f"(Fuente: {source}" not in line).rstrip()
+    before = action.get("antes") or {}
+    for name, value in (before.get("campos") or {}).items():
+        description = set_field(description, name, value) if value is not None else without_line(description, name)
+    changes: dict[str, Any] = {"description": description}
+    if before.get("title") and current.get("title") != before["title"]:
+        changes["title"] = before["title"]
+    if "done" in before and bool(current.get("done")) != before["done"]:
+        changes["done"] = before["done"]
+    vk.update_task_fields(task_id, changes, current=current)
+    return f"Deshecho en #{task_id} lo registrado por esta minuta"
+
+
+def instruction_prompt(minute: dict[str, Any], action: dict[str, Any], instruction: str) -> str:
+    done = {key: action.get(key) for key in ("tipo", "task_id", "creada_id", "project_id", "titulo", "nota",
+                                              "responsable", "fecha_objetivo", "dependencia", "estado", "resultado")}
+    state = "ya se aplicó automáticamente" if action.get("auto") else "es una propuesta aún no aplicada"
+    return (
+        "Eres el analista PMO-DSTA. Álvaro dio una instrucción sobre una acción derivada de la minuta "
+        f"«{minute['titulo']}» ({minute.get('fecha', '')}), id `{minute['minuta']}` en dsta-minutas. "
+        f"La acción {state}:\n{json.dumps(done, ensure_ascii=False)}\n\n"
+        f"Instrucción de Álvaro: «{instruction}»\n\n"
+        "Traduce la instrucción en operaciones. Puedes leer la minuta (minutas_leer) y las tareas "
+        "(pmo_open_tasks); no modifiques nada tú mismo. Operaciones posibles: actualizar, comentar, "
+        "completar, crear, mover (mismos campos que en el análisis: task_id, project_id, titulo, nota, "
+        "responsable, fecha_objetivo AAAA-MM-DD, dependencia, criterio_cierre) y deshacer, que revierte "
+        "lo que esta acción ya hizo (elimina la tarea que creó, quita su nota, restaura campos y estado). "
+        "Para «elimina»/«borra»/«no correspondía» sobre algo ya aplicado usa deshacer. Para corregir algo ya "
+        "aplicado, usa deshacer y luego la operación correcta. Si la instrucción es descartar una propuesta, "
+        "no devuelvas operaciones. No inventes datos que la instrucción o la minuta no den.\n\n"
+        'Responde SOLO JSON: {"resumen":"qué harás en una frase","operaciones":[{"tipo":"deshacer"},'
+        '{"tipo":"crear","project_id":4,"titulo":"...","nota":"...","responsable":"Nelson","fecha_objetivo":"2026-10-15"}]}'
+    )
+
+
+def apply_instruction(action: dict[str, Any], minute: dict[str, Any], instruction: str,
+                      ask_model: Callable[[str], str], vk) -> None:
+    prompt = instruction_prompt(minute, action, instruction)
+    try:
+        decoded = loads_lenient(extract_json(ask_model(prompt)))
+    except ValueError:
+        decoded = loads_lenient(extract_json(ask_model(prompt + RETRY_NOTE)))
+    results, failed = [], False
+    for index, raw in enumerate(decoded.get("operaciones") or []):
+        if not isinstance(raw, dict):
+            continue
+        try:
+            if str(raw.get("tipo", "")).lower() == "deshacer":
+                results.append(undo(action, minute, vk))
+                continue
+            operation = normalize_action(raw, index + 1)
+            if not operation:
+                continue
+            results.append(execute(operation, minute, vk))
+            if operation.get("creada_id") and not action.get("creada_id"):
+                action["creada_id"] = operation["creada_id"]  # later instructions can undo it too
+        except Exception as error:
+            failed = True
+            results.append(f"No se aplicó: {error}"[:300])
+    summary = "; ".join(results) or "Sin cambios en Vikunja"
+    action.setdefault("instrucciones", []).append({"texto": instruction[:1500], "resultado": summary[:800], "fecha": now()})
+    if not action.get("auto"):
+        action["estado"] = "error" if failed else ("aplicada" if results else "rechazada")
+        action["resultado"] = summary[:400] if results else "Descartada según tu instrucción"
+    else:
+        action["resultado"] = f"{action['resultado']} → Instrucción: {summary}"[:600]
+
+
+def extract_json(output: str) -> str:
+    start, end = output.find("{"), output.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("El modelo no devolvió JSON.")
+    return output[start:end + 1]
 
 
 # ── Record lifecycle ──
@@ -369,14 +482,20 @@ def process_item(item: dict[str, Any], ask_model: Callable[[str], str], vk, stor
     return record
 
 
-def apply_decision(store: Path, decision: dict[str, Any], vk) -> dict[str, Any]:
-    """Execute the user's approvals (with edits) and rejections for one minute."""
+def apply_decision(store: Path, decision: dict[str, Any], vk,
+                   ask_model: Callable[[str], str] | None = None) -> dict[str, Any]:
+    """Execute the user's approvals, rejections and free-text instructions for one minute."""
     record = get_record(store, str(decision.get("minuteId", "")))
     if not record:
         raise KeyError("La minuta ya no está en la bandeja.")
     by_id = {action["id"]: action for action in record["acciones"]}
     for choice in decision.get("decisions") or []:
         action = by_id.get(str(choice.get("actionId", "")))
+        instruction = text_field(choice.get("instruccion"), 1500)
+        if action and choice.get("decision") == "instruccion" and instruction and ask_model:
+            # Instructions also work on actions already applied automatically.
+            apply_instruction(action, record, instruction, ask_model, vk)
+            continue
         if not action or action.get("auto") or action["estado"] not in {"propuesta", "error"}:
             continue
         if choice.get("decision") == "rechazar":

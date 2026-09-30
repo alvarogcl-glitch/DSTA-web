@@ -26,7 +26,11 @@ class FakeVikunja:
         self.created = []
 
     def request(self, method, path, **kwargs):
-        return dict(self.tasks[int(path.rsplit("/", 1)[-1])])
+        task_id = int(path.rsplit("/", 1)[-1])
+        if method == "DELETE":
+            self.tasks.pop(task_id)
+            return {"ok": True}
+        return dict(self.tasks[task_id])
 
     def update_task_fields(self, task_id, changes, current=None):
         self.tasks[task_id].update(changes)
@@ -42,7 +46,10 @@ class FakeVikunja:
 
     def pmo_create_task(self, **kwargs):
         self.created.append(kwargs)
-        return {"task": {"id": 200}}
+        task_id = 200 + len(self.created) - 1
+        self.tasks[task_id] = {"id": task_id, "title": kwargs["title"], "project_id": kwargs["project_id"],
+                               "done": False, "description": f"ACTION_KEY: {kwargs['action_key']}"}
+        return {"task": {"id": task_id}}
 
     def pmo_move_task(self, task_id, destination):
         self.tasks[task_id]["project_id"] = destination
@@ -143,6 +150,52 @@ class MinuteInboxTests(unittest.TestCase):
         self.assertEqual(created["action_key"], "granola-abc-123-coordinar-con-la-fuerza-aerea")
         self.assertEqual(created["source"], "Granola abc-123")
         self.assertEqual(created["target_date"], "", "non ISO dates are dropped, never invented")
+
+    def test_instruction_undoes_an_automatic_update_and_restores_fields(self):
+        original = self.vk.tasks[63]["description"]
+        self.process()
+        prompts = []
+        ask = lambda prompt: prompts.append(prompt) or '{"resumen":"deshacer","operaciones":[{"tipo":"deshacer"}]}'
+        record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [
+            {"actionId": "a1", "decision": "instruccion", "instruccion": "esto no correspondía, bórralo"}]}, self.vk, ask)
+        self.assertEqual(self.vk.tasks[63]["description"].strip(), original.strip())
+        self.assertIn("bórralo", prompts[0])
+        self.assertIn("ya se aplicó automáticamente", prompts[0])
+        self.assertIn("Deshecho en #63", record["acciones"][0]["instrucciones"][0]["resultado"])
+
+    def test_instruction_deletes_only_tasks_created_by_the_minute(self):
+        plan = {"acciones": [{"tipo": "crear", "evidente": True, "confianza": "alta", "project_id": 3,
+                              "titulo": "Coordinar con la Fuerza Aérea", "nota": "x"}]}
+        self.process(plan)
+        self.assertIn(200, self.vk.tasks)
+        ask = lambda prompt: '{"operaciones":[{"tipo":"deshacer"}]}'
+        record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [
+            {"actionId": "a1", "decision": "instruccion", "instruccion": "elimina esta tarea"}]}, self.vk, ask)
+        self.assertNotIn(200, self.vk.tasks)
+        self.assertIn("Eliminada #200", record["acciones"][0]["instrucciones"][0]["resultado"])
+        self.vk.tasks[300] = {"id": 300, "title": "Antigua", "project_id": 3, "done": False,
+                              "description": "ACTION_KEY: granola-abc-123-antigua"}
+        legacy = {"tipo": "crear", "estado": "aplicada", "resultado": "Creada #300 · Antigua"}
+        self.assertIn("Eliminada #300", inbox.undo(legacy, {"sourceId": "abc-123"}, self.vk))
+        self.vk.tasks[9]["description"] = "sin marca de la minuta"
+        action = {"creada_id": 9, "estado": "aplicada", "tipo": "crear"}
+        with self.assertRaises(ValueError):
+            inbox.undo(action, {"sourceId": "abc-123"}, self.vk)
+        self.assertIn(9, self.vk.tasks, "tasks not created by this minute are never deleted")
+
+    def test_instruction_resolves_a_proposal(self):
+        self.process()
+        ask = lambda prompt: json.dumps({"operaciones": [{"tipo": "crear", "project_id": 3,
+            "titulo": "Coordinar FACh", "responsable": "Nelson", "fecha_objetivo": "2026-10-15"}]})
+        record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [
+            {"actionId": "a3", "decision": "instruccion", "instruccion": "créala con Nelson para el 15-10"},
+            {"actionId": "a2", "decision": "instruccion", "instruccion": "no corresponde"}]},
+            self.vk, lambda prompt: '{"operaciones":[]}' if "no corresponde" in prompt else ask(prompt))
+        create, close = record["acciones"][2], record["acciones"][1]
+        self.assertEqual(create["estado"], "aplicada")
+        self.assertEqual(self.vk.created[-1]["owner"], "Nelson")
+        self.assertEqual(close["estado"], "rechazada")
+        self.assertEqual(record["estado"], "procesada")
 
     def test_pending_items_keep_accented_file_names(self):
         queue = Path(self.tmp.name) / "queue.json"

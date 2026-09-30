@@ -249,14 +249,16 @@ function validDecision(body) {
   const clean = [];
   for (const item of decisions) {
     if (!item || !MINUTE_ACTION_ID.test(String(item.actionId || ""))) return null;
-    if (!["aprobar", "rechazar"].includes(item.decision)) return null;
+    if (!["aprobar", "rechazar", "instruccion"].includes(item.decision)) return null;
+    const instruccion = typeof item.instruccion === "string" ? item.instruccion.trim() : "";
+    if (item.decision === "instruccion" && (!instruccion || instruccion.length > 1500)) return null;
     const edits = {};
     for (const [key, value] of Object.entries(item.edits || {})) {
       if (!MINUTE_EDIT_KEYS.has(key) || !["string", "number"].includes(typeof value)) return null;
       if (String(value).length > 1500) return null;
       edits[key] = value;
     }
-    clean.push({ actionId: item.actionId, decision: item.decision, edits });
+    clean.push({ actionId: item.actionId, decision: item.decision, edits, ...(instruccion ? { instruccion } : {}) });
   }
   return { minuteId, decisions: clean };
 }
@@ -560,7 +562,7 @@ export class DashboardChatQueue extends DurableObject {
   takeDecision() {
     const storage = this.ctx.storage.kv;
     for (const [key, decision] of storage.list({ prefix: "decision:" })) {
-      const stalled = decision.status === "running" && Date.now() - Date.parse(decision.startedAt || "") > 300_000;
+      const stalled = decision.status === "running" && Date.now() - Date.parse(decision.startedAt || "") > 900_000; // instrucciones llaman al modelo
       if (decision.status === "queued" || stalled) {
         decision.status = "running";
         decision.startedAt = new Date().toISOString();

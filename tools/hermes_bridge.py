@@ -409,13 +409,7 @@ def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path,
         if not pending:
             return
         vk = minute_inbox.load_vikunja()
-        ask = lambda prompt: codex_or_claude(
-            lambda: ask_hermes(prompt, hermes_cli, hermes_home, provider, model, ANALYSIS_TOOLSETS,
-                               max_turns=20, timeout=ANALYSIS_TIMEOUT_SECONDS),
-            lambda: ask_claude(prompt, claude_cli, hermes_home, claude_model, read_only=True,
-                               timeout=ANALYSIS_TIMEOUT_SECONDS),
-            claude_cli,
-        )
+        ask = analysis_asker(hermes_cli, hermes_home, provider, model, claude_cli, claude_model)
         for item in pending:
             try:
                 record = minute_inbox.process_item(item, ask, vk, inbox_store(hermes_home))
@@ -445,12 +439,25 @@ def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url:
     return snapshot["timestamp"]
 
 
+def analysis_asker(hermes_cli: str, hermes_home: Path, provider: str, model: str,
+                   claude_cli: str, claude_model: str) -> Callable[[str], str]:
+    """Read-only model session (Vikunja queries + minutes); writes are done by minute_inbox."""
+    return lambda prompt: codex_or_claude(
+        lambda: ask_hermes(prompt, hermes_cli, hermes_home, provider, model, ANALYSIS_TOOLSETS,
+                           max_turns=20, timeout=ANALYSIS_TIMEOUT_SECONDS),
+        lambda: ask_claude(prompt, claude_cli, hermes_home, claude_model, read_only=True,
+                           timeout=ANALYSIS_TIMEOUT_SECONDS),
+        claude_cli,
+    )
+
+
 def process_decision(decision: dict, base_url: str, token: str, hermes_home: Path,
-                     vikunja_token: str, vikunja_url: str) -> None:
-    """Apply the approvals/rejections the user sent from the dashboard inbox."""
+                     vikunja_token: str, vikunja_url: str,
+                     ask: Callable[[str], str] | None = None) -> None:
+    """Apply the approvals, rejections and instructions the user sent from the dashboard inbox."""
     error = ""
     try:
-        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision, minute_inbox.load_vikunja())
+        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision, minute_inbox.load_vikunja(), ask)
         push_minute(base_url, token, record)
         publish_snapshot(base_url, token, vikunja_token, vikunja_url)
     except Exception as failure:
@@ -637,8 +644,11 @@ def run(*, once: bool, env_file: Path | None) -> int:
                         hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url, health)
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
                 if result.get("decision"):
-                    process_decision(result["decision"], dashboard_url, bridge_token, hermes_home,
-                                     vikunja_token, vikunja_url)
+                    # Instructions call the model, so decisions run beside the hourly Granola work.
+                    granola.submit(process_decision, result["decision"], dashboard_url, bridge_token, hermes_home,
+                                   vikunja_token, vikunja_url,
+                                   analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model,
+                                                  claude_cli, claude_model))
                 chat_job = result.get("job")
                 if chat_job:
                     process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
