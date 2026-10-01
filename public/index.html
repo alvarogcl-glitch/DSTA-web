@@ -196,11 +196,17 @@ function inspector(title,fields,items){
 }
 function back(){
  if(history.state?.dstaDrawer)history.back();
- else if(inspectionHistory.length)showInspection(inspectionHistory.pop());
+ else if(inspectionHistory.length){const previous=rebuildInspection(inspectionHistory.pop());if(previous)showInspection(previous);else closeDirect()}
  else closeDirect();
 }
 function taskView(t){return {title:'#'+t.id+' · '+t.title,taskId:String(t.id),fields:[['Estado',t.done?'Completada':'Abierta'],['Línea',t.project],['Responsable',t.owner],['Fecha / horizonte',t.date],['Dependencia',t.dependency],['Descripción estructurada',{html:descriptionLog(t.description)}]]}}
 function projectView(p){const all=tasks.filter(t=>String(t.project_id)===String(p.id)),items=all.filter(t=>!t.done);return {title:p.title,projectId:String(p.id),fields:[['Tareas totales',all.length],['Abiertas',items.length],['Completadas',all.length-items.length],['Responsables de tareas abiertas',[...new Set(items.map(t=>t.owner))].join(', ')||'Ninguno']],items}}
+function rebuildInspection(view){
+ const project=view.projectId&&projects.find(p=>String(p.id)===view.projectId);
+ if(view.projectId)return project?projectView(project):null;
+ if(view.taskId){const task=tasks.find(t=>String(t.id)===view.taskId);return task?taskView(task):null}
+ return view;
+}
 function showTask(id){const t=tasks.find(x=>String(x.id)===String(id));if(!t)return;if(inspection)inspectionHistory.push(inspection);showInspection(taskView(t));pushDrawerHistory()}
 function filtered(){const q=$('#q').value.toLowerCase(),a=$('#a').value,s=$('#s').value;return tasks.filter(t=>(!q||(t.title+' '+t.project+' '+t.owner+' '+t.id).toLowerCase().includes(q))&&(!a||String(t.project_id)===a)&&(!s||(t.done?'done':'open')===s))}
 function renderRows(){const visible=filtered(),[field,direction]=$('#sort').value.split('-'),factor=direction==='desc'?-1:1;visible.sort((a,b)=>{let av,bv;if(field==='id'){av=Number(a.id);bv=Number(b.id);return (av-bv)*factor}if(field==='date'){const aHasDate=/^\d{4}-\d{2}-\d{2}$/.test(a.date||''),bHasDate=/^\d{4}-\d{2}-\d{2}$/.test(b.date||'');if(aHasDate!==bHasDate)return aHasDate?-1:1;return aHasDate?a.date.localeCompare(b.date)*factor:Number(a.id)-Number(b.id)}if(field==='status'){av=a.done?'Completada':'Abierta';bv=b.done?'Completada':'Abierta'}else{av=field==='owner'?a.owner:a.title;bv=field==='owner'?b.owner:b.title}return String(av||'').localeCompare(String(bv||''),'es',{numeric:true,sensitivity:'base'})*factor||Number(a.id)-Number(b.id)});$('#rows').innerHTML=visible.map(t=>'<tr class="clickable" tabindex="0" data-task="'+esc(t.id)+'"><td>#'+esc(t.id)+'</td><td><b>'+esc(t.title)+'</b><small>'+esc(t.project)+'</small></td><td><span class="pill '+(t.done?'done':'open')+'">'+(t.done?'Completada':'Abierta')+'</span></td><td>'+esc(t.owner)+'</td><td>'+esc(t.date)+'</td><td>'+esc(t.dependency)+'</td></tr>').join('');$('#count').textContent=visible.length+' visibles · '+tasks.length+' tareas totales'}
@@ -238,7 +244,7 @@ window.addEventListener('dsta-snapshot-ready',async event=>{
 window.addEventListener('popstate',()=>{
  if(closingDrawerHistory){closingDrawerHistory=false;return}
  if(!$('#drawer').classList.contains('open'))return;
- if(inspectionHistory.length)showInspection(inspectionHistory.pop());
+ if(inspectionHistory.length){const previous=rebuildInspection(inspectionHistory.pop());if(previous)showInspection(previous);else closeDirect()}
  else closeDirect();
 });
 let longPressTimer=null,longPressTarget=null,longPressStart=null,suppressLongPressClick=false;
