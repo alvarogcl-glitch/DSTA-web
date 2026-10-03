@@ -247,6 +247,38 @@ resúmenes automáticos.
 
 En operación normal, el script consulta Vikunja cada 30 segundos. Solo publica si cambian los datos o cada cinco minutos como pulso de actividad.
 
+## Seguridad verificada
+
+- El MCP valida la pertenencia a una línea activa PMO-DSTA antes de actualizar,
+  completar, cambiar dependencias o agregar comentarios. Crear y mover ya validaban
+  el alcance; ahora las demás escrituras no dependen de que el modelo elija bien el ID.
+- Los POST del navegador a chat y decisiones requieren JSON y rechazan `Origin`
+  distinto del sitio, `Origin: null` y metadatos Fetch de otro sitio. La autenticación
+  Basic sigue siendo obligatoria; clientes no navegador sin Origin siguen admitidos.
+- La ingestión rechaza fechas inválidas, registros nulos, IDs duplicados, tipos de
+  campo incorrectos y referencias a proyectos ausentes antes de reemplazar el snapshot.
+- El Worker cuenta los bytes del cuerpo durante su lectura y corta el stream al
+  superar el límite, antes de interpretar JSON. También cuenta espacios y UTF-8;
+  `Content-Length` no es la única defensa.
+- CSP permite los scripts externos del sitio y solo las huellas SHA-256 de los
+  scripts inline entregados por Static Assets. No admite JavaScript inline arbitrario,
+  `eval`, objetos ni envíos nativos de formularios. Los formularios de la interfaz
+  conservan sus manejadores JavaScript y sus solicitudes JSON del mismo origen.
+- Wrangler queda fijado en 4.147.0 con lockfile actualizado. La auditoría npm incluye
+  las dependencias de desarrollo: no basta `npm audit --omit=dev`.
+
+Pruebas de regresión y seguridad (sin escribir en PMO productivo):
+
+```bash
+python -m unittest discover -s tests -v
+node tests/test_assistant_worker.mjs
+node tests/test_security_worker.mjs
+node tests/test_inspector_refresh.mjs
+node tests/test_portfolio_selection.mjs
+npm audit
+npm run check
+```
+
 ## Desarrollo local
 
 ```powershell

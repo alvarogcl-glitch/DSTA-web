@@ -35,6 +35,12 @@ def sample_task():
 
 
 class SafeTaskUpdateTests(unittest.TestCase):
+    def setUp(self):
+        scope = patch.object(dashboard_mcp, "pmo_projects", return_value=[
+            {"id": 3, "title": "LT1", "parent_project_id": 2}])
+        scope.start()
+        self.addCleanup(scope.stop)
+
     def test_partial_update_preserves_every_unmodified_field(self):
         current = sample_task()
         payload = dashboard_mcp.task_update_payload(17, current, {"title": "Título actualizado"})
@@ -178,10 +184,10 @@ class PortfolioStructureTests(unittest.TestCase):
         current["project_id"] = 13
         moved = {**current, "project_id": 19}
         with patch.object(dashboard_mcp, "request", side_effect=[
-            [source, target], current, [source, target], moved, moved]) as mocked:
+            [source, target], current, [source, target], [source, target], moved, moved]) as mocked:
             result = dashboard_mcp.pmo_move_task(17, 19)
         self.assertEqual(result["task"]["project_id"], 19)
-        payload = mocked.call_args_list[3].kwargs["json"]
+        payload = mocked.call_args_list[4].kwargs["json"]
         self.assertEqual(payload["description"], current["description"])
         self.assertEqual(payload["reminders"], current["reminders"])
 

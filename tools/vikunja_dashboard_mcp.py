@@ -163,6 +163,10 @@ def update_task_fields(task_id: int, changes: dict[str, Any], current: dict[str,
     if current is None:
         current = request("GET", f"/api/v1/tasks/{task_id}")
     payload = task_update_payload(task_id, current, changes)
+    projects = pmo_projects()
+    require_line(int(current.get("project_id") or 0), projects)
+    if "project_id" in changes:
+        require_line(int(changes["project_id"]), projects)
     return request("POST", f"/api/v1/tasks/{task_id}", json=payload)
 
 
@@ -407,7 +411,11 @@ def pmo_set_dependency(task_id: int, dependency: str) -> dict[str, Any]:
 
 @mcp.tool()
 def pmo_add_comment(task_id: int, comment: str) -> dict[str, Any]:
-    """Add a dated comment to the specified Vikunja task."""
+    """Add a dated comment to a task in an active PMO-DSTA line."""
+    current = request("GET", f"/api/v1/tasks/{task_id}")
+    if int(current.get("id") or 0) != task_id:
+        raise RuntimeError("Vikunja devolvió una tarea distinta; no se agregó el comentario.")
+    require_line(int(current.get("project_id") or 0), pmo_projects())
     return request("PUT", f"/api/v1/tasks/{task_id}/comments", json={"comment": comment})
 
 

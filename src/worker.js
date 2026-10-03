@@ -60,16 +60,32 @@ function requestAuthentication() {
 }
 
 async function readJson(request, maxBytes = 1_000_000) {
+  const tooLarge = () => ({ error: json({ error: "Solicitud demasiado grande" }, 413) });
   const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (declaredLength > maxBytes) return { error: json({ error: "Solicitud demasiado grande" }, 413) };
+  if (declaredLength > maxBytes) return tooLarge();
+  const reader = request.body?.getReader();
+  if (!reader) return { error: json({ error: "JSON inválido" }, 400) };
   try {
-    const body = await request.json();
-    if (new TextEncoder().encode(JSON.stringify(body)).length > maxBytes) {
-      return { error: json({ error: "Solicitud demasiado grande" }, 413) };
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return tooLarge();
+      }
+      chunks.push(value);
     }
-    return { body };
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return { body: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) };
   } catch {
     return { error: json({ error: "JSON inválido" }, 400) };
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -85,6 +101,21 @@ function isCataTask(task) {
     .some(value => cataMention.test(String(value || "")));
 }
 
+function validSnapshot(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.projects) || !Array.isArray(snapshot.tasks) ||
+      typeof snapshot.timestamp !== "string" || !Number.isFinite(Date.parse(snapshot.timestamp))) return false;
+  const validRecord = item => item && typeof item === "object" && !Array.isArray(item) &&
+    Number.isSafeInteger(item.id) && item.id > 0 && typeof item.title === "string";
+  if (snapshot.projects.some(item => !validRecord(item)) || snapshot.tasks.some(item => !validRecord(item))) return false;
+  const projectIds = new Set(snapshot.projects.map(item => item.id));
+  if (projectIds.size !== snapshot.projects.length || new Set(snapshot.tasks.map(item => item.id)).size !== snapshot.tasks.length) return false;
+  return snapshot.tasks.every(task =>
+    (task.project_id === undefined || projectIds.has(task.project_id)) &&
+    (task.done === undefined || typeof task.done === "boolean") &&
+    ["project", "owner", "date", "dependency", "criterion", "source", "action_key", "description"]
+      .every(key => task[key] === undefined || typeof task[key] === "string"));
+}
+
 async function receiveSnapshot(request, env, fromBridge = false) {
   if (!(fromBridge ? bridgeAuthorized(request, env) : ingestAuthorized(request, env))) {
     return json({ error: "No autorizado" }, 401);
@@ -92,8 +123,7 @@ async function receiveSnapshot(request, env, fromBridge = false) {
   const parsed = await readJson(request, 2_000_000);
   if (parsed.error) return parsed.error;
   const snapshot = parsed.body;
-  if (!snapshot || !Array.isArray(snapshot.projects) || !Array.isArray(snapshot.tasks) ||
-      typeof snapshot.timestamp !== "string") {
+  if (!validSnapshot(snapshot)) {
     return json({ error: "Estructura de snapshot inválida" }, 400);
   }
 
@@ -615,6 +645,18 @@ export default {
 
     if (!basicAuthorized(request, env)) return requestAuthentication();
 
+    // Basic auth is ambient browser authority: reject foreign-site writes before
+    // reading a body or scheduling a job. CLI clients without Origin remain valid.
+    if (request.method === "POST" && ["/api/assistant", "/api/minutes/seen", "/api/minutes/decide"].includes(url.pathname)) {
+      const origin = request.headers.get("origin");
+      const site = request.headers.get("sec-fetch-site");
+      if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
+        return json({ error: "Origen de solicitud no permitido." }, 403);
+      }
+      const mediaType = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+      if (mediaType !== "application/json") return json({ error: "Se requiere application/json." }, 415);
+    }
+
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return chatStub(env).fetch("https://chat.internal/minutes/list");
@@ -640,7 +682,20 @@ export default {
     headers.set("cache-control", "no-store");
     headers.set("x-content-type-options", "nosniff");
     headers.set("referrer-policy", "no-referrer");
-    headers.set("content-security-policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+    const scriptSources = ["'self'"];
+    if ((asset.headers.get("content-type") || "").includes("text/html")) {
+      const html = await asset.clone().text();
+      for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+        if (/\bsrc\s*=/i.test(match[1]) || !match[2].trim()) continue;
+        // HTML parsing normalizes CRLF/CR to LF before CSP hashes are evaluated.
+        const bytes = new TextEncoder().encode(match[2].replace(/\r\n?/g, "\n"));
+        const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        scriptSources.push(`'sha256-${btoa(String.fromCharCode(...digest))}'`);
+      }
+    }
+    headers.set("content-security-policy", `default-src 'self'; style-src 'self' 'unsafe-inline'; script-src ${scriptSources.join(" ")}; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'`);
+    headers.set("x-frame-options", "DENY");
+    headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
     return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
   },
 };
