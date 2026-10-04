@@ -19,6 +19,38 @@
  }
  body:has(.drawer.open):has(#dsta-assistant-panel:not([hidden])) #dsta-assistant-toggle{display:none}
 }
+
+/* DSTA-MODERN-START */
+/* Slate + mint, deliberately lightweight: original geometry and inventory styles.
+   No webfonts, blur, decorative JS or universal reduced-motion rules. */
+body{background:#0b121a;color:#edf4f7}
+.metric,.project,.panel{background:#121d28;border-color:#2a3b4a;border-radius:14px}
+.panel{border-radius:16px}
+.project strong,.kicker{color:#86e2bb}
+.project.selected,.priority-card.selected{border-color:#86e2bb;background:#1b3834;box-shadow:inset 0 0 0 1px #86e2bb}
+.project.selected:after,.priority-card.selected:after{color:#86e2bb}
+.priority-card,.task-card{background:#16232f;border-color:#2a3b4a;border-radius:10px}
+.drawer{background:#121d28}
+.light i{box-shadow:none}.light.ok i{background:#86e2bb;box-shadow:none}
+#refresh{background:#203c36;border-color:#3e665a;color:#d9fff0}
+button:focus-visible,.clickable:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #86e2bb;outline-offset:3px}
+/* IDs stay scoped and outrank the lazy-loaded component styles. */
+body #dsta-assistant-toggle,body #dsta-assistant-send{background:#a3ebcd;color:#10261f;border-color:#a3ebcd;border-radius:12px}
+body #dsta-assistant-panel,body #dsta-minute-viewer,body #dsta-inbox{background:#121d28;border-color:#3b5061}
+body #dsta-assistant-panel,body #dsta-minute-viewer{border-radius:14px}
+body .dsta-message.user{background:#24483e}
+/* Preserve the existing desktop columns / mobile vertical split. */
+@media(max-width:900px){body:has(.drawer.open):has(#dsta-assistant-panel:not([hidden])) #dsta-assistant-panel{border-radius:0}}
+@media(prefers-reduced-motion:reduce){
+ .drawer,.project,[data-select-group]{transition:none}
+ [data-select-group].long-pressing{transform:none}
+}
+@media print{
+ body{background:#fff;color:#111}
+ .metric,.panel,.project,.priority-card,.task-card{background:#fff;color:#111;border-color:#ccc;box-shadow:none}
+ body #dsta-assistant,body #dsta-minute-viewer,body #dsta-inbox{display:none!important}
+}
+/* DSTA-MODERN-END */
 </style></head><body><main class="wrap"><header><div><div class="kicker">PMO-DSTA / VIKUNJA / LECTURA EN VIVO</div><h1>Dashboard Gestión DSTA</h1><small>Fuente canónica: Vikunja · actualización automática cada 30 segundos</small></div><div><div id="status" class="status">Conectando…</div><div id="health" class="health" aria-label="Disponibilidad de servicios"></div><button id="refresh" type="button">Actualizar ahora</button></div></header><p id="error" role="alert"></p><section id="metrics" class="grid"></section><section class="panel"><div class="panel-heading"><h2>Portafolio por línea de trabajo</h2><button id="portfolio-minute" type="button" disabled>Generar minuta (0 seleccionadas)</button></div><p class="muted">Mantén presionada una tarjeta LT/TR para activar el modo selección; luego toca otras para sumarlas o quitarlas. Toca un espacio vacío para salir. Clic normal: ver tareas. Teclado: Shift + Enter para seleccionar.</p><div class="select-hint" role="status"><span>Modo selección para minuta · toca tarjetas para sumarlas o quitarlas · toca un espacio vacío para salir</span><button type="button" data-select-clear="portfolio">Quitar selección</button></div><div id="projects" class="projects"></div></section><section class="panel"><div class="panel-heading"><h2>Tareas con fechas próximas</h2><button id="upcoming-minute" type="button">Generar minuta</button></div><p class="muted">Tareas abiertas con fecha objetivo en los próximos 45 días. Las vencidas se muestran aparte; sin fecha confirmada, no se incluyen. Mantén presionada una tarea para elegir cuáles van a la minuta; sin selección se incluyen todas.</p><div class="select-hint" role="status"><span>Modo selección para minuta · toca tareas para sumarlas o quitarlas · toca un espacio vacío para salir</span><button type="button" data-select-clear="upcoming">Quitar selección</button></div><div id="upcoming" class="priority-list"></div></section><section class="panel"><div class="panel-heading"><h2>Cata 1-1</h2><button id="cata-minute" type="button">Generar minuta Cata 1-1</button></div><p class="muted">Temas vinculados explícitamente a Cata en Vikunja. Pendientes primero; completados como antecedentes, no como acuerdos por revisar. Mantén presionado un pendiente para elegir cuáles van a la minuta; sin selección se incluyen todos.</p><div class="select-hint" role="status"><span>Modo selección para minuta · toca pendientes para sumarlos o quitarlos · toca un espacio vacío para salir</span><button type="button" data-select-clear="cata">Quitar selección</button></div><div id="cata" class="priority-list"></div></section><section class="panel"><h2>Inventario operativo completo</h2><div class="toolbar"><input id="q" placeholder="Buscar tarea, responsable o línea…" aria-label="Buscar"><select id="a" aria-label="Línea"><option value="">Todas las líneas</option></select><select id="s" aria-label="Estado"><option value="">Todos los estados</option><option value="open">Abiertas</option><option value="done">Completadas</option></select><select id="sort" aria-label="Ordenar por"><option value="id-asc">Ordenar: ID ascendente</option><option value="id-desc">ID descendente</option><option value="title-asc">Actividad A–Z</option><option value="title-desc">Actividad Z–A</option><option value="owner-asc">Responsable A–Z</option><option value="date-asc">Fecha más próxima</option><option value="date-desc">Fecha más lejana</option><option value="status-asc">Estado</option></select><button id="print" type="button">Imprimir / PDF</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Actividad</th><th>Estado</th><th>Responsable</th><th>Fecha / horizonte</th><th>Dependencia</th></tr></thead><tbody id="rows"></tbody></table></div><p id="count" class="muted"></p></section></main><div class="drawer-backdrop" id="backdrop"></div><aside class="drawer" id="drawer" aria-label="Inspector"><header><span class="kicker">INSPECTOR / MINUTAS</span><div class="drawer-actions"><button id="back" type="button" aria-label="Regresar al nivel anterior">← Regresar</button><button id="close" type="button">Cerrar ×</button></div></header><div id="breadcrumb" class="breadcrumb" aria-label="Ruta de navegación"></div><h2 id="detail-title"></h2><div id="detail-body"></div></aside>
 <script>
 'use strict';
