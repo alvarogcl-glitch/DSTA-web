@@ -75,6 +75,33 @@ class SafeTaskUpdateTests(unittest.TestCase):
         self.assertEqual(payload["priority"], current["priority"])
         self.assertEqual(payload["reminders"], current["reminders"])
 
+    def test_log_append_preserves_fields_and_verifies_saved_description(self):
+        current = sample_task()
+        description = current['description'] + '\n\nNota 2026-10-05: Acuerdo confirmado\nSegunda línea'
+        with patch.object(dashboard_mcp, 'request', side_effect=[current, {}, {**current, 'description': description}]) as mocked:
+            result = dashboard_mcp.pmo_append_log(17, 'Acuerdo confirmado\nSegunda línea', '2026-10-05', 'Nota')
+        payload = mocked.call_args_list[1].kwargs['json']
+        self.assertEqual(payload['description'], description)
+        for field in dashboard_mcp.TASK_UPDATE_FIELDS:
+            if field != 'description':
+                self.assertEqual(payload[field], current[field])
+        self.assertTrue(result['verified'])
+
+    def test_log_rejects_invalid_input_before_api_access(self):
+        for entry, entry_date, kind in [(' ', '2026-10-05', 'Nota'), ('x' * 2501, '2026-10-05', 'Nota'),
+                                       ('Nota', '2026-02-30', 'Nota'), ('Nota', '20261005', 'Nota'),
+                                       ('Nota', '2026-10-05', 'Responsable')]:
+            with self.subTest(entry_date=entry_date, kind=kind), patch.object(dashboard_mcp, 'request') as mocked:
+                with self.assertRaises(ValueError):
+                    dashboard_mcp.pmo_append_log(17, entry, entry_date, kind)
+                mocked.assert_not_called()
+
+    def test_log_detects_failed_persistence(self):
+        current = sample_task()
+        with patch.object(dashboard_mcp, 'request', side_effect=[current, {}, current]):
+            with self.assertRaisesRegex(RuntimeError, 'no se pudo verificar'):
+                dashboard_mcp.pmo_append_log(17, 'Acuerdo', '2026-10-05')
+
     def test_dependency_change_preserves_description_history_and_task_fields(self):
         current = sample_task()
         with patch.object(dashboard_mcp, "request", side_effect=[current, {"ok": True}]) as mocked:

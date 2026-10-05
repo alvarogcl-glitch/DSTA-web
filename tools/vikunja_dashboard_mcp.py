@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -391,6 +392,27 @@ def pmo_update_task(
 def pmo_complete_task(task_id: int) -> dict[str, Any]:
     """Mark the specified Vikunja task as completed."""
     return update_task_fields(task_id, {"done": True})
+
+
+@mcp.tool()
+def pmo_append_log(task_id: int, entry: str, entry_date: str, kind: str = "Actualización") -> dict[str, Any]:
+    """Append a dated entry to the structured description, preserving fields and prior history."""
+    if kind not in {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}:
+        raise ValueError("Tipo de registro inválido.")
+    if date.fromisoformat(entry_date).isoformat() != entry_date:
+        raise ValueError("La fecha debe usar AAAA-MM-DD.")
+    entry = entry.strip()
+    if not entry or len(entry) > 2500:
+        raise ValueError("El registro debe contener entre 1 y 2500 caracteres.")
+    current = request("GET", f"/api/v1/tasks/{task_id}")
+    original = str(current.get("description") or "")
+    addition = f"{kind} {entry_date}: {entry}"
+    description = original + ("\n\n" if original else "") + addition
+    update_task_fields(task_id, {"description": description}, current=current)
+    verified = request("GET", f"/api/v1/tasks/{task_id}")
+    if int(verified.get("id") or 0) != task_id or verified.get("description") != description:
+        raise RuntimeError("Se envió el registro, pero no se pudo verificar su descripción en Vikunja. Revisa antes de reintentar.")
+    return {"ok": True, "verified": True, "task": verified}
 
 
 @mcp.tool()

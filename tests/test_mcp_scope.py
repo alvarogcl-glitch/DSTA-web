@@ -11,6 +11,7 @@ class DashboardScopeTests(unittest.TestCase):
             lambda: dashboard_mcp.pmo_complete_task(17),
             lambda: dashboard_mcp.pmo_set_dependency(17, 'LT2'),
             lambda: dashboard_mcp.pmo_add_comment(17, 'Follow-up'),
+            lambda: dashboard_mcp.pmo_append_log(17, 'Follow-up', '2026-10-05'),
         ]
         for project in [
             {'id':3, 'title':'Personal', 'parent_project_id':0},

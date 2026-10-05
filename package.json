@@ -8,7 +8,7 @@
     "deploy": "wrangler deploy",
     "preview": "wrangler versions upload",
     "check": "wrangler deploy --dry-run",
-    "test": "python -m unittest discover -s tests -v && node tests/test_assistant_worker.mjs && node tests/test_security_worker.mjs && node tests/test_inspector_refresh.mjs && node tests/test_portfolio_selection.mjs && node tests/test_health_refresh.mjs"
+    "test": "python -m unittest discover -s tests -v && node tests/test_assistant_worker.mjs && node tests/test_security_worker.mjs && node tests/test_inspector_refresh.mjs && node tests/test_portfolio_selection.mjs && node tests/test_health_refresh.mjs && node tests/test_task_actions.mjs"
   },
   "devDependencies": {
     "wrangler": "4.147.0"

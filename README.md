@@ -14,6 +14,21 @@ package.json                 Wrangler y comandos del proyecto
 
 No se usa `dist` porque no hay un framework que compilar. Wrangler publica directamente `public/` como Static Assets.
 
+## Acciones en el detalle de una tarea
+
+El inspector permite **Marcar como completada** una tarea abierta y **Guardar registro**
+en su bitácora (tipo, fecha y texto). La fecha inicial corresponde a Santiago. Las
+acciones usan la cola autenticada existente de Hermes, con el ID explícito y sin
+historial del chat. `pmo_append_log` relee la descripción canónica, agrega el registro
+fechado, conserva todos los campos y verifica su persistencia. El navegador confirma
+el resultado solo después de leer el snapshot actualizado. Un registro de tipo Cierre
+no cambia el estado: completar es una acción separada.
+
+Los borradores se conservan por tarea durante la sesión, incluso al refrescar o navegar
+entre tareas. Las solicitudes pendientes guardan su ID en sessionStorage para retomar
+su consulta al recargar sin reenviar escrituras. Los errores conservan el texto.
+Los archivos `public/task-actions.js` y `public/task-actions.css` contienen los controles.
+
 ## Generación de minutas
 
 - Mantener presionada durante 650 ms una tarjeta activa el **modo selección** de su
