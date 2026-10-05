@@ -210,7 +210,9 @@ function bridgeAuthorized(request, env) {
 async function takeBridgeJob(request, env) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
-  const kind = new URL(request.url).searchParams.get("kind") === "summary" ? "summary" : "chat";
+  const requestedKind = new URL(request.url).searchParams.get("kind");
+  if (requestedKind === "health") return json({ request: await chatStub(env).pendingHealthCheck() });
+  const kind = requestedKind === "summary" ? "summary" : "chat";
   if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next");
   return json({ job: await chatStub(env).takeSummaryJob() });
 }
@@ -259,7 +261,8 @@ async function receiveHealth(request, env) {
     const item = parsed.body?.[name];
     if (!item || typeof item.ok !== "boolean") continue;
     health[name] = { ok: item.ok, detail: String(item.detail || "").slice(0, 120),
-      checkedAt: String(item.checkedAt || "").slice(0, 40) };
+      checkedAt: String(item.checkedAt || "").slice(0, 40),
+      requestId: String(item.requestId || "").slice(0, 36) };
   }
   await chatStub(env).saveHealth(health);
   return json({ ok: true });
@@ -487,12 +490,32 @@ export class DashboardChatQueue extends DurableObject {
     return { ...snapshot, aiSummaries, health: this.ctx.storage.kv.get("data:health") || {} };
   }
 
+  requestHealthCheck() {
+    const storage = this.ctx.storage.kv;
+    const pending = storage.get("data:health-request");
+    if (pending && Date.now() - Date.parse(pending.createdAt) < 120_000) return pending;
+    const request = { id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    storage.put("data:health-request", request);
+    return request;
+  }
+
+  pendingHealthCheck() {
+    const request = this.ctx.storage.kv.get("data:health-request");
+    return request && Date.now() - Date.parse(request.createdAt) < 120_000 ? request : null;
+  }
+
+  healthStatus() { return this.ctx.storage.kv.get("data:health") || {}; }
+
   saveHealth(health) {
     const storage = this.ctx.storage.kv;
     const current = storage.get("data:health") || {};
     const receivedAt = new Date().toISOString();
     for (const [name, item] of Object.entries(health)) current[name] = { ...item, receivedAt };
     storage.put("data:health", current);
+    const pending = storage.get("data:health-request");
+    if (pending && ["vikunja", "granola"].every(name => current[name]?.requestId === pending.id)) {
+      storage.delete("data:health-request");
+    }
   }
 
   async saveSnapshot(snapshot) {
@@ -647,7 +670,7 @@ export default {
 
     // Basic auth is ambient browser authority: reject foreign-site writes before
     // reading a body or scheduling a job. CLI clients without Origin remain valid.
-    if (request.method === "POST" && ["/api/assistant", "/api/minutes/seen", "/api/minutes/decide"].includes(url.pathname)) {
+    if (request.method === "POST" && ["/api/assistant", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
       const origin = request.headers.get("origin");
       const site = request.headers.get("sec-fetch-site");
       if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
@@ -666,6 +689,12 @@ export default {
       return browserMinuteRoute(request, env, url.pathname.replace("/api", ""));
     }
 
+    if (url.pathname === "/api/health/refresh") {
+      if (request.method === "GET") return json({ health: await chatStub(env).healthStatus() });
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
+      return json(await chatStub(env).requestHealthCheck(), 202);
+    }
     if (url.pathname === "/api/dashboard") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return serveSnapshot(env);

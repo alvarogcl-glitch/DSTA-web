@@ -181,3 +181,19 @@ assert.equal(citeStatus.body.minutes['Minutas 2026/x.md'].titulo, 'Reunión Dire
 assert.match(citeStatus.body.minutes['Minutas 2026/x.md'].contenido, /ENAER/);
 
 console.log('assistant Durable Object queue checks passed');
+
+// Manual checks persist across bridge polls, coalesce clicks, and require both acknowledgements.
+assert.equal((await call(env, 'POST', '/api/health/refresh', {}, 'Basic wrong')).status, 401);
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=health', null, 'Bearer wrong')).status, 401);
+const manual = await call(env, 'POST', '/api/health/refresh', {});
+assert.equal(manual.status, 202);
+assert.equal((await call(env, 'POST', '/api/health/refresh', {})).body.id, manual.body.id);
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=health', null, 'Bearer bridge')).body.request.id, manual.body.id);
+await call(env, 'POST', '/api/bridge/health', { granola: {ok: true} }, 'Bearer bridge');
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=health', null, 'Bearer bridge')).body.request.id, manual.body.id);
+await call(env, 'POST', '/api/bridge/health', { granola: {ok: true, requestId: manual.body.id} }, 'Bearer bridge');
+assert.ok((await call(env, 'GET', '/api/bridge/next?kind=health', null, 'Bearer bridge')).body.request);
+await call(env, 'POST', '/api/bridge/health', { vikunja: {ok: true, requestId: manual.body.id} }, 'Bearer bridge');
+assert.equal((await call(env, 'GET', '/api/bridge/next?kind=health', null, 'Bearer bridge')).body.request, null);
+assert.equal((await call(env, 'GET', '/api/health/refresh')).body.health.granola.requestId, manual.body.id);
+console.log('manual health refresh checks passed');

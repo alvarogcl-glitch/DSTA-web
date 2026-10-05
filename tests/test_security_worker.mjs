@@ -13,7 +13,7 @@ function request(path, headers = {}, body = '{"message":"hola"}') {
   return new Request(`https://example.com${path}`, {method: 'POST', headers: {authorization: auth, 'content-type': 'application/json', ...headers}, body});
 }
 // Basic credentials cached by a browser must not authorize writes initiated on another site.
-for (const path of ['/api/assistant', '/api/minutes/decide', '/api/minutes/seen']) {
+for (const path of ['/api/assistant', '/api/minutes/decide', '/api/minutes/seen', '/api/health/refresh']) {
   const response = await worker.fetch(request(path, {origin: 'https://attacker.example'}), env);
   assert.equal(response.status, 403, `${path} rejects cross-origin browser writes before parsing or forwarding`);
 }

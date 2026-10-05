@@ -166,6 +166,18 @@ class HermesWindowTests(unittest.TestCase):
         self.assertFalse(healthy)
         self.assertIn("hermes mcp login granola", detail)
 
+    def test_manual_health_checks_acknowledge_even_unchanged_health(self):
+        monitor = bridge.HealthMonitor("https://example.com", "bridge", "http://127.0.0.1:3456", "hermes", Path.cwd())
+        with patch.object(bridge, "vikunja_listening", return_value=True), \
+             patch.object(bridge, "check_granola", return_value=(True, "Conectado")), \
+             patch.object(bridge, "request_json") as send:
+            monitor.refresh_requested("first")
+            monitor.refresh_requested("second")
+        self.assertEqual(send.call_count, 2)
+        for item in send.call_args.kwargs["payload"].values():
+            self.assertEqual(item["requestId"], "second")
+            self.assertTrue(item["ok"])
+
     def test_health_reports_changes_and_heartbeats_only(self):
         sent = []
         monitor = bridge.HealthMonitor("https://example.com", "bridge", "http://127.0.0.1:3456", "hermes", Path.cwd())

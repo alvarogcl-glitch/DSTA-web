@@ -94,7 +94,7 @@ ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
 ANALYSIS_TIMEOUT_SECONDS = 420
 GRANOLA_FIRST_CHECK_SECONDS = 60
 VIKUNJA_CHECK_SECONDS = 60
-GRANOLA_CHECK_SECONDS = 900
+GRANOLA_CHECK_SECONDS = 300
 HEALTH_HEARTBEAT_SECONDS = 300
 MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
 MAX_CITED_MINUTES = 5
@@ -160,6 +160,16 @@ class HealthMonitor:
 
     def check_granola(self) -> None:
         self.set("granola", *check_granola(self.hermes_cli, self.hermes_home))
+
+    def refresh_requested(self, request_id: str) -> None:
+        # Do not run the watchdog during a user-requested availability check.
+        ok = vikunja_listening(self.vikunja_url)
+        self.set("vikunja", ok, "Respondiendo" if ok else "No responde")
+        self.check_granola()
+        for item in self.state.values():
+            item["requestId"] = request_id
+        self.last_sent = ""
+        self.publish()
 
     def publish(self) -> None:
         signature = json.dumps({name: item["ok"] for name, item in self.state.items()}, sort_keys=True)
@@ -632,6 +642,14 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 next_vikunja_check = time.monotonic() + VIKUNJA_CHECK_SECONDS
                 health.check_vikunja()
                 health.publish()
+            if granola_check is None or granola_check.done():
+                try:
+                    pending = request_json(f"{dashboard_url}/api/bridge/next?kind=health", token=bridge_token).get("request")
+                except (HTTPError, URLError, OSError, ValueError):
+                    pending = None
+                if pending:
+                    next_granola_check = time.monotonic() + GRANOLA_CHECK_SECONDS
+                    granola_check = checks.submit(health.refresh_requested, pending["id"])
             if time.monotonic() >= next_granola_check and (granola_check is None or granola_check.done()):
                 next_granola_check = time.monotonic() + GRANOLA_CHECK_SECONDS
                 granola_check = checks.submit(lambda: (health.check_granola(), health.publish()))
