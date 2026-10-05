@@ -11,7 +11,7 @@
   let sending = false;
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());
   const state = id => {
-    if (!drafts.has(id)) drafts.set(id, { entry: '', date: today(), kind: 'Actualización', status: '' });
+    if (!drafts.has(id)) drafts.set(id, { entry: '', date: today(), kind: 'Actualización', status: '', expanded: false });
     return drafts.get(id);
   };
   function savePending(value) {
@@ -27,10 +27,20 @@
     if (!task) return;
     const section = document.createElement('section');
     section.className = 'task-actions';
-    section.innerHTML = (task.done ? '' : '<button type="button" class="task-complete">Marcar como completada</button>') +
-      '<form><h3>Agregar registro a la bitácora</h3><div class="task-log-fields"><label>Tipo<select name="kind"><option>Actualización</option><option>Avance</option><option>Seguimiento</option><option>Nota</option><option>Cierre</option></select></label><label>Fecha<input name="date" type="date" required></label></div>' +
-      '<label>Registro<textarea name="entry" rows="4" maxlength="2500" required placeholder="Escribe el avance, acuerdo o antecedente…"></textarea></label><button type="submit">Guardar registro</button></form><p class="task-action-status" role="status" aria-live="polite"></p>';
+    section.innerHTML = '<button type="button" class="task-log-toggle" aria-controls="task-log-form" aria-expanded="false">+ Agregar registro</button>' +
+      '<form id="task-log-form" hidden><div class="task-log-fields"><label>Tipo<select name="kind"><option>Actualización</option><option>Avance</option><option>Seguimiento</option><option>Nota</option><option>Cierre</option></select></label><label>Fecha<input name="date" type="date" required></label></div>' +
+      '<label>Registro<textarea name="entry" rows="3" maxlength="2500" required placeholder="Escribe un nuevo registro…"></textarea></label><div class="task-log-buttons"><button type="submit">Guardar</button><button type="button" class="task-log-cancel">Cancelar</button></div></form><p class="task-action-status" role="status" aria-live="polite"></p>';
     const form = section.querySelector('form');
+    const toggle = section.querySelector('.task-log-toggle');
+    const setExpanded = value => {
+      draft.expanded = value;
+      form.hidden = !value;
+      toggle.hidden = value;
+      toggle.setAttribute('aria-expanded', String(value));
+    };
+    setExpanded(Boolean(draft.expanded));
+    toggle.addEventListener('click', () => { setExpanded(true); form.elements.entry.focus(); });
+    section.querySelector('.task-log-cancel').addEventListener('click', () => { setExpanded(false); toggle.focus(); });
     for (const name of ['entry', 'date', 'kind']) {
       form.elements[name].value = draft[name];
       form.elements[name].addEventListener('input', () => { draft[name] = form.elements[name].value; });
@@ -47,9 +57,18 @@
       });
       section.append(resume);
     }
-    section.querySelector('.task-complete')?.addEventListener('click', () => void submit(id, 'complete'));
+    if (!task.done) {
+      const complete = document.createElement('button');
+      complete.type = 'button';
+      complete.className = 'task-complete';
+      complete.setAttribute('aria-label', 'Marcar como completada');
+      complete.innerHTML = '<span class="task-complete-icon" aria-hidden="true">✓</span><span class="task-complete-text" aria-hidden="true">Marcar como completada</span>';
+      complete.disabled = Boolean(pending);
+      complete.addEventListener('click', () => void submit(id, 'complete'));
+      document.querySelector('#detail-body .detail-value').append(complete);
+    }
     form.addEventListener('submit', event => { event.preventDefault(); void submit(id, 'log'); });
-    document.querySelector('#detail-body').prepend(section);
+    document.querySelector('#detail-body').append(section);
   }
   function redraw() {
     const task = typeof inspection !== 'undefined' && inspection?.taskId && tasks.find(t => String(t.id) === inspection.taskId);
@@ -82,7 +101,7 @@
       const task = tasks.find(t => String(t.id) === job.taskId);
       const expected = job.kind === 'complete' ? task?.done : task?.description?.includes(job.expected);
       if (!refreshed || !expected) throw Error('No se pudo confirmar el cambio en los datos actualizados. Revisa la tarea antes de reintentar. ' + (result.reply || ''));
-      if (job.kind === 'log') draft.entry = '';
+      if (job.kind === 'log') { draft.entry = ''; draft.expanded = false; }
       draft.status = job.kind === 'complete' ? 'Tarea completada.' : 'Registro guardado en la bitácora.';
       savePending(null);
     } catch (error) {

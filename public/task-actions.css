@@ -1,1 +1,18 @@
-.task-actions{border:1px solid #3e665a;border-radius:12px;padding:16px;margin-bottom:20px;background:#162a2b}.task-actions h3{font-size:15px;margin:18px 0 12px}.task-actions label{display:block;color:#c6d8dd;font:13px system-ui;letter-spacing:0;text-transform:none}.task-log-fields{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}.task-log-fields label{flex:1;min-width:140px}.task-actions input,.task-actions select,.task-actions textarea{display:block;width:100%;min-width:0;margin-top:6px}.task-actions textarea{resize:vertical;margin-bottom:12px}.task-complete,.task-actions button[type=submit]{border-color:#3e665a;background:#203c36;color:#d9fff0}.task-action-status{color:#d9fff0;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:0;font-size:13px}
+.task-complete{display:inline-flex;align-items:center;vertical-align:middle;gap:0;margin-left:10px;padding:5px 9px;min-height:32px;border:1px solid #3a4859;border-radius:7px;background:transparent;color:#86e2bb;white-space:nowrap}
+.task-complete-icon{font-size:17px;line-height:1}
+.task-complete-text{max-width:0;overflow:hidden;opacity:0;transition:max-width .2s ease,opacity .15s ease,margin-left .2s ease}
+.task-complete:hover .task-complete-text,.task-complete:focus-visible .task-complete-text{max-width:190px;opacity:1;margin-left:8px}
+.task-actions{margin:12px 0 0}
+.task-log-toggle,.task-log-cancel{border:0;background:transparent;color:#9bacbd;padding:6px 0;font-size:13px;text-align:left}
+.task-log-toggle:hover,.task-log-cancel:hover{color:#86e2bb}
+.task-actions form{margin-top:12px}
+.task-actions label{display:block;color:#9bacbd;font:12px system-ui;letter-spacing:0;text-transform:none}
+.task-log-fields{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.task-log-fields label{flex:1;min-width:140px}
+.task-actions input,.task-actions select,.task-actions textarea{display:block;width:100%;min-width:0;margin-top:6px}
+.task-actions textarea{resize:vertical;margin-bottom:10px}
+.task-log-buttons{display:flex;align-items:center;gap:16px}
+.task-actions button[type=submit]{padding:7px 12px;background:transparent}
+.task-action-status{color:#9bacbd;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;font-size:12px}
+.task-action-status:empty{display:none}
+@media(prefers-reduced-motion:reduce){.task-complete-text{transition:none}}

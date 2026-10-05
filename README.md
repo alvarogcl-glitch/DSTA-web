@@ -16,8 +16,11 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 ## Acciones en el detalle de una tarea
 
-El inspector permite **Marcar como completada** una tarea abierta y **Guardar registro**
-en su bitácora (tipo, fecha y texto). La fecha inicial corresponde a Santiago. Las
+El inspector muestra un visto bueno **✓** junto al estado de una tarea abierta; al
+pasar el cursor o enfocarlo con teclado se expande a **Marcar como completada**.
+Debajo de la descripción, **Agregar registro** abre un formulario discreto con tipo,
+fecha y texto. **Guardar** lo cierra al confirmar el registro; **Cancelar** lo oculta
+conservando el borrador. La fecha inicial corresponde a Santiago. Las
 acciones usan la cola autenticada existente de Hermes, con el ID explícito y sin
 historial del chat. `pmo_append_log` relee la descripción canónica, agrega el registro
 fechado, conserva todos los campos y verifica su persistencia. El navegador confirma

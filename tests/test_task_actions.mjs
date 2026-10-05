@@ -5,9 +5,9 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../public/task-actions.js', import.meta.url), 'utf8');
 async function scenario(mode) {
   const task = { id: 17, done: false, description: 'Responsable: Álvaro\nAntecedentes' };
-  let section, posts = 0, sent, now = 0;
+  let section, complete, posts = 0, sent, now = 0;
   const storage = new Map();
-  const field = () => ({ value: '', disabled: false, addEventListener(name, fn) { this[name] = fn; } });
+  const field = () => ({ value: '', disabled: false, focus() {}, setAttribute(name, value) { this[name] = value; }, addEventListener(name, fn) { this[name] = fn; } });
   const context = {
     tasks: [task], inspection: { taskId: '17' }, Intl,
     Date: class extends Date { static now() { return now; } },
@@ -16,14 +16,14 @@ async function scenario(mode) {
     document: {
       head: { append() {} },
       createElement(tag) {
-        if (tag !== 'section') return { addEventListener() {} };
+        if (tag !== 'section') return field();
         const form = { elements: { entry: field(), date: field(), kind: field() }, addEventListener(name, fn) { this[name] = fn; } };
-        const complete = field(), status = {};
-        return { form, complete, status, append() {},
-          querySelector(sel) { return sel === 'form' ? form : sel === '.task-complete' ? complete : status; },
-          querySelectorAll() { return [complete, ...Object.values(form.elements)]; } };
+        const toggle = field(), cancel = field(), status = {};
+        return { form, toggle, cancel, status, append() {},
+          querySelector(sel) { return sel === 'form' ? form : sel === '.task-log-toggle' ? toggle : sel === '.task-log-cancel' ? cancel : status; },
+          querySelectorAll() { return [toggle, cancel, ...Object.values(form.elements)]; } };
       },
-      querySelector: () => ({ prepend(value) { section = value; } }),
+      querySelector: sel => ({ append(value) { if (sel.endsWith('.detail-value')) complete = value; else section = value; } }),
     },
     taskView: () => ({ taskId: '17' }),
     refresh: async () => {
@@ -44,13 +44,23 @@ async function scenario(mode) {
   context.showInspection = view => context.window.DstaTaskActions.mount(view);
   vm.runInNewContext(source, context);
   context.showInspection(context.inspection);
+  assert.equal(section.form.hidden, true, 'el formulario comienza cerrado');
+  assert.equal(complete['aria-label'], 'Marcar como completada');
+  section.toggle.click();
+  assert.equal(section.form.hidden, false);
+  assert.equal(section.toggle['aria-expanded'], 'true');
   const edit = (name, value) => { section.form.elements[name].value = value; section.form.elements[name].input(); };
   edit('entry', 'Acuerdo <literal>'); edit('date', '2026-10-05'); edit('kind', 'Nota');
   context.showInspection(context.inspection);
+  assert.equal(section.form.hidden, false, 'el refresco conserva el formulario abierto');
   assert.equal(section.form.elements.entry.value, 'Acuerdo <literal>', 'el borrador sobrevive al refresco');
-  if (mode === 'complete') section.complete.click();
+  section.cancel.click();
+  assert.equal(section.form.hidden, true);
+  section.toggle.click();
+  assert.equal(section.form.elements.entry.value, 'Acuerdo <literal>', 'cerrar conserva el borrador');
+  if (mode === 'complete') complete.click();
   else section.form.submit({ preventDefault() {} });
-  section.complete.click();
+  complete.click();
   for (let i = 0; i < 1500; i++) await Promise.resolve();
   assert.equal(posts, 1, 'no se duplica la solicitud pendiente');
   assert.deepEqual(sent.history, [], 'las acciones no arrastran contexto del chat');
@@ -59,6 +69,7 @@ async function scenario(mode) {
     assert.match(sent.message, /pmo_append_log/);
     assert.equal(section.form.elements.entry.value, '');
     assert.equal(section.status.textContent, 'Registro guardado en la bitácora.');
+    assert.equal(section.form.hidden, true, 'guardar cierra el formulario');
   } else if (mode === 'complete') {
     assert.equal(task.done, true);
     assert.equal(section.status.textContent, 'Tarea completada.');
