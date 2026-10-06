@@ -57,7 +57,7 @@ assert.match(csp, /form-action 'none'/);
 assert.equal(asset.headers.get('x-frame-options'), 'DENY');
 assert.equal(await asset.text(), html, 'security headers must not alter the delivered HTML');
 let snapshotsSaved = 0;
-env.CHAT_STATE = { getByName: () => ({ saveSnapshot: async () => { snapshotsSaved++; } }) };
+env.CHAT_STATE = { getByName: () => ({ saveSnapshot: async () => { snapshotsSaved++; return true; } }) };
 const validSnapshot = {timestamp:'2026-10-03T00:00:00Z', projects:[{id:3,title:'LT1'}], tasks:[{id:17,title:'Seguimiento',project_id:3,done:false}]};
 for (const invalid of [
   {...validSnapshot, timestamp:'not-a-date'},

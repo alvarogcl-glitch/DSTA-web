@@ -13,6 +13,12 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 
+# Stable normal import shares reentrant state across importlib-loaded clients.
+_tools_dir = str(Path(__file__).resolve().parent)
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+from task_mutation_lock import task_lock, task_lock_owned
+
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
 HERMES_ENV = Path(os.environ.get("HERMES_HOME", str(DEFAULT_HERMES_HOME))) / ".env"
 
@@ -159,16 +165,19 @@ def task_update_payload(task_id: int, current: dict[str, Any], changes: dict[str
 
 
 def update_task_fields(task_id: int, changes: dict[str, Any], current: dict[str, Any] | None = None) -> Any:
-    if not changes:
-        raise ValueError("No se indicó ningún campo para actualizar.")
-    if current is None:
-        current = request("GET", f"/api/v1/tasks/{task_id}")
-    payload = task_update_payload(task_id, current, changes)
-    projects = pmo_projects()
-    require_line(int(current.get("project_id") or 0), projects)
-    if "project_id" in changes:
-        require_line(int(changes["project_id"]), projects)
-    return request("POST", f"/api/v1/tasks/{task_id}", json=payload)
+    # Only callers already holding the transaction can supply an authoritative read.
+    nested = task_lock_owned(BASE_URL, task_id)
+    with task_lock(BASE_URL, task_id):
+        if not changes:
+            raise ValueError("No se indicó ningún campo para actualizar.")
+        if current is None or not nested:
+            current = request("GET", f"/api/v1/tasks/{task_id}")
+        payload = task_update_payload(task_id, current, changes)
+        projects = pmo_projects()
+        require_line(int(current.get("project_id") or 0), projects)
+        if "project_id" in changes:
+            require_line(int(changes["project_id"]), projects)
+        return request("POST", f"/api/v1/tasks/{task_id}", json=payload)
 
 
 @mcp.tool()
@@ -229,16 +238,17 @@ def pmo_update_project(project_id: int, title: str | None = None,
 @mcp.tool()
 def pmo_move_task(task_id: int, destination_project_id: int) -> dict[str, Any]:
     """Move a task between active PMO lines while preserving all its fields."""
-    require_line(destination_project_id, pmo_projects())
-    current = request("GET", f"/api/v1/tasks/{task_id}")
-    require_line(int(current.get("project_id") or 0), pmo_projects())
-    if int(current["project_id"]) == destination_project_id:
-        return {"ok": True, "task": current, "verified": True}
-    update_task_fields(task_id, {"project_id": destination_project_id}, current=current)
-    verified = request("GET", f"/api/v1/tasks/{task_id}")
-    if int(verified.get("project_id") or 0) != destination_project_id:
-        raise RuntimeError(f"La tarea {task_id} no quedó en la línea destino; revisa Vikunja antes de reintentar.")
-    return {"ok": True, "task": verified, "verified": True}
+    with task_lock(BASE_URL, task_id):
+        require_line(destination_project_id, pmo_projects())
+        current = request("GET", f"/api/v1/tasks/{task_id}")
+        require_line(int(current.get("project_id") or 0), pmo_projects())
+        if int(current["project_id"]) == destination_project_id:
+            return {"ok": True, "task": current, "verified": True}
+        update_task_fields(task_id, {"project_id": destination_project_id}, current=current)
+        verified = request("GET", f"/api/v1/tasks/{task_id}")
+        if int(verified.get("project_id") or 0) != destination_project_id:
+            raise RuntimeError(f"La tarea {task_id} no quedó en la línea destino; revisa Vikunja antes de reintentar.")
+        return {"ok": True, "task": verified, "verified": True}
 
 
 def archive_empty_line(project_id: int, projects: list[dict[str, Any]]) -> dict[str, Any]:
@@ -397,48 +407,51 @@ def pmo_complete_task(task_id: int) -> dict[str, Any]:
 @mcp.tool()
 def pmo_append_log(task_id: int, entry: str, entry_date: str, kind: str = "Actualización") -> dict[str, Any]:
     """Append a dated entry to the structured description, preserving fields and prior history."""
-    if kind not in {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}:
-        raise ValueError("Tipo de registro inválido.")
-    if date.fromisoformat(entry_date).isoformat() != entry_date:
-        raise ValueError("La fecha debe usar AAAA-MM-DD.")
-    entry = entry.strip()
-    if not entry or len(entry) > 2500:
-        raise ValueError("El registro debe contener entre 1 y 2500 caracteres.")
-    current = request("GET", f"/api/v1/tasks/{task_id}")
-    original = str(current.get("description") or "")
-    addition = f"{kind} {entry_date}: {entry}"
-    description = original + ("\n\n" if original else "") + addition
-    update_task_fields(task_id, {"description": description}, current=current)
-    verified = request("GET", f"/api/v1/tasks/{task_id}")
-    if int(verified.get("id") or 0) != task_id or verified.get("description") != description:
-        raise RuntimeError("Se envió el registro, pero no se pudo verificar su descripción en Vikunja. Revisa antes de reintentar.")
-    return {"ok": True, "verified": True, "task": verified}
+    with task_lock(BASE_URL, task_id):
+        if kind not in {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}:
+            raise ValueError("Tipo de registro inválido.")
+        if date.fromisoformat(entry_date).isoformat() != entry_date:
+            raise ValueError("La fecha debe usar AAAA-MM-DD.")
+        entry = entry.strip()
+        if not entry or len(entry) > 2500:
+            raise ValueError("El registro debe contener entre 1 y 2500 caracteres.")
+        current = request("GET", f"/api/v1/tasks/{task_id}")
+        original = str(current.get("description") or "")
+        addition = f"{kind} {entry_date}: {entry}"
+        description = original + ("\n\n" if original else "") + addition
+        update_task_fields(task_id, {"description": description}, current=current)
+        verified = request("GET", f"/api/v1/tasks/{task_id}")
+        if int(verified.get("id") or 0) != task_id or verified.get("description") != description:
+            raise RuntimeError("Se envió el registro, pero no se pudo verificar su descripción en Vikunja. Revisa antes de reintentar.")
+        return {"ok": True, "verified": True, "task": verified}
 
 
 @mcp.tool()
 def pmo_set_dependency(task_id: int, dependency: str) -> dict[str, Any]:
     """Set the structured Dependencia field while preserving the rest of the task description."""
-    task = request("GET", f"/api/v1/tasks/{task_id}")
-    lines = (task.get("description") or "").replace("\r", "").split("\n")
-    for index, line in enumerate(lines):
-        if line.lower().startswith("dependencia:"):
-            lines[index] = f"Dependencia: {dependency.strip()}"
-            break
-    else:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append(f"Dependencia: {dependency.strip()}")
-    return update_task_fields(task_id, {"description": "\n".join(lines)}, current=task)
+    with task_lock(BASE_URL, task_id):
+        task = request("GET", f"/api/v1/tasks/{task_id}")
+        lines = (task.get("description") or "").replace("\r", "").split("\n")
+        for index, line in enumerate(lines):
+            if line.lower().startswith("dependencia:"):
+                lines[index] = f"Dependencia: {dependency.strip()}"
+                break
+        else:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append(f"Dependencia: {dependency.strip()}")
+        return update_task_fields(task_id, {"description": "\n".join(lines)}, current=task)
 
 
 @mcp.tool()
 def pmo_add_comment(task_id: int, comment: str) -> dict[str, Any]:
     """Add a dated comment to a task in an active PMO-DSTA line."""
-    current = request("GET", f"/api/v1/tasks/{task_id}")
-    if int(current.get("id") or 0) != task_id:
-        raise RuntimeError("Vikunja devolvió una tarea distinta; no se agregó el comentario.")
-    require_line(int(current.get("project_id") or 0), pmo_projects())
-    return request("PUT", f"/api/v1/tasks/{task_id}/comments", json={"comment": comment})
+    with task_lock(BASE_URL, task_id):
+        current = request("GET", f"/api/v1/tasks/{task_id}")
+        if int(current.get("id") or 0) != task_id:
+            raise RuntimeError("Vikunja devolvió una tarea distinta; no se agregó el comentario.")
+        require_line(int(current.get("project_id") or 0), pmo_projects())
+        return request("PUT", f"/api/v1/tasks/{task_id}/comments", json={"comment": comment})
 
 
 READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_open_tasks"}

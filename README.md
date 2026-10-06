@@ -22,12 +22,26 @@ En móvil (hasta 620 px) y pantallas táctiles, la etiqueta siempre está visibl
 el control tiene un objetivo táctil de al menos 44 px, sin depender de hover.
 Debajo de la descripción, **Agregar registro** abre un formulario discreto con tipo,
 fecha y texto. **Guardar** lo cierra al confirmar el registro; **Cancelar** lo oculta
-conservando el borrador. La fecha inicial corresponde a Santiago. Las
-acciones usan la cola autenticada existente de Hermes, con el ID explícito y sin
-historial del chat. `pmo_append_log` relee la descripción canónica, agrega el registro
-fechado, conserva todos los campos y verifica su persistencia. El navegador confirma
-el resultado solo después de leer el snapshot actualizado. Un registro de tipo Cierre
-no cambia el estado: completar es una acción separada.
+conservando el borrador. La fecha inicial corresponde a Santiago.
+
+**Completar no usa un modelo de IA.** El navegador envía exclusivamente
+`{action: "complete", taskId, requestId}` a `/api/task-actions`, con autenticación
+Basic, protección de origen y validación estricta. El UUID se guarda antes del POST.
+Una cola durable separada del chat conserva ese mismo ID, reclama el trabajo con
+una concesión temporal y rechaza confirmaciones de intentos anteriores. El puente
+valida la pertenencia actual a una LT/TR activa bajo PMO-DSTA, relee la tarea nativa,
+conserva sus campos (incluidos `SOURCE` y `ACTION_KEY`), aplica `done=true` y verifica
+el resultado. Si ya está completada, no repite el POST. Después publica un snapshot
+fresco; solo al comprobarlo muestra éxito. El chat y los resúmenes se ejecutan en
+segundo plano, sin bloquear la recepción de acciones directas.
+
+**Agregar registro** conserva la cola del copiloto, con ID explícito y sin historial.
+`pmo_append_log` relee la descripción canónica, agrega el registro fechado, conserva
+los campos y verifica su persistencia. Un registro de tipo Cierre no cambia el
+estado: completar es una acción separada. Las escrituras del puente, del MCP y de
+las minutas comparten un bloqueo por tarea entre procesos de la VM, desde la lectura
+hasta la verificación. No cubre ediciones realizadas por otros clientes externos:
+la API de Vikunja utilizada aquí no ofrece una precondición CAS/ETag verificada.
 
 Los borradores se conservan por tarea durante la sesión, incluso al refrescar o navegar
 entre tareas. Las solicitudes pendientes guardan su ID en sessionStorage para retomar
@@ -38,6 +52,17 @@ muestra **Completando…** o **Guardando registro…**, incluso si se navega fue
 inspector. El éxito aparece únicamente tras verificar el snapshot y desaparece
 a los 6 segundos. Los errores y resultados inciertos permanecen hasta descartarlos
 con **×**; descartar el aviso no cancela ni reenvía la solicitud pendiente.
+Si una acción terminó pero no pudo confirmarse en pantalla,
+**Actualizar y revisar tarea** realiza una lectura y libera el control solo si esa lectura funciona; no
+repite la escritura. Las pérdidas de red mantienen el UUID para consultar o reenviar
+únicamente la misma solicitud idempotente. Si sessionStorage no permite conservar
+el ID, el navegador no envía el cambio.
+
+Los snapshots incluyen `observationStartedAt`, capturado antes de consultar Vikunja.
+El Durable Object no acepta una recolección anterior ni un productor sin esa marca
+una vez activado el protocolo. Así, un chat lento o una sincronización atrasada no
+puede reemplazar la observación fresca de una acción completada. Los errores
+conservan el último snapshot válido.
 
 ## Generación de minutas
 
@@ -216,11 +241,14 @@ vuelve a cambiar antes de terminar el resumen.
    `/api/bridge/snapshot` responde **401 JSON** ante un POST sin token válido
    (la versión anterior responde 401 de autenticación básica en texto plano).
    No publicar snapshots de prueba ni tareas ficticias en producción.
-4. Reiniciar la tarea programada `DSTA Hermes Bridge` para que cargue el Python
-   nuevo y comprobar que existe un solo proceso `hermes_bridge.py`. La ruta
-   `/api/bridge/snapshot` debe estar desplegada antes de probar una acción real;
-   de lo contrario el chat conservará su respuesta, pero advertirá que no pudo
-   actualizar el portafolio de inmediato.
+4. Publicar primero el Worker y comprobar `/api/task-actions` con una solicitud
+   inválida autenticada (400, sin crear trabajos). Reiniciar primero
+   `DSTA Dashboard Cloud Sync` y después `DSTA Hermes Bridge` para cargar el Python
+   nuevo, sin cambiar la configuración de las tareas programadas. Antes de parar el
+   puente, comprobar que no hay un subproceso del copiloto en ejecución. Verificar
+   un solo proceso de cada servicio y un snapshot con `observationStartedAt`.
+   Un productor anterior sin esa marca será rechazado tras la primera publicación
+   nueva; esto protege el estado actualizado de sobrescrituras tardías.
 5. Confirmar por la API de Cloudflare que la versión recién publicada está al
    **100 %** en el último despliegue; un `401` JSON de la ruta nueva confirma
    además su presencia sin escribir datos de producción.

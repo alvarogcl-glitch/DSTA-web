@@ -75,6 +75,7 @@ def description_field(description: str, name: str) -> str:
 
 
 def fetch_dashboard(base_url: str, token: str) -> dict:
+    observation_started_at = datetime.now(timezone.utc).isoformat()
     projects = pages(base_url, "/api/v1/projects", token)
     if not any(int(project.get("id") or 0) == 2 for project in projects):
         raise RuntimeError("No se encontró la raíz PMO-DSTA; no se publica información parcial")
@@ -115,6 +116,7 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
             )
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "observationStartedAt": observation_started_at,
         "projects": project_summary,
         "tasks": tasks,
         "stale": False,

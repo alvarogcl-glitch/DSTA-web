@@ -17,6 +17,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import importlib.util
@@ -25,6 +26,12 @@ from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+# Stable normal import shares reentrant state across importlib-loaded clients.
+_tools_dir = str(Path(__file__).resolve().parent)
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+from task_mutation_lock import task_lock
 
 _publisher_spec = importlib.util.spec_from_file_location(
     "dsta_publish_dashboard", Path(__file__).with_name("publish_dashboard.py"))
@@ -441,12 +448,16 @@ def push_minute(base_url: str, token: str, record: dict) -> None:
     request_json(f"{base_url}/api/bridge/minute", token=token, method="POST", payload=record, timeout=40)
 
 
+_snapshot_lock = threading.Lock()
+
+
 def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str) -> str:
     if not vikunja_token:
         raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
-    snapshot = fetch_dashboard(vikunja_url, vikunja_token)
-    request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
-    return snapshot["timestamp"]
+    with _snapshot_lock:
+        snapshot = fetch_dashboard(vikunja_url, vikunja_token)
+        request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
+        return snapshot["timestamp"]
 
 
 def analysis_asker(hermes_cli: str, hermes_home: Path, provider: str, model: str,
@@ -539,11 +550,62 @@ def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path, provider: str,
     return summaries
 
 
+# Same conservative v1 mutable-field contract as the scoped MCP; no MCP globals or credentials.
+COMPLETION_FIELDS = (
+    "id", "title", "description", "project_id", "done", "due_date", "reminders", "repeat_after",
+    "repeat_mode", "priority", "start_date", "end_date", "assignees", "hex_color", "percent_done",
+    "cover_image_attachment_id", "is_favorite",
+)
+
+
+def execute_completion(job: dict, request: Callable, *, server_url: str | None = None) -> dict:
+    """Only complete a currently active direct PMO child; preserve all mutable fields."""
+    task_id, project_id = job.get("taskId"), job.get("projectId")
+    if (job.get("kind") != "action" or job.get("action") != "complete" or
+            type(task_id) is not int or task_id <= 0 or type(project_id) is not int or project_id <= 0):
+        raise ValueError("Acción inválida")
+    path = f"/api/v1/tasks/{task_id}"
+
+    def scoped_task():
+        task = request("GET", path)
+        if not isinstance(task, dict) or task.get("id") != task_id or task.get("project_id") != project_id:
+            raise ValueError("La tarea cambió de alcance")
+        root = request("GET", "/api/v1/projects/2")
+        project = request("GET", f"/api/v1/projects/{project_id}")
+        if (not isinstance(root, dict) or root.get("id") != 2 or root.get("is_archived") is not False or
+                not isinstance(project, dict) or project.get("id") != project_id or
+                project.get("parent_project_id") != 2 or project.get("is_archived") is not False):
+            raise ValueError("No es una línea activa de PMO-DSTA")
+        if type(task.get("done")) is not bool:
+            raise ValueError("Estado de tarea inválido")
+        return task
+
+    with task_lock(server_url or os.environ.get('VIKUNJA_URL', 'http://127.0.0.1:3456'), task_id):
+        current = scoped_task()
+        if current["done"] is True:
+            return current
+        # Re-read the whole task and authoritative scope immediately before a write.
+        current = scoped_task()
+        if current["done"] is True:
+            return current
+        if any(field not in current for field in COMPLETION_FIELDS):
+            raise ValueError("No se pueden preservar todos los campos")
+        payload = {field: current[field] for field in COMPLETION_FIELDS}
+        payload["done"] = True
+        request("POST", path, payload=payload)
+        verified = scoped_task()
+        if verified["done"] is not True:
+            raise RuntimeError("Vikunja no confirmó la tarea completada")
+        return verified
+
+
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                summaries: list[dict] | None = None, error: str = "",
                refresh_error: str = "", snapshot_timestamp: str = "",
                minutes: dict | None = None) -> None:
     payload: dict = {"id": job["id"]}
+    if job.get("kind") == "action":
+        payload.update(kind="action", attempt=job.get("attempt"))
     if error:
         payload["error"] = error
     elif job.get("kind") == "summary":
@@ -570,7 +632,26 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                 vikunja_url: str = "http://127.0.0.1:3456", claude_cli: str = "",
                 claude_model: str = "sonnet") -> None:
     try:
-        if job.get("kind") == "summary":
+        if job.get("kind") == "action":
+            if not vikunja_token:
+                raise ValueError("Falta credencial de Vikunja")
+            def action_request(method, path, **kwargs):
+                if method == "POST":
+                    lease = job.get("leaseUntil")
+                    # Reserve more than the upstream timeout. An expired delivery can
+                    # still read/verify, but must not initiate another write.
+                    if type(lease) not in (int, float) or lease <= time.time() * 1000 + 30_000:
+                        raise RuntimeError("El intento ya no tiene una concesión válida")
+                return request_json(vikunja_url.rstrip("/") + path, token=vikunja_token,
+                                    method=method, timeout=20, **kwargs)
+            execute_completion(job, action_request, server_url=vikunja_url)
+            try:
+                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+            except Exception:
+                finish_job(base_url, token, job, refresh_error="No se pudo confirmar el snapshot actualizado.")
+            else:
+                finish_job(base_url, token, job, snapshot_timestamp=timestamp)
+        elif job.get("kind") == "summary":
             summaries = run_summarizer(job, hermes_cli, hermes_home, hermes_provider, hermes_model,
                                        claude_cli, claude_model)
             finish_job(base_url, token, job, summaries=summaries)
@@ -592,12 +673,12 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                        snapshot_timestamp=snapshot_timestamp, minutes=minutes)
         print(f"{job.get('kind')} completado", flush=True)
     except Exception as error:
-        safe_error = "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
+        safe_error = "No se pudo completar la tarea de forma segura." if job.get("kind") == "action" else "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
         try:
             finish_job(base_url, token, job, error=safe_error)
         except (HTTPError, URLError, OSError, ValueError):
             pass
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {job.get('kind')} falló ({type(error).__name__}: {error})"[:600], file=sys.stderr, flush=True)
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {job.get('kind')} falló ({type(error).__name__})"[:600], file=sys.stderr, flush=True)
 
 
 def run(*, once: bool, env_file: Path | None) -> int:
@@ -629,7 +710,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
         except (HTTPError, URLError, OSError, ValueError):
             break
     with ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
-            ThreadPoolExecutor(max_workers=1) as checks:
+            ThreadPoolExecutor(max_workers=1) as checks, ThreadPoolExecutor(max_workers=1) as chats:
+        chat_future: Future | None = None
         summary_future: Future | None = None
         granola_future: Future | None = None
         next_granola = time.monotonic() + GRANOLA_FIRST_CHECK_SECONDS
@@ -660,7 +742,16 @@ def run(*, once: bool, env_file: Path | None) -> int:
                     granola_future = granola.submit(
                         granola_cycle, dashboard_url, bridge_token, hermes_cli, hermes_home, hermes_provider,
                         hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url, health)
-                result = request_json(f"{dashboard_url}/api/bridge/next?kind=chat", token=bridge_token)
+                action = request_json(f"{dashboard_url}/api/bridge/next?kind=action", token=bridge_token).get("job")
+                if action:
+                    process_job(action, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                                hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                                claude_cli, claude_model)
+                    if once:
+                        return 0
+                chat_busy = chat_future is not None and not chat_future.done()
+                chat_query = "chat&chatBusy=1" if chat_busy else "chat"
+                result = request_json(f"{dashboard_url}/api/bridge/next?kind={chat_query}", token=bridge_token)
                 if result.get("decision"):
                     # Instructions call the model, so decisions run beside the hourly Granola work.
                     granola.submit(process_decision, result["decision"], dashboard_url, bridge_token, hermes_home,
@@ -669,12 +760,14 @@ def run(*, once: bool, env_file: Path | None) -> int:
                                                   claude_cli, claude_model))
                 chat_job = result.get("job")
                 if chat_job:
-                    process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
-                                hermes_provider, hermes_model, vikunja_token, vikunja_url,
-                                claude_cli, claude_model)
                     if once:
+                        process_job(chat_job, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                                    hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                                    claude_cli, claude_model)
                         return 0
-                    continue
+                    chat_future = chats.submit(process_job, chat_job, dashboard_url, bridge_token,
+                                               hermes_cli, hermes_home, hermes_provider, hermes_model,
+                                               vikunja_token, vikunja_url, claude_cli, claude_model)
 
                 if summary_future is None or summary_future.done():
                     result = request_json(f"{dashboard_url}/api/bridge/next?kind=summary", token=bridge_token)

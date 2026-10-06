@@ -8,6 +8,7 @@ the rest as proposals that the user approves, edits or rejects in the dashboard.
 from __future__ import annotations
 
 import importlib.util
+from contextlib import nullcontext
 import json
 import os
 import re
@@ -18,6 +19,17 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+
+# A stable import is essential: this file and MCP can have multiple importlib names.
+_tools_dir = str(Path(__file__).resolve().parent)
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+from task_mutation_lock import task_lock
+
+
+def mutation_scope(vk):
+    return getattr(vk, "BASE_URL", os.environ.get("VIKUNJA_URL", "http://127.0.0.1:3456"))
 
 
 LOCALAPPDATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
@@ -267,6 +279,13 @@ def with_entry(description: str, heading: str, date: str, note: str, source: str
 
 
 def execute(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
+    """Lock existing tasks before reading source fields, never while awaiting AI."""
+    task_id = action.get("task_id") if action.get("tipo") != "crear" else None
+    with task_lock(mutation_scope(vk), task_id) if task_id else nullcontext():
+        return _execute_locked(action, minute, vk)
+
+
+def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
     """Apply one action in Vikunja, read it back and return a short confirmation."""
     date = minute.get("fecha") or datetime.now().strftime("%Y-%m-%d")
     source = f"Granola {minute['sourceId']} · {minute['titulo']}"
@@ -335,6 +354,14 @@ def apply_action(action: dict[str, Any], minute: dict[str, Any], vk) -> None:
 
 
 def undo(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
+    """Keep undo's authoritative read/build/write in the same task transaction."""
+    created = re.match(r"Creada #(\d+)", action.get("resultado") or "")
+    task_id = action.get("creada_id") or (int(created.group(1)) if action.get("tipo") == "crear" and created else action.get("task_id"))
+    with task_lock(mutation_scope(vk), task_id) if task_id else nullcontext():
+        return _undo_locked(action, minute, vk)
+
+
+def _undo_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
     """Revert what this minute's action did: delete the task it created, or remove its log
     entries and restore the fields, title and state it changed."""
     source = f"Granola {minute['sourceId']}"

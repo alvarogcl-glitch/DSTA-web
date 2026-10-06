@@ -104,6 +104,10 @@ function isCataTask(task) {
 function validSnapshot(snapshot) {
   if (!snapshot || !Array.isArray(snapshot.projects) || !Array.isArray(snapshot.tasks) ||
       typeof snapshot.timestamp !== "string" || !Number.isFinite(Date.parse(snapshot.timestamp))) return false;
+  if (snapshot.observationStartedAt !== undefined &&
+      (typeof snapshot.observationStartedAt !== "string" ||
+       !Number.isFinite(Date.parse(snapshot.observationStartedAt)) ||
+       Date.parse(snapshot.observationStartedAt) > Date.parse(snapshot.timestamp))) return false;
   const validRecord = item => item && typeof item === "object" && !Array.isArray(item) &&
     Number.isSafeInteger(item.id) && item.id > 0 && typeof item.title === "string";
   if (snapshot.projects.some(item => !validRecord(item)) || snapshot.tasks.some(item => !validRecord(item))) return false;
@@ -129,11 +133,14 @@ async function receiveSnapshot(request, env, fromBridge = false) {
 
   const normalized = {
     timestamp: snapshot.timestamp,
+    ...(snapshot.observationStartedAt ? { observationStartedAt: snapshot.observationStartedAt } : {}),
     projects: snapshot.projects,
     tasks: snapshot.tasks,
     stale: false,
   };
-  await chatStub(env).saveSnapshot(normalized);
+  if (!await chatStub(env).saveSnapshot(normalized)) {
+    return json({ error: "Snapshot anterior a la observación vigente; no se reemplazaron los datos." }, 409);
+  }
   return json({ ok: true, projects: normalized.projects.length, tasks: normalized.tasks.length }, 202);
 }
 
@@ -192,6 +199,26 @@ async function createAssistantJob(request, env) {
   }));
 }
 
+const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function taskActionRoute(request, url, env) {
+  if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
+  if (request.method === "GET") {
+    const id = url.searchParams.get("id") || "";
+    if (!ACTION_UUID.test(id)) return json({ error: "Identificador inválido." }, 400);
+    return chatStub(env).fetch(`https://chat.internal/actions/status?id=${id}`);
+  }
+  if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+  const parsed = await readJson(request, 1024);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body;
+  if (!body || Array.isArray(body) || Object.keys(body).sort().join(",") !== "action,requestId,taskId" ||
+      body.action !== "complete" || !Number.isSafeInteger(body.taskId) || body.taskId <= 0 ||
+      typeof body.requestId !== "string" || !ACTION_UUID.test(body.requestId)) {
+    return json({ error: "Acción estructurada inválida." }, 400);
+  }
+  return forwardToChatObject(env, "/actions/create", body);
+}
+
 async function readAssistantJob(url, env) {
   const id = url.searchParams.get("id") || "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
@@ -212,8 +239,9 @@ async function takeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const requestedKind = new URL(request.url).searchParams.get("kind");
   if (requestedKind === "health") return json({ request: await chatStub(env).pendingHealthCheck() });
+  if (requestedKind === "action") return chatStub(env).fetch("https://chat.internal/actions/next");
   const kind = requestedKind === "summary" ? "summary" : "chat";
-  if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next");
+  if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
   return json({ job: await chatStub(env).takeSummaryJob() });
 }
 
@@ -222,6 +250,7 @@ async function completeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 400_000);
   if (parsed.error) return parsed.error;
+  if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body);
   const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
   const chatResponse = await chatStub(env).fetch(new Request("https://chat.internal/complete", {
@@ -332,6 +361,8 @@ export class DashboardChatQueue extends DurableObject {
     const url = new URL(request.url);
     const storage = this.ctx.storage.kv;
 
+    if (url.pathname.startsWith("/actions/")) return this.actionRequest(request, url);
+
     if (url.pathname === "/create" && request.method === "POST") {
       const job = await request.json();
       if (job?.kind !== "chat" || !/^[0-9a-f-]{36}$/i.test(job.id || "")) {
@@ -376,7 +407,7 @@ export class DashboardChatQueue extends DurableObject {
       const decision = this.takeDecision();
       const currentId = storage.get("current");
       const job = currentId ? storage.get(`job:${currentId}`) : null;
-      if (!job || job.status !== "queued") return json({ job: null, decision });
+      if (url.searchParams.get("chatBusy") === "1" || !job || job.status !== "queued") return json({ job: null, decision });
       job.status = "running";
       job.startedAt = new Date().toISOString();
       storage.put(`job:${job.id}`, job);
@@ -462,6 +493,83 @@ export class DashboardChatQueue extends DurableObject {
     return json({ error: "Ruta interna no encontrada." }, 404);
   }
 
+  async actionRequest(request, url) {
+    // Synchronous KV read-modify-write after body/snapshot awaits: no interleaving.
+    const body = request.method === "POST" ? await request.json() : null;
+    const createSnapshot = url.pathname === "/actions/create" ? await this.snapshot() : null;
+    const storage = this.ctx.storage.kv;
+    const now = Date.now();
+    const jobs = () => [...storage.list({ prefix: "action:" })];
+    const view = job => ({ id: job.id, kind: "action", taskId: job.taskId, status: job.status,
+      error: job.error || "", refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "" });
+    if (url.pathname === "/actions/create" && request.method === "POST") {
+      const old = storage.get(`action:${body.requestId}`);
+      if (old) return old.taskId === body.taskId && old.action === body.action
+        ? json(view(old), 202) : json({ error: "Identificador reutilizado para otra acción." }, 409);
+      const snapshot = storage.get("data:snapshot") ?? createSnapshot;
+      const task = validSnapshot(snapshot) ? snapshot.tasks.find(item => item.id === body.taskId) : null;
+      if (!task || !Number.isSafeInteger(task.project_id) || !snapshot.projects.some(p => p.id === task.project_id)) {
+        return json({ error: "La tarea no está en el snapshot actual." }, 404);
+      }
+      for (const [key, job] of jobs()) {
+        if (["completed", "error"].includes(job.status) && now - Date.parse(job.completedAt) > 604_800_000) storage.delete(key);
+      }
+      const existing = jobs().find(([, job]) => job.taskId === body.taskId && ["queued", "running"].includes(job.status));
+      if (existing) return json({ error: "La tarea ya tiene una acción pendiente.", id: existing[1].id }, 409);
+      if (jobs().length >= 500) return json({ error: "Cola de acciones llena." }, 429);
+      const job = { id: body.requestId, kind: "action", action: "complete", taskId: task.id,
+        projectId: task.project_id, status: "queued", createdAt: new Date(now).toISOString(), attempts: 0 };
+      storage.put(`action:${job.id}`, job);
+      return json(view(job), 202);
+    }
+    if (url.pathname === "/actions/status" && request.method === "GET") {
+      const job = storage.get(`action:${url.searchParams.get("id")}`);
+      return job ? json(view(job)) : json({ error: "Acción no encontrada." }, 404);
+    }
+    if (url.pathname === "/actions/next" && request.method === "GET") {
+      const activeId = storage.get("action-current");
+      const active = activeId ? storage.get(`action:${activeId}`) : null;
+      if (active?.status === "running" && active.leaseUntil > now) return json({ job: null });
+      if (active?.status === "running") {
+        active.status = active.attempts >= 5 ? "error" : "queued";
+        if (active.status === "error") { active.error = "Acción sin confirmación; revisa la tarea."; active.completedAt = new Date(now).toISOString(); }
+        storage.put(`action:${active.id}`, active);
+      }
+      storage.delete("action-current");
+      const next = jobs().map(([,job]) => job).filter(job => job.status === "queued" && (!job.nextAt || job.nextAt <= now))
+        .sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
+      if (!next) return json({ job: null });
+      next.status = "running";
+      next.attempt = crypto.randomUUID();
+      next.attempts += 1;
+      next.leaseUntil = now + 180_000;
+      next.startedAt = new Date(now).toISOString();
+      storage.put(`action:${next.id}`, next);
+      storage.put("action-current", next.id);
+      return json({ job: next });
+    }
+    if (url.pathname === "/actions/complete" && request.method === "POST") {
+      const job = storage.get(`action:${body.id}`);
+      if (!job || job.status !== "running" || storage.get("action-current") !== job.id ||
+          body.attempt !== job.attempt || job.leaseUntil <= now) return json({ error: "Intento no activo." }, 409);
+      const snapshot = storage.get("data:snapshot");
+      const verified = body.snapshotTimestamp && Number.isFinite(Date.parse(body.snapshotTimestamp)) &&
+        Date.parse(body.snapshotTimestamp) >= Date.parse(job.startedAt) &&
+        Date.parse(snapshot?.timestamp) >= Date.parse(body.snapshotTimestamp) &&
+        snapshot.tasks.some(task => task.id === job.taskId && task.project_id === job.projectId && task.done === true);
+      job.error = body.error ? "No se pudo completar la tarea de forma segura; revisa su estado y alcance." : "";
+      job.refreshError = !job.error && !verified ? "No se pudo confirmar el snapshot actualizado." : "";
+      job.snapshotTimestamp = verified ? body.snapshotTimestamp : "";
+      job.status = job.error ? "error" : verified ? "completed" : job.attempts >= 5 ? "error" : "queued";
+      if (job.status === "queued") job.nextAt = now + 30_000;
+      else job.completedAt = new Date(now).toISOString();
+      storage.put(`action:${job.id}`, job);
+      storage.delete("action-current");
+      return json({ ok: true, status: job.status });
+    }
+    return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
   // Dashboard data (RPC from the Worker). Storage calls run synchronously after the awaits,
   // so each read-modify-write completes without another request interleaving.
   async snapshot() {
@@ -519,8 +627,19 @@ export class DashboardChatQueue extends DurableObject {
   }
 
   async saveSnapshot(snapshot) {
-    this.ctx.storage.kv.put("data:snapshot", snapshot);
+    const storage = this.ctx.storage.kv;
+    const legacy = storage.get("data:snapshot") === undefined
+      ? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json") : null;
+    // Re-read after the legacy await: another request may have published meanwhile.
+    const current = storage.get("data:snapshot") ?? legacy;
+    const observedAt = value => Date.parse(value?.observationStartedAt || value?.timestamp);
+    if (current && ((current.observationStartedAt && !snapshot.observationStartedAt) ||
+        observedAt(snapshot) < observedAt(current))) return false;
+    // Synchronous compare+put is atomic within the DO. Ordering uses collection START,
+    // not completion time: a slow old collection must not resurrect completed tasks.
+    storage.put("data:snapshot", snapshot);
     await this.enqueueChangedCataTasks(snapshot.tasks);
+    return true;
   }
 
   async enqueueChangedCataTasks(tasks) {
@@ -670,7 +789,7 @@ export default {
 
     // Basic auth is ambient browser authority: reject foreign-site writes before
     // reading a body or scheduling a job. CLI clients without Origin remain valid.
-    if (request.method === "POST" && ["/api/assistant", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
+    if (request.method === "POST" && ["/api/assistant", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
       const origin = request.headers.get("origin");
       const site = request.headers.get("sec-fetch-site");
       if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
@@ -699,6 +818,7 @@ export default {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return serveSnapshot(env);
     }
+    if (url.pathname === "/api/task-actions") return taskActionRoute(request, url, env);
     if (url.pathname === "/api/assistant") {
       if (request.method === "POST") return createAssistantJob(request, env);
       if (request.method === "GET") return readAssistantJob(url, env);
