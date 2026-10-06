@@ -18,6 +18,8 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 El inspector muestra un visto bueno **✓** junto al estado de una tarea abierta; al
 pasar el cursor o enfocarlo con teclado se expande a **Marcar como completada**.
+En móvil (hasta 620 px) y pantallas táctiles, la etiqueta siempre está visible y
+el control tiene un objetivo táctil de al menos 44 px, sin depender de hover.
 Debajo de la descripción, **Agregar registro** abre un formulario discreto con tipo,
 fecha y texto. **Guardar** lo cierra al confirmar el registro; **Cancelar** lo oculta
 conservando el borrador. La fecha inicial corresponde a Santiago. Las
@@ -31,6 +33,11 @@ Los borradores se conservan por tarea durante la sesión, incluso al refrescar o
 entre tareas. Las solicitudes pendientes guardan su ID en sessionStorage para retomar
 su consulta al recargar sin reenviar escrituras. Los errores conservan el texto.
 Los archivos `public/task-actions.js` y `public/task-actions.css` contienen los controles.
+Un aviso no bloqueante (`role=status`, `aria-live=polite`) identifica la tarea y
+muestra **Completando…** o **Guardando registro…**, incluso si se navega fuera del
+inspector. El éxito aparece únicamente tras verificar el snapshot y desaparece
+a los 6 segundos. Los errores y resultados inciertos permanecen hasta descartarlos
+con **×**; descartar el aviso no cancela ni reenvía la solicitud pendiente.
 
 ## Generación de minutas
 
@@ -44,7 +51,16 @@ Los archivos `public/task-actions.js` y `public/task-actions.css` contienen los 
   abiertas en el orden del portafolio.
 - **Generar minuta Cata 1-1** y **Generar minuta** de fechas próximas usan solo lo
   seleccionado; sin selección incluyen todos los pendientes del panel.
-- El texto generado se puede editar en el panel lateral y copiar al portapapeles.
+- Cada inspector de LT/TR, sección o KPI ofrece **Generar minuta**, incluso si
+  está vacío. Esta acción usa exclusivamente las tareas abiertas del ámbito
+  actual, reconstruido desde los datos vivos, sin mezclar selecciones de otros
+  paneles. Si no hay pendientes, indica **Sin tareas abiertas en esta sección**.
+  Al volver a una sección o KPI se reconstruyen su lista y conteo actualizados.
+- El texto generado se puede editar en el panel lateral y copiar al portapapeles;
+  **Volver** conserva la navegación al inspector de origen.
+- `npm test` incluye regresiones de ámbito de minutas, snapshots, borradores,
+  avisos durante navegación, solicitudes duplicadas y contratos CSS móviles.
+  Las pruebas simulan la API: no publican trabajos ni modifican datos reales.
 
 ## Bandeja de minutas Granola (🔔)
 

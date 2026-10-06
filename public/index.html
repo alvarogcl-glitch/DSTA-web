@@ -220,13 +220,17 @@ function showInspection(view){
  }else{
   $('#detail-body').innerHTML=view.fields.map(([k,v])=>'<div class="detail-label">'+esc(k)+'</div><div class="detail-value">'+(v&&typeof v==='object'&&v.html!==undefined?v.html:esc(v))+'</div>').join('')+(view.items?'<div class="detail-label">Tareas ('+view.items.length+')</div>'+view.items.map(t=>'<button type="button" class="task-card" data-task="'+esc(t.id)+'">#'+esc(t.id)+' · '+esc(t.title)+(view.title==='Cata 1-1 · pendientes'?'<span class="review-note">Para revisar: '+esc(cataReview(t))+'</span>':'')+'<small>'+esc(t.project)+' · '+(t.done?'Completada':'Abierta')+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>').join(''):'');
  }
+ if(!view.taskId&&Array.isArray(view.items)&&view.minuteText===undefined){
+  $('#detail-body').insertAdjacentHTML('afterbegin','<div class="minute-actions"><button id="inspector-minute" type="button">Generar minuta</button></div>');
+  $('#inspector-minute').addEventListener('click',()=>inspectorMinute(view));
+ }
  window.DstaTaskActions?.mount(view);
  if(editing?.name){const field=$('#detail-body').querySelector('[name="'+editing.name+'"]');if(field&&!field.disabled){field.focus({preventScroll:true});if(field.tagName==='TEXTAREA')field.setSelectionRange(editing.start,editing.end)}}
  $('#drawer').classList.add('open');$('#backdrop').classList.add('open');
 }
-function inspector(title,fields,items){
+function inspector(title,fields,items,options={}){
  if(inspection)inspectionHistory.push(inspection);
- showInspection({title,fields,items});
+ showInspection({title,fields,items,...options});
  pushDrawerHistory();
 }
 function back(){
@@ -240,7 +244,18 @@ function rebuildInspection(view){
  const project=view.projectId&&projects.find(p=>String(p.id)===view.projectId);
  if(view.projectId)return project?projectView(project):null;
  if(view.taskId){const task=tasks.find(t=>String(t.id)===view.taskId);return task?taskView(task):null}
+ if(view.scope){
+  const items=view.scope.panel?(panelSets[view.scope.panel]||[]):(window.metricSubsets[view.scope.metric]||[]);
+  return {...view,items,fields:view.fields.map(([key,value])=>[key,['Tareas','Cantidad'].includes(key)?items.length:value])};
+ }
+ if(Array.isArray(view.items))return {...view,items:view.items.map(old=>tasks.find(t=>String(t.id)===String(old.id))).filter(Boolean)};
  return view;
+}
+function inspectorMinute(view){
+ const current=rebuildInspection(view);
+ if(!current||!Array.isArray(current.items))return;
+ const body=taskLines(current.items);
+ minuteView('Minuta · '+current.title,current.title+' - '+minuteDate()+'\n\n'+(body||'Sin tareas abiertas en esta sección.'));
 }
 function showTask(id){const t=tasks.find(x=>String(x.id)===String(id));if(!t)return;if(inspection)inspectionHistory.push(inspection);showInspection(taskView(t));pushDrawerHistory()}
 function filtered(){const q=$('#q').value.toLowerCase(),a=$('#a').value,s=$('#s').value;return tasks.filter(t=>(!q||(t.title+' '+t.project+' '+t.owner+' '+t.id).toLowerCase().includes(q))&&(!a||String(t.project_id)===a)&&(!s||(t.done?'done':'open')===s))}
@@ -321,7 +336,7 @@ document.addEventListener('click',e=>{
   // Un clic fuera de controles (espacio vacío, otra sección) cierra el modo selección.
   if(selectable||!e.target.closest('button,input,select,textarea,a,summary,.select-hint,#drawer,#dsta-assistant,#dsta-inbox'))exitSelectMode();
  }
- const target=e.target.closest('[data-task],[data-project],[data-metric]');if(!target)return;if(target.dataset.task){if(target.dataset.context){const context=target.dataset.context,items=panelSets[context]||[],title=({upcoming:'Por vencer · próximos 45 días',overdue:'Tareas vencidas','cata-open':'Cata 1-1 · pendientes','cata-done':'Cata 1-1 · antecedentes completados'})[context];inspector(title,[['Tareas',items.length]],items)}return showTask(target.dataset.task)}if(target.dataset.project){const p=projects.find(x=>String(x.id)===target.dataset.project);if(!p)return;if(inspection)inspectionHistory.push(inspection);showInspection(projectView(p));pushDrawerHistory();return}if(target.dataset.metric){const index=Number(target.dataset.metric),items=window.metricSubsets[index];inspector(target.querySelector('span').textContent,[['Cantidad',items.length]],items)}});
+ const target=e.target.closest('[data-task],[data-project],[data-metric]');if(!target)return;if(target.dataset.task){if(target.dataset.context){const context=target.dataset.context,items=panelSets[context]||[],title=({upcoming:'Por vencer · próximos 45 días',overdue:'Tareas vencidas','cata-open':'Cata 1-1 · pendientes','cata-done':'Cata 1-1 · antecedentes completados'})[context];inspector(title,[['Tareas',items.length]],items,{scope:{panel:context}})}return showTask(target.dataset.task)}if(target.dataset.project){const p=projects.find(x=>String(x.id)===target.dataset.project);if(!p)return;if(inspection)inspectionHistory.push(inspection);showInspection(projectView(p));pushDrawerHistory();return}if(target.dataset.metric){const index=Number(target.dataset.metric),items=window.metricSubsets[index];inspector(target.querySelector('span').textContent,[['Cantidad',items.length]],items,{scope:{metric:index}})}});
 document.addEventListener('keydown',e=>{
  if(e.key==='Escape'){if(selectMode)return exitSelectMode();close()}
  if(!['Enter',' '].includes(e.key)||!(e.target instanceof Element))return;

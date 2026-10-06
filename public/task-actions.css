@@ -15,4 +15,14 @@
 .task-actions button[type=submit]{padding:7px 12px;background:transparent}
 .task-action-status{color:#9bacbd;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;font-size:12px}
 .task-action-status:empty{display:none}
+.task-action-toast{position:fixed;z-index:30;max-width:calc(100vw - 24px);width:420px;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:10px;padding:10px 12px;background:#1b2430;border:1px solid #3a4859;border-radius:10px;box-shadow:0 4px 20px #0006;color:#dce9f3;font:13px/1.4 system-ui}
+.task-action-toast[hidden]{display:none}
+.task-action-toast span{flex:1;min-width:0;overflow-wrap:anywhere}
+.task-action-toast button{flex:none;min-width:44px;min-height:44px;padding:6px;background:transparent}
+@media(any-hover:none),(pointer:coarse),(max-width:620px){
+ .task-complete{display:flex;width:fit-content;max-width:100%;min-height:44px;margin-left:0;margin-top:8px;white-space:normal;text-align:left}
+ .task-complete .task-complete-text{max-width:none;opacity:1;margin-left:8px;overflow:visible;overflow-wrap:anywhere;min-width:0;transition:none}
+ .task-complete-icon{flex:none}
+ .task-log-toggle,.task-log-cancel,.task-actions button[type=submit]{min-height:44px}
+}
 @media(prefers-reduced-motion:reduce){.task-complete-text{transition:none}}
