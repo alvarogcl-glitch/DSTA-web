@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Dashboard Gestión DSTA",
+  "short_name": "DSTA",
+  "description": "Portafolio, seguimiento y minutas PMO-DSTA.",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b121a",
+  "theme_color": "#0b121a",
+  "icons": [
+    { "src": "/icons/dsta-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/dsta-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/dsta-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

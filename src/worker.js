@@ -785,7 +785,13 @@ export default {
       return bridgeMinuteRoute(request, env, "/minutes/decision-done");
     }
 
-    if (!basicAuthorized(request, env)) return requestAuthentication();
+    // Android fetches installation metadata without the user's Basic credentials.
+    // Expose only exact, generic PWA assets; all dashboard files and APIs stay private.
+    const publicPwaAsset = new Set([
+      "/manifest.webmanifest", "/sw.js", "/offline", "/offline.html",
+      "/icons/dsta-192.png", "/icons/dsta-512.png", "/icons/dsta-maskable-512.png",
+    ]).has(url.pathname) && ["GET", "HEAD"].includes(request.method);
+    if (!publicPwaAsset && !basicAuthorized(request, env)) return requestAuthentication();
 
     // Basic auth is ambient browser authority: reject foreign-site writes before
     // reading a body or scheduling a job. CLI clients without Origin remain valid.

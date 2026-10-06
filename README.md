@@ -364,3 +364,27 @@ La integración con GitHub despliega automáticamente cada commit en `main`. Si 
 npm install
 npm run deploy
 ```
+
+## Android: PWA instalable
+
+El dashboard incluye un manifiesto, iconos Android normales y adaptativos, y un
+service worker. En Chrome para Android, abrir la URL HTTPS del dashboard, iniciar
+sesión y pulsar **Instalar DSTA** cuando esté disponible. También se puede usar el
+menú de Chrome → **Instalar aplicación** o **Añadir a pantalla de inicio**; el texto
+varía según el dispositivo. La app abre en una ventana propia y usa el mismo sitio.
+
+La autenticación Basic se conserva. La instalación puede pedir iniciar sesión
+nuevamente: comprobar en un teléfono real después de publicar. Solo son públicos
+el manifiesto, los tres iconos, el service worker y la página genérica sin conexión,
+mediante una lista exacta de rutas GET/HEAD. El dashboard, sus scripts y todas sus
+API siguen protegidos; los POST conservan la validación de origen del mismo sitio.
+
+Solo se guarda la página genérica sin conexión en CacheStorage. No se guardan
+datos del dashboard, credenciales, chat ni minutas para uso offline; tampoco se
+encolan ni reenvían cambios desde el service worker. Sin red se muestra **Sin
+conexión** al abrir la app. Las actualizaciones se obtienen de la web al abrirla.
+
+Validación: `npm test` incluye la lista pública, autenticación y aislamiento del
+service worker. Verificar finalmente instalación y reapertura en Chrome Android,
+inicio de sesión, navegación, copia de minutas y recuperación después de perder
+la conexión; probar acciones de escritura solo con tareas de prueba autorizadas.
