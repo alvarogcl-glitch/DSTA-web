@@ -39,7 +39,18 @@ salud, chat o resúmenes no bloquea su recepción. Se procesan de una en una, us
 la misma concesión e identificación durable. El log `dsta-bridge.log` registra
 recepción, verificación en Vikunja, publicación y confirmación, con duraciones y
 ID de solicitud sin datos de la tarea ni credenciales. Cambiar este código requiere
-reiniciar el puente local; no requiere desplegar el Worker.
+reiniciar el puente local; los cambios solo del sondeo no requieren desplegar el Worker.
+
+La confirmación directa vincula el snapshot autenticado al ID y a la concesión
+vigente (`actionConfirmation: {id, attempt}`). El Worker comprueba tarea, línea y
+estado completado antes de guardar esa prueba; al finalizar exige la misma
+concesión y timestamp y que el snapshot vigente siga mostrando la tarea completada.
+Así no depende de comparar relojes de la VM y Cloudflare. Se preserva el orden
+de snapshots por inicio de observación, la caducidad y el rechazo de concesiones
+anteriores. La compatibilidad con puentes anteriores conserva la comprobación
+temporal antigua. Este contrato requiere desplegar Worker y reiniciar el puente.
+El log solo dice confirmado cuando la respuesta final tiene `status=completed`;
+un HTTP 200 con `status=queued` se registra como sin confirmación.
 
 **Agregar registro** conserva la cola del copiloto, con ID explícito y sin historial.
 `pmo_append_log` relee la descripción canónica, agrega el registro fechado, conserva

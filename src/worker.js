@@ -138,7 +138,10 @@ async function receiveSnapshot(request, env, fromBridge = false) {
     tasks: snapshot.tasks,
     stale: false,
   };
-  if (!await chatStub(env).saveSnapshot(normalized)) {
+  if (snapshot.actionConfirmation !== undefined && !fromBridge) {
+    return json({ error: "La confirmación requiere el canal del puente." }, 400);
+  }
+  if (!await chatStub(env).saveSnapshot(normalized, snapshot.actionConfirmation ?? null)) {
     return json({ error: "Snapshot anterior a la observación vigente; no se reemplazaron los datos." }, 409);
   }
   return json({ ok: true, projects: normalized.projects.length, tasks: normalized.tasks.length }, 202);
@@ -553,8 +556,10 @@ export class DashboardChatQueue extends DurableObject {
       if (!job || job.status !== "running" || storage.get("action-current") !== job.id ||
           body.attempt !== job.attempt || job.leaseUntil <= now) return json({ error: "Intento no activo." }, 409);
       const snapshot = storage.get("data:snapshot");
+      const confirmedAttempt = job.snapshotConfirmation?.attempt === body.attempt &&
+        job.snapshotConfirmation?.timestamp === body.snapshotTimestamp;
       const verified = body.snapshotTimestamp && Number.isFinite(Date.parse(body.snapshotTimestamp)) &&
-        Date.parse(body.snapshotTimestamp) >= Date.parse(job.startedAt) &&
+        (confirmedAttempt || Date.parse(body.snapshotTimestamp) >= Date.parse(job.startedAt)) &&
         Date.parse(snapshot?.timestamp) >= Date.parse(body.snapshotTimestamp) &&
         snapshot.tasks.some(task => task.id === job.taskId && task.project_id === job.projectId && task.done === true);
       job.error = body.error ? "No se pudo completar la tarea de forma segura; revisa su estado y alcance." : "";
@@ -626,7 +631,7 @@ export class DashboardChatQueue extends DurableObject {
     }
   }
 
-  async saveSnapshot(snapshot) {
+  async saveSnapshot(snapshot, actionConfirmation = null) {
     const storage = this.ctx.storage.kv;
     const legacy = storage.get("data:snapshot") === undefined
       ? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json") : null;
@@ -635,9 +640,26 @@ export class DashboardChatQueue extends DurableObject {
     const observedAt = value => Date.parse(value?.observationStartedAt || value?.timestamp);
     if (current && ((current.observationStartedAt && !snapshot.observationStartedAt) ||
         observedAt(snapshot) < observedAt(current))) return false;
+    // Bind the authenticated post-write snapshot to the current delivery. VM and
+    // edge timestamps cannot be compared for causality: their clocks may differ.
+    let actionJob = null;
+    if (actionConfirmation !== null) {
+      if (!actionConfirmation || typeof actionConfirmation !== "object" ||
+          Object.keys(actionConfirmation).sort().join(",") !== "attempt,id" ||
+          typeof actionConfirmation.id !== "string" || typeof actionConfirmation.attempt !== "string") return false;
+      actionJob = storage.get(`action:${actionConfirmation.id}`);
+      if (!actionJob || actionJob.status !== "running" || storage.get("action-current") !== actionJob.id ||
+          actionJob.attempt !== actionConfirmation.attempt || actionJob.leaseUntil <= Date.now() ||
+          !snapshot.tasks.some(task => task.id === actionJob.taskId &&
+            task.project_id === actionJob.projectId && task.done === true)) return false;
+    }
     // Synchronous compare+put is atomic within the DO. Ordering uses collection START,
     // not completion time: a slow old collection must not resurrect completed tasks.
     storage.put("data:snapshot", snapshot);
+    if (actionJob) {
+      actionJob.snapshotConfirmation = { attempt: actionConfirmation.attempt, timestamp: snapshot.timestamp };
+      storage.put(`action:${actionJob.id}`, actionJob);
+    }
     await this.enqueueChangedCataTasks(snapshot.tasks);
     return true;
   }

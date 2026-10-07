@@ -41,7 +41,7 @@ const base=`http://127.0.0.1:${server.address().port}`;
 const authorization='Basic '+Buffer.from('test:test').toString('base64');
 const browserFetch=(url,opts={})=>fetch(base+url,{...opts,headers:{authorization,...opts.headers}});
 try{
- await queue.saveSnapshot({timestamp:new Date().toISOString(),projects:[projects[1]],tasks:[task]});
+ await queue.saveSnapshot({timestamp:new Date(Date.now()-60000).toISOString(),projects:[projects[1]],tasks:[task]});
  await browserFetch('/api/assistant',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:'Long chat remains queued'})});
  const requestId=crypto.randomUUID();
  const action={action:'complete',taskId:15,requestId};
@@ -57,7 +57,16 @@ try{
   refresh:async(timestamp)=>{const snapshot=await(await browserFetch('/api/dashboard')).json();context.tasks=snapshot.tasks;return Date.parse(snapshot.timestamp)>=Date.parse(timestamp)}};
  vm.runInNewContext(readFileSync(new URL('../public/task-actions.js',import.meta.url),'utf8'),context);
  const script=`import importlib.util,json,sys\nfrom pathlib import Path\nspec=importlib.util.spec_from_file_location('bridge',Path('tools/hermes_bridge.py'));b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)\nb.answer_chat=lambda *a: (_ for _ in ()).throw(AssertionError('AI forbidden'))\nb.process_job(json.loads(sys.argv[2]),sys.argv[1],'bridge-test','unused',Path('.'),'unused','unused','vikunja-test',sys.argv[1])\n`;
- const child=spawn('python',['-c',script,base,JSON.stringify(job)],{stdio:['ignore','pipe','pipe']});
+ const skewedScript=script.replace('b.process_job(',`from datetime import datetime,timedelta
+original_fetch=b.fetch_dashboard
+def skewed_fetch(*args):
+    snapshot=original_fetch(*args)
+    for field in ('timestamp','observationStartedAt'):
+        snapshot[field]=(datetime.fromisoformat(snapshot[field])-timedelta(seconds=5)).isoformat()
+    return snapshot
+b.fetch_dashboard=skewed_fetch
+b.process_job(`);
+ const child=spawn('python',['-c',skewedScript,base,JSON.stringify(job)],{stdio:['ignore','pipe','pipe']});
  let output='';child.stdout.on('data',x=>output+=x);child.stderr.on('data',x=>output+=x);
  const exit=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve)});
  assert.equal(exit,0,output);
@@ -69,5 +78,5 @@ try{
  const duplicate=await browserFetch('/api/task-actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(action)});
  assert.equal((await duplicate.json()).status,'completed');assert.equal(writes,1);
  assert.equal(store.get('job:'+store.get('current')).status,'queued','copilot independent');
- console.log('real localhost HTTP: Worker queue -> Python deterministic Vikunja -> snapshot -> frontend verification; one write, no AI');
+ console.log('real localhost HTTP with VM clock 5s behind: Worker queue -> Python deterministic Vikunja -> snapshot -> frontend success; one write, no AI');
 }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}

@@ -100,3 +100,18 @@ console.log('action validation, auth, scope snapshot, isolation, lease fencing a
 const fallbackEnv=environment();
 fallbackEnv.legacyValues.set('vikunja-dashboard-v1',{timestamp:new Date().toISOString(),projects:[{id:3,title:'LT1'}],tasks:[{id:15,title:'Task',project_id:3,done:false}]});
 assert.equal((await call(fallbackEnv,'POST','/api/task-actions',body)).status,202,'valid migrated snapshot supports completion');
+
+for (const skew of [-5000, 120000]) {
+ const clockEnv=environment();
+ const initial={timestamp:new Date(Date.now()+skew-60000).toISOString(),projects:[{id:3,title:'LT1'}],tasks:[{id:15,title:'Task',project_id:3,done:false}]};
+ await call(clockEnv,'POST','/api/bridge/snapshot',initial,'Bearer bridge');
+ await call(clockEnv,'POST','/api/task-actions',body);
+ const delivery=(await call(clockEnv,'GET','/api/bridge/next?kind=action',null,'Bearer bridge')).body.job;
+ const fresh={...initial,timestamp:new Date(Date.now()+skew).toISOString(),tasks:[{...initial.tasks[0],done:true}],actionConfirmation:{id:delivery.id,attempt:delivery.attempt}};
+ assert.equal((await call(clockEnv,'POST','/api/bridge/snapshot',{...fresh,actionConfirmation:{id:delivery.id,attempt:'stale'}},'Bearer bridge')).status,409,'snapshot from stale delivery rejected');
+ assert.equal((await call(clockEnv,'POST','/api/bridge/snapshot',{...fresh,tasks:initial.tasks},'Bearer bridge')).status,409,'incomplete task cannot confirm delivery');
+ assert.equal((await call(clockEnv,'POST','/api/ingest',fresh,'Bearer ingest')).status,400,'periodic publisher cannot certify action');
+ assert.equal((await call(clockEnv,'POST','/api/bridge/snapshot',fresh,'Bearer bridge')).status,202);
+ assert.equal((await call(clockEnv,'POST','/api/bridge/complete',{kind:'action',id:delivery.id,attempt:delivery.attempt,snapshotTimestamp:fresh.timestamp},'Bearer bridge')).body.status,'completed','confirmed action tolerates VM clock drift');
+}
+console.log('action snapshot correlation tolerates clock drift and rejects stale delivery/incomplete task/ingest proof');

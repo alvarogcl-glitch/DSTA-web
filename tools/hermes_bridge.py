@@ -453,11 +453,14 @@ def push_minute(base_url: str, token: str, record: dict) -> None:
 _snapshot_lock = threading.Lock()
 
 
-def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str) -> str:
+def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str,
+                     *, action_job: dict | None = None) -> str:
     if not vikunja_token:
         raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
     with _snapshot_lock:
         snapshot = fetch_dashboard(vikunja_url, vikunja_token)
+        if action_job is not None:
+            snapshot["actionConfirmation"] = {"id": action_job["id"], "attempt": action_job["attempt"]}
         request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
         return snapshot["timestamp"]
 
@@ -604,7 +607,7 @@ def execute_completion(job: dict, request: Callable, *, server_url: str | None =
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                summaries: list[dict] | None = None, error: str = "",
                refresh_error: str = "", snapshot_timestamp: str = "",
-               minutes: dict | None = None) -> None:
+               minutes: dict | None = None) -> dict:
     payload: dict = {"id": job["id"]}
     if job.get("kind") == "action":
         payload.update(kind="action", attempt=job.get("attempt"))
@@ -620,7 +623,7 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
             payload["refreshError"] = refresh_error
         if snapshot_timestamp:
             payload["snapshotTimestamp"] = snapshot_timestamp
-    request_json(
+    return request_json(
         f"{base_url}/api/bridge/complete",
         token=token,
         method="POST",
@@ -651,12 +654,16 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             execute_completion(job, action_request, server_url=vikunja_url)
             written = time.monotonic()
             try:
-                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url, action_job=job)
             except Exception:
                 finish_job(base_url, token, job, refresh_error="No se pudo confirmar el snapshot actualizado.")
             else:
                 published = time.monotonic()
-                finish_job(base_url, token, job, snapshot_timestamp=timestamp)
+                result = finish_job(base_url, token, job, snapshot_timestamp=timestamp)
+                if result.get("status") != "completed":
+                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} action sin confirmacion id={job['id']} "
+                          f"estado={result.get('status', 'desconocido')}", file=sys.stderr, flush=True)
+                    return
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} action confirmado id={job['id']} "
                       f"vikunja={written - started:.2f}s snapshot={published - written:.2f}s "
                       f"confirmacion={time.monotonic() - published:.2f}s", flush=True)

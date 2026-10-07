@@ -8,15 +8,25 @@ class DirectActionTests(unittest.TestCase):
         job = {'id':'12345678-1234-4234-8234-123456789012','kind':'action','action':'complete','taskId':15,'projectId':3,'attempt':'lease'}
         with patch.object(bridge, 'answer_chat', side_effect=AssertionError('AI forbidden')) as ai, \
              patch.object(bridge, 'execute_completion', create=True, return_value={'done':True}) as execute, \
-             patch.object(bridge, 'publish_snapshot', return_value='2026-10-06T14:00:00Z'), \
-             patch.object(bridge, 'request_json', return_value={}) as requests:
+             patch.object(bridge, 'publish_snapshot', return_value='2026-10-06T14:00:00Z') as publish, \
+             patch.object(bridge, 'request_json', return_value={'status':'completed'}) as requests:
             bridge.process_job(job,'https://example.test','bridge','hermes',Path('.'),'p','m','vk','http://local')
         ai.assert_not_called()
         execute.assert_called_once()
+        self.assertEqual(publish.call_args.kwargs['action_job'],job)
         payload = requests.call_args.kwargs['payload']
         self.assertEqual(payload['kind'],'action')
         self.assertEqual(payload['attempt'],'lease')
         self.assertEqual(payload['snapshotTimestamp'],'2026-10-06T14:00:00Z')
+
+    def test_queued_ack_is_not_logged_as_confirmed(self):
+        job={'id':'test','kind':'action','attempt':'lease'}
+        with patch.object(bridge,'execute_completion'), patch.object(bridge,'publish_snapshot',return_value='fresh'), \
+             patch.object(bridge,'request_json',return_value={'status':'queued'}), patch('builtins.print') as output:
+            bridge.process_job(job,'https://example.test','bridge','unused',Path('.'),'p','m','vk')
+        messages=[str(call.args[0]) for call in output.call_args_list]
+        self.assertTrue(any('sin confirmacion' in m for m in messages))
+        self.assertFalse(any('action confirmado' in m or m == 'action completado' for m in messages))
 
     def test_preserves_fields_rereads_and_verifies(self):
         execute = getattr(bridge, 'execute_completion', None)
