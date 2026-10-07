@@ -310,6 +310,11 @@ const MINUTE_EDIT_KEYS = new Set(["task_id", "project_id", "titulo", "nota", "re
 function validDecision(body) {
   const { minuteId, decisions } = body || {};
   if (typeof minuteId !== "string" || !MINUTE_ID.test(minuteId)) return null;
+  if (body.decision === "descartar") {
+    if (decisions !== undefined || typeof body.digest !== "string" || !body.digest || body.digest.length > 100) return null;
+    return { minuteId, decision: "descartar", digest: body.digest };
+  }
+  if (body.decision !== undefined) return null;
   if (!Array.isArray(decisions) || !decisions.length || decisions.length > 25) return null;
   const clean = [];
   for (const item of decisions) {
@@ -423,6 +428,12 @@ export class DashboardChatQueue extends DurableObject {
         return json({ error: "Minuta inválida." }, 400);
       }
       const previous = storage.get(`minute:${record.id}`);
+      // A source dismissed by the user stays out even when its content changes.
+      if (previous?.descartadaEn) {
+        record.descartadaEn = previous.descartadaEn;
+        record.estado = "descartada";
+        record.vista = true;
+      }
       record.vista = Boolean(record.vista) || Boolean(previous && previous.digest === record.digest && previous.vista);
       record.aplicando = [...storage.list({ prefix: "decision:" })]
         .some(([, decision]) => decision.minuteId === record.id);
@@ -453,6 +464,10 @@ export class DashboardChatQueue extends DurableObject {
       const record = storage.get(`minute:${decision.minuteId}`);
       if (!record) return json({ error: "Minuta no encontrada." }, 404);
       if (record.aplicando) return json({ error: "Ya se están aplicando decisiones de esta minuta." }, 409);
+      if (record.descartadaEn) return json({ error: "Esta minuta ya fue descartada." }, 409);
+      if (decision.decision === "descartar" && decision.digest !== record.digest) {
+        return json({ error: "La minuta cambió. Actualiza la bandeja antes de descartarla." }, 409);
+      }
       const id = crypto.randomUUID();
       storage.put(`decision:${id}`, { ...decision, id, status: "queued", createdAt: new Date().toISOString() });
       record.aplicando = true;

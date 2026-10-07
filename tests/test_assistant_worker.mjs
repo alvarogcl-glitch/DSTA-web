@@ -154,6 +154,25 @@ await call(env, 'POST', '/api/bridge/decision-done', { id: withDecision.body.dec
 inbox = await call(env, 'GET', '/api/minutes');
 assert.equal(inbox.body.minutes[0].aplicando, false);
 
+// Whole-minute dismissal uses the existing durable decision channel, even with no proposals.
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decision: 'descartar' })).status, 400);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decision: 'descartar', digest: minute.digest, decisions: [] })).status, 400);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decision: 'descartar', digest: 'old' })).status, 409);
+const discard = await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decision: 'descartar', digest: minute.digest });
+assert.equal(discard.status, 202);
+const discardClaim = await call(env, 'GET', '/api/bridge/next?kind=chat', null, 'Bearer bridge');
+assert.equal(discardClaim.body.decision.decision, 'descartar');
+assert.equal(discardClaim.body.decision.digest, minute.digest);
+const dismissed = { ...minute, estado: 'descartada', vista: true, descartadaEn: '2026-10-07T15:00:00Z' };
+await call(env, 'POST', '/api/bridge/minute', dismissed, 'Bearer bridge');
+await call(env, 'POST', '/api/bridge/decision-done', { id: discardClaim.body.decision.id }, 'Bearer bridge');
+await call(env, 'POST', '/api/bridge/minute', { ...minute, digest: 'new-revision', vista: false }, 'Bearer bridge');
+inbox = await call(env, 'GET', '/api/minutes');
+assert.equal(inbox.body.minutes[0].estado, 'descartada', 'later content cannot resurrect a dismissed meeting');
+assert.equal(inbox.body.minutes[0].descartadaEn, dismissed.descartadaEn);
+assert.equal(inbox.body.minutes[0].vista, true);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar' }] })).status, 409);
+
 // Semáforos de disponibilidad
 assert.equal((await call(env, 'POST', '/api/bridge/health', { vikunja: { ok: true } }, 'Bearer wrong')).status, 401);
 await call(env, 'POST', '/api/bridge/health',

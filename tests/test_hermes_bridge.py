@@ -18,6 +18,21 @@ SPEC.loader.exec_module(bridge)
 
 
 class HermesWindowTests(unittest.TestCase):
+    def test_whole_minute_discard_does_not_access_vikunja_or_publish_snapshot(self):
+        decision = {"id": "decision-1", "minuteId": "minute-1", "decision": "descartar"}
+        record = {"id": "minute-1", "estado": "descartada"}
+        with patch.object(bridge.minute_inbox, "load_vikunja") as load, \
+             patch.object(bridge.minute_inbox, "apply_decision", return_value=record) as apply, \
+             patch.object(bridge, "push_minute") as push, \
+             patch.object(bridge, "publish_snapshot") as snapshot, \
+             patch.object(bridge, "request_json") as ack:
+            bridge.process_decision(decision, "https://example.test", "test-token", Path("home"), "", "")
+        load.assert_not_called()
+        snapshot.assert_not_called()
+        self.assertIsNone(apply.call_args.args[2])
+        push.assert_called_once_with("https://example.test", "test-token", record)
+        self.assertEqual(ack.call_args.kwargs["payload"], {"id": "decision-1", "error": ""})
+
     def test_chat_hides_console(self):
         with patch.object(bridge.subprocess, "Popen", wraps=subprocess.Popen) as popen, \
              tempfile.TemporaryDirectory() as home:

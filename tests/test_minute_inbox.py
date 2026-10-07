@@ -115,6 +115,39 @@ class MinuteInboxTests(unittest.TestCase):
         self.assertEqual(self.process(plan)["estado"], "procesada")
         self.assertEqual(self.marks, ["processed"])
 
+    def test_discard_entire_minute_rejects_proposals_without_writes_or_model(self):
+        record = self.process()
+        before = json.dumps(self.vk.tasks, sort_keys=True)
+        with patch.object(inbox, "QUEUE_PATH", Path(self.tmp.name) / "queue.json"):
+            record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decision": "descartar"}, None,
+                                          lambda _: self.fail("discard must not call a model"))
+            timestamp = record["descartadaEn"]
+            again = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decision": "descartar"}, None)
+        self.assertEqual(record["estado"], "descartada")
+        self.assertTrue(record["vista"])
+        self.assertEqual([a["estado"] for a in record["acciones"]], ["aplicada", "rechazada", "rechazada"])
+        self.assertEqual(json.dumps(self.vk.tasks, sort_keys=True), before)
+        self.assertEqual(again["descartadaEn"], timestamp, "retry preserves original decision")
+        self.assertEqual(self.marks[-1], "processed")
+        with self.assertRaisesRegex(ValueError, "descartada"):
+            inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [{"actionId": "a2", "decision": "aprobar"}]}, self.vk)
+
+    def test_discarded_source_is_not_analysed_on_a_new_content_revision(self):
+        self.process()
+        with patch.object(inbox, "QUEUE_PATH", Path(self.tmp.name) / "queue.json"):
+            inbox.apply_decision(self.store, {"minuteId": "abc-123", "decision": "descartar"}, None)
+        result = inbox.process_item({**self.item, "digest": "d2"}, lambda _: self.fail("no new analysis"), None, self.store)
+        self.assertEqual(result["estado"], "descartada")
+        self.assertEqual(self.marks[-1], "processed")
+
+    def test_discard_marks_latest_queued_revision_processed(self):
+        self.process()
+        queue = Path(self.tmp.name) / "queue.json"
+        queue.write_text(json.dumps({"items": {"abc-123": {**self.item, "digest": "d2"}}}))
+        with patch.object(inbox, "QUEUE_PATH", queue), patch.object(inbox, "mark_queue") as mark:
+            inbox.apply_decision(self.store, {"minuteId": "abc-123", "decision": "descartar"}, None)
+        self.assertEqual(mark.call_args.args[0]["digest"], "d2")
+
     def test_user_decisions_apply_edits_and_rejections(self):
         self.process()
         record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [

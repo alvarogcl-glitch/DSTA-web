@@ -38,10 +38,11 @@
 
   const currentTasks = () => (typeof tasks !== 'undefined' && Array.isArray(tasks) ? tasks : []);
   const currentProjects = () => (typeof projects !== 'undefined' && Array.isArray(projects) ? projects : []);
-  const pending = minute => minute.acciones.filter(a => !a.auto && ['propuesta', 'error'].includes(a.estado));
-  const attention = minute => minute.estado === 'por_revisar' || !minute.vista;
+  const discarded = minute => Boolean(minute.descartadaEn) || minute.estado === 'descartada';
+  const pending = minute => discarded(minute) ? [] : minute.acciones.filter(a => !a.auto && ['propuesta', 'error'].includes(a.estado));
+  const attention = minute => !discarded(minute) && (minute.estado === 'por_revisar' || !minute.vista);
   // Una minuta sale de la bandeja cuando ya no tiene nada por decidir (y ya fue vista).
-  const inInbox = minute => attention(minute) || minute.aplicando || minute.id === openId;
+  const inInbox = minute => !discarded(minute) && (attention(minute) || minute.aplicando || minute.id === openId);
   const awaiting = new Set(); // minutas con decisiones enviadas, para avisar el resultado
   let notice = '';
 
@@ -59,6 +60,7 @@
   }
 
   function decidable(minute) {
+    if (discarded(minute)) return [];
     return [...pending(minute), ...minute.acciones.filter(a => a.auto)];
   }
 
@@ -109,20 +111,21 @@
     const automatic = minute.acciones.filter(a => a.auto);
     const resolved = minute.acciones.filter(a => !a.auto && !['propuesta', 'error'].includes(a.estado));
     const chosen = decidable(minute).filter(a => chosenDecision(minute.id, a)).length;
-    const chip = minute.estado === 'por_revisar' ? '<span class="dsta-inbox-chip todo">Nueva minuta por procesar</span>' : '<span class="dsta-inbox-chip done">Procesada</span>';
+    const chip = discarded(minute) ? '<span class="dsta-inbox-chip">Descartada</span>' : minute.estado === 'por_revisar' ? '<span class="dsta-inbox-chip todo">Nueva minuta por procesar</span>' : '<span class="dsta-inbox-chip done">Procesada</span>';
     let detail = '';
     if (open) {
       detail = `<div class="dsta-inbox-detail">
         ${minute.resumen ? `<p>${esc(minute.resumen)}</p>` : ''}
         <h4>Aplicado automáticamente · ${automatic.length}</h4>
         ${automatic.length ? '<ul class="dsta-inbox-done">' + automatic.map(a => `<li><b>${esc(a.resultado)}</b>${a.nota ? `<br><span>${esc(a.nota)}</span>` : ''}${previousInstructions(a)}
-          <details class="dsta-inbox-modify"${draftFor(minute.id, a.id).instruccion ? ' open' : ''}><summary>Modificar</summary>${instructionBox(minute, a, 'Ej: cambia el responsable a Nelson · elimina esta tarea · agrega que falta la firma')}</details></li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
+          ${discarded(minute) ? '' : `<details class="dsta-inbox-modify"${draftFor(minute.id, a.id).instruccion ? ' open' : ''}><summary>Modificar</summary>${instructionBox(minute, a, 'Ej: cambia el responsable a Nelson · elimina esta tarea · agrega que falta la firma')}</details>`}</li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
         <h4>Propuestas para tu revisión · ${proposals.length}</h4>
         ${proposals.map(action => proposal(minute, action)).join('') || '<p class="muted">Sin propuestas pendientes.</p>'}
         ${resolved.length ? `<details><summary>Resueltas · ${resolved.length}</summary><ul class="dsta-inbox-done">${resolved.map(a => `<li>${esc(LABELS[a.tipo])}: ${esc(a.resultado)}</li>`).join('')}</ul></details>` : ''}
         ${minute.antecedentes?.length ? `<details><summary>Antecedentes · ${minute.antecedentes.length}</summary><ul>${minute.antecedentes.map(item => `<li>${esc(item)}</li>`).join('')}</ul></details>` : ''}
         ${minute.errorDecision ? `<p class="dsta-inbox-error">${esc(minute.errorDecision)}</p>` : ''}
         ${decidable(minute).length ? `<div class="dsta-inbox-submit"><button type="button" data-submit="${esc(minute.id)}"${chosen && !minute.aplicando ? '' : ' disabled'}>${minute.aplicando ? 'Aplicando en Vikunja… (las instrucciones pueden tardar 1-2 min)' : `Enviar (${chosen})`}</button></div>` : ''}
+        ${discarded(minute) ? '<p class="muted">Descartada por tu instrucción. No se realizarán nuevas acciones con esta minuta.</p>' : `<div class="dsta-inbox-discard"><button type="button" data-discard="${esc(minute.id)}"${minute.aplicando ? ' disabled' : ''}>No hacer nada · descartar minuta</button><p class="muted">Quita la minuta de las pendientes y descarta sus propuestas. Lo ya aplicado se conserva.</p></div>`}
         <p class="muted dsta-inbox-source">Copia guardada: ${esc(minute.minuta)}</p>
       </div>`;
     }
@@ -146,10 +149,11 @@
     if (panel.hidden) return;
     const focused = panel.contains(document.activeElement) && document.activeElement.matches('input:not([type=radio]),textarea,select');
     if (focused) return; // no reescribir mientras se edita un campo
+    const historyOpen = Boolean(body.querySelector('.dsta-inbox-history')?.open);
     body.innerHTML = (loadError ? `<p class="dsta-inbox-error">${esc(loadError)}</p>` : '') +
       (notice ? `<p class="dsta-inbox-notice" role="status">${esc(notice)}</p>` : '') +
       (minutes.filter(inInbox).map(minuteCard).join('') || '<p class="muted">Sin minutas pendientes. Granola se revisa cada hora.</p>') +
-      (processedCount() ? `<details class="dsta-inbox-history"><summary>Minutas procesadas · ${processedCount()}</summary>${minutes.filter(m => !inInbox(m)).map(minuteCard).join('')}</details>` : '');
+      (processedCount() ? `<details class="dsta-inbox-history"${historyOpen ? ' open' : ''}><summary>Historial de minutas · ${processedCount()}</summary>${minutes.filter(m => !inInbox(m)).map(minuteCard).join('')}</details>` : '');
   }
 
   async function load() {
@@ -166,8 +170,12 @@
           const minute = minutes.find(item => item.id === id);
           if (!minute || minute.aplicando) continue;
           awaiting.delete(id);
+          if (minute.errorDecision) {
+            notice = minute.errorDecision;
+            continue;
+          }
           const left = pending(minute).length;
-          notice = left ? `Decisiones aplicadas en «${minute.titulo}»; quedan ${left} por decidir.`
+          notice = discarded(minute) ? `«${minute.titulo}» fue descartada y salió de las pendientes.` : left ? `Decisiones aplicadas en «${minute.titulo}»; quedan ${left} por decidir.`
             : `«${minute.titulo}» quedó procesada y salió de la bandeja.`;
           if (!left && openId === id) openId = '';
         }
@@ -226,10 +234,34 @@
     load();
   }
 
+  async function discard(minuteId) {
+    const minute = minutes.find(item => item.id === minuteId);
+    if (!minute || minute.aplicando || discarded(minute)) return;
+    minute.aplicando = true;
+    loadError = '';
+    render();
+    try {
+      const response = await fetch('/api/minutes/decide', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ minuteId, decision: 'descartar', digest: minute.digest }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'No se pudo descartar la minuta.');
+      delete drafts[minuteId];
+      awaiting.add(minuteId);
+      notice = `Guardando tu instrucción para descartar «${minute.titulo}»…`;
+    } catch (error) {
+      minute.aplicando = false;
+      loadError = error.message;
+    }
+    lastPayload = '';
+    load();
+  }
+
   bell.addEventListener('click', () => openPanel(panel.hidden));
   panel.querySelector('#dsta-inbox-close').addEventListener('click', () => openPanel(false));
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) openPanel(false); });
   body.addEventListener('click', event => {
+    const discardButton = event.target.closest('[data-discard]');
+    if (discardButton) { discard(discardButton.dataset.discard); return; }
     const opener = event.target.closest('[data-open]');
     if (opener) {
       const minute = minutes.find(item => item.id === opener.dataset.open);

@@ -1,7 +1,7 @@
 #dsta-inbox-toggle{position:relative;margin-right:8px;font-size:17px;line-height:1;padding:9px 12px}
 #dsta-inbox-toggle.has-news{border-color:#f6c85f}
 .dsta-inbox-badge{position:absolute;top:-7px;right:-7px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#ff7b72;color:#0d1117;font:700 11px/20px system-ui;text-align:center}
-#dsta-inbox{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:7;display:flex;flex-direction:column;background:#151b23;border-left:1px solid #3a4859;box-shadow:-18px 0 60px #000a;color:#eef3f8}
+#dsta-inbox{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);z-index:7;display:flex;flex-direction:column;background:#151b23;border-left:1px solid #3a4859;box-shadow:-18px 0 60px #000a;color:#eef3f8}
 #dsta-inbox[hidden]{display:none}
 #dsta-inbox>header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0;padding:18px 20px;border-bottom:1px solid #2b3745}
 #dsta-inbox>header strong{display:block;font-size:18px;margin-top:3px}
@@ -44,3 +44,6 @@ body:has(#dsta-inbox:not([hidden])) #dsta-assistant{display:none}
 .dsta-inbox-instr-done{margin:4px 0 0;padding:6px 9px;border-left:3px solid #68d391;background:#1c3430;color:#dce9f3;font-size:12px}
 .dsta-inbox-history{margin-top:6px}.dsta-inbox-history>summary{cursor:pointer;color:#9bacbd;padding:6px 2px}
 .dsta-inbox-history .dsta-inbox-minute{margin-top:10px}
+.dsta-inbox-discard{display:grid;gap:6px;margin-top:10px;padding-top:12px;border-top:1px solid #2b3745}
+.dsta-inbox-discard button{width:100%}
+.dsta-inbox-discard p{font-size:12px}

@@ -483,9 +483,12 @@ def process_decision(decision: dict, base_url: str, token: str, hermes_home: Pat
     """Apply the approvals, rejections and instructions the user sent from the dashboard inbox."""
     error = ""
     try:
-        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision, minute_inbox.load_vikunja(), ask)
+        discard = decision.get("decision") == "descartar"
+        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision,
+                                             None if discard else minute_inbox.load_vikunja(), ask)
         push_minute(base_url, token, record)
-        publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+        if not discard:
+            publish_snapshot(base_url, token, vikunja_token, vikunja_url)
     except Exception as failure:
         error = f"No se pudieron aplicar las decisiones: {failure}"[:300]
         print(f"Decisión de minuta falló ({type(failure).__name__})", file=sys.stderr, flush=True)

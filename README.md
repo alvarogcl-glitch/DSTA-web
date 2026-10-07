@@ -405,3 +405,41 @@ Validación: `npm test` incluye la lista pública, autenticación y aislamiento 
 service worker. Verificar finalmente instalación y reapertura en Chrome Android,
 inicio de sesión, navegación, copia de minutas y recuperación después de perder
 la conexión; probar acciones de escritura solo con tareas de prueba autorizadas.
+
+### Disponibilidad tardía de minutas Granola
+
+El exportador operativo usa `tools/granola_summary_export.py` (copia instalada en
+`pmo-dsta/scripts/granola-summary-export.py`) y el promotor usa
+`tools/promote_granola_summaries.py` (instalado como `promote-granola-summaries.py`
+en la misma carpeta). Ambos se cargan en cada sincronización; estos cambios no
+requieren reiniciar Hermes ni desplegar el Worker. Antes de instalar una actualización,
+respaldar los scripts operativos y copiar las fuentes versionadas con esos nombres.
+
+Si Granola lista una reunión antes de generar su resumen y no hay notas disponibles,
+el exportador consulta esa reunión una vez por separado. Si sigue vacía, registra
+`deferred` en `07_reuniones/.granola-summary-staging/extraction-report.json` y la
+reintenta en el siguiente ciclo horario, dentro de la ventana de 30 días. No exporta
+ni encola una minuta vacía y conserva contenido válido anterior. El promotor también
+excluye archivos vacíos antiguos. Las notas disponibles bastan para importar una reunión.
+Cuando aparece el contenido, su nueva huella genera una revisión para el flujo habitual
+de reconciliación. `tests/test_granola_summary_export.py` cubre estas transiciones.
+
+### Descartar una minuta completa
+
+El detalle de cada minuta ofrece **No hacer nada · descartar minuta**. Envía una
+decisión de reunión completa por la cola existente (`decision: "descartar"`,
+`minuteId` y `digest`), que rechaza las propuestas pendientes y conserva las acciones
+ya aplicadas. El puente no llama al modelo ni consulta o modifica Vikunja para esta
+operación. Al confirmarse, la minuta deja de contar en la campana y aparece solo en
+el historial como **Descartada**. La copia Markdown se conserva.
+
+La VM guarda `descartadaEn` por sourceId, cierra la revisión vigente de la cola y
+omite nuevas reconciliaciones de esa reunión. El exportador también omite fuentes
+descartadas para no volver a encolarlas; el Worker conserva esa decisión ante
+republicaciones, incluso con otra huella. Se rechazan decisiones sobre una versión
+que cambió o mientras hay otra operación pendiente.
+
+Activación de este cambio: instalar la copia actualizada del exportador operativo,
+reiniciar solo la tarea `DSTA Hermes Bridge` y publicar el Worker con los assets.
+Requiere la aprobación operativa del proyecto. No se descartan reuniones reales
+como parte de las pruebas.

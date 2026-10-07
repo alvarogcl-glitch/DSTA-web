@@ -461,6 +461,8 @@ def extract_json(output: str) -> str:
 # ── Record lifecycle ──
 
 def record_status(record: dict[str, Any]) -> str:
+    if record.get("descartadaEn"):
+        return "descartada"
     return "por_revisar" if any(a["estado"] in {"propuesta", "error"} and not a.get("auto")
                                 for a in record["acciones"]) else "procesada"
 
@@ -473,7 +475,10 @@ def write_report(record: dict[str, Any]) -> str:
                           f"{a['titulo'] or a['nota'][:120]} — {a['estado']}: {a['resultado'] or a['motivo']}"
                           f"\n  Evidencia: {a['evidencia']}")
     body = (f"# Reconciliación Granola · {record['titulo']} ({record['fecha']})\n\n"
-            f"Fuente: {record['sourceId']} · hash {record['digest']}\n\n{record['resumen']}\n\n"
+            f"Fuente: {record['sourceId']} · hash {record['digest']}\n\n"
+            + (f"Instrucción de Álvaro: descartar minuta, no realizar nuevas acciones. Guardada: {record['descartadaEn']}\n\n"
+               if record.get("descartadaEn") else "")
+            + f"{record['resumen']}\n\n"
             + section("Actualizadas automáticamente", [describe(a) for a in record["acciones"] if a.get("auto")])
             + section("Propuestas para decisión", [describe(a) for a in record["acciones"] if not a.get("auto")])
             + section("Antecedentes", [f"- {item}" for item in record["antecedentes"]]))
@@ -482,6 +487,11 @@ def write_report(record: dict[str, Any]) -> str:
 
 
 def process_item(item: dict[str, Any], ask_model: Callable[[str], str], vk, store: Path) -> dict[str, Any]:
+    previous = get_record(store, item["source_id"])
+    if previous and previous.get("descartadaEn"):
+        # Discard applies to this meeting source, including later content revisions.
+        mark_queue(item, "processed", write_report(previous))
+        return previous
     minute_id, title = minute_ref(item)
     date = iso_meeting_date(item.get("meeting_date", ""))
     prompt = analysis_prompt(minute_id, title, item.get("meeting_date", ""))
@@ -515,6 +525,24 @@ def apply_decision(store: Path, decision: dict[str, Any], vk,
     record = get_record(store, str(decision.get("minuteId", "")))
     if not record:
         raise KeyError("La minuta ya no está en la bandeja.")
+    if decision.get("decision") == "descartar":
+        if not record.get("descartadaEn"):
+            record["descartadaEn"] = now()
+            for action in record["acciones"]:
+                if not action.get("auto") and action["estado"] in {"propuesta", "error"}:
+                    action["estado"] = "rechazada"
+                    action["resultado"] = "Minuta descartada por Álvaro: no realizar acciones."
+        record["estado"] = "descartada"
+        record["vista"] = True
+        record["actualizadaEn"] = now()
+        save_record(store, record)
+        report = write_report(record)
+        # The exporter may have queued a newer hash before the dismissal is handled.
+        queued = json.loads(QUEUE_PATH.read_text(encoding="utf-8")).get("items", {}).get(record["sourceId"]) if QUEUE_PATH.exists() else None
+        mark_queue(queued or {"source_id": record["sourceId"], "digest": record["digest"]}, "processed", report)
+        return record
+    if record.get("descartadaEn"):
+        raise ValueError("Esta minuta ya fue descartada.")
     by_id = {action["id"]: action for action in record["acciones"]}
     for choice in decision.get("decisions") or []:
         action = by_id.get(str(choice.get("actionId", "")))
