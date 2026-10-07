@@ -33,7 +33,13 @@ valida la pertenencia actual a una LT/TR activa bajo PMO-DSTA, relee la tarea na
 conserva sus campos (incluidos `SOURCE` y `ACTION_KEY`), aplica `done=true` y verifica
 el resultado. Si ya está completada, no repite el POST. Después publica un snapshot
 fresco; solo al comprobarlo muestra éxito. El chat y los resúmenes se ejecutan en
-segundo plano, sin bloquear la recepción de acciones directas.
+segundo plano. Las acciones se consultan en un hilo independiente cada 2 segundos,
+con un tiempo máximo de 10 segundos por consulta; una petición lenta o fallida de
+salud, chat o resúmenes no bloquea su recepción. Se procesan de una en una, usando
+la misma concesión e identificación durable. El log `dsta-bridge.log` registra
+recepción, verificación en Vikunja, publicación y confirmación, con duraciones y
+ID de solicitud sin datos de la tarea ni credenciales. Cambiar este código requiere
+reiniciar el puente local; no requiere desplegar el Worker.
 
 **Agregar registro** conserva la cola del copiloto, con ID explícito y sin historial.
 `pmo_append_log` relee la descripción canónica, agrega el registro fechado, conserva

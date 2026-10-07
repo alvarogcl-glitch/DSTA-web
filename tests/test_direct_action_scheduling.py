@@ -34,10 +34,43 @@ class SchedulingTests(unittest.TestCase):
             with patch.object(bridge,'load_env_file',return_value=values), patch.object(bridge,'setting',side_effect=lambda n,v,d='': v.get(n,d)), \
                  patch.object(bridge.shutil,'which',return_value='test'), patch.object(bridge.minute_inbox,'load_store',return_value={'minutes':{}}), \
                  patch.object(bridge,'HealthMonitor'), patch.object(bridge,'request_json',side_effect=request), \
-                 patch.object(bridge,'process_job',side_effect=process), patch.object(bridge.time,'sleep',side_effect=sleep):
+                 patch.object(bridge,'process_job',side_effect=process), patch.object(bridge,'ACTION_POLL_SECONDS',0.01), \
+                 patch.object(bridge.time,'sleep',side_effect=sleep):
                 with self.assertRaises(KeyboardInterrupt): bridge.run(once=False,env_file=Path('none'))
         finally:
             release.set()
         self.assertTrue(acted.is_set(),'action polling must continue while chat is blocked')
+
+    def test_blocked_health_poll_does_not_delay_action(self):
+        blocked, acted = threading.Event(), threading.Event()
+        def request(url, **kwargs):
+            if url.endswith('kind=action'):
+                self.assertEqual(kwargs['timeout'], 10)
+                return {'job': {'kind': 'action', 'id': 'direct'}} if blocked.is_set() else {}
+            if url.endswith('kind=health'):
+                blocked.set()
+                self.assertTrue(acted.wait(1), 'health request blocked direct actions')
+                raise KeyboardInterrupt()
+            return {}
+        values = {'DSTA_DASHBOARD_URL':'https://example.test','DSTA_BRIDGE_TOKEN':'test','HERMES_CLI':'test','DSTA_GRANOLA_INTERVAL_SECONDS':'0'}
+        with patch.object(bridge,'load_env_file',return_value=values), \
+             patch.object(bridge,'setting',side_effect=lambda n,v,d='': v.get(n,d)), \
+             patch.object(bridge.shutil,'which',return_value='test'), \
+             patch.object(bridge.minute_inbox,'load_store',return_value={'minutes':{}}), \
+             patch.object(bridge,'HealthMonitor'), patch.object(bridge,'request_json',side_effect=request), \
+             patch.object(bridge,'process_job',side_effect=lambda *args: acted.set()), \
+             patch.object(bridge,'ACTION_POLL_SECONDS',0.01):
+            with self.assertRaises(KeyboardInterrupt): bridge.run(once=False,env_file=Path('none'))
+        self.assertTrue(acted.is_set())
+        self.assertFalse(any(t.name == 'dsta-direct-actions' for t in threading.enumerate()))
+
+    def test_action_poll_recovers_after_network_failure(self):
+        acted = threading.Event()
+        with patch.object(bridge,'request_json',side_effect=[bridge.URLError('offline'),
+                     {'job': {'kind':'action','id':'recovered'}}]), \
+             patch.object(bridge,'process_job',side_effect=lambda *args: acted.set()), \
+             patch.object(bridge,'ACTION_POLL_SECONDS',0.01):
+            with bridge.action_polling(True,'https://example.test','test'):
+                self.assertTrue(acted.wait(1))
 
 if __name__ == '__main__': unittest.main()

@@ -8,6 +8,7 @@ use an isolated Hermes session without tools.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import os
@@ -46,6 +47,7 @@ minute_inbox = importlib.util.module_from_spec(_inbox_spec)
 _inbox_spec.loader.exec_module(minute_inbox)
 
 POLL_SECONDS = 5
+ACTION_POLL_SECONDS = 2
 USER_AGENT = "DSTA-Hermes-Bridge/1.0"
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
 DEFAULT_DASHBOARD_URL = "https://dsta-web.alvaro-gcl.workers.dev"
@@ -633,6 +635,8 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                 claude_model: str = "sonnet") -> None:
     try:
         if job.get("kind") == "action":
+            started = time.monotonic()
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} action recibido id={job['id']}", flush=True)
             if not vikunja_token:
                 raise ValueError("Falta credencial de Vikunja")
             def action_request(method, path, **kwargs):
@@ -645,12 +649,17 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                 return request_json(vikunja_url.rstrip("/") + path, token=vikunja_token,
                                     method=method, timeout=20, **kwargs)
             execute_completion(job, action_request, server_url=vikunja_url)
+            written = time.monotonic()
             try:
                 timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
             except Exception:
                 finish_job(base_url, token, job, refresh_error="No se pudo confirmar el snapshot actualizado.")
             else:
+                published = time.monotonic()
                 finish_job(base_url, token, job, snapshot_timestamp=timestamp)
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} action confirmado id={job['id']} "
+                      f"vikunja={written - started:.2f}s snapshot={published - written:.2f}s "
+                      f"confirmacion={time.monotonic() - published:.2f}s", flush=True)
         elif job.get("kind") == "summary":
             summaries = run_summarizer(job, hermes_cli, hermes_home, hermes_provider, hermes_model,
                                        claude_cli, claude_model)
@@ -681,6 +690,41 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {job.get('kind')} falló ({type(error).__name__})"[:600], file=sys.stderr, flush=True)
 
 
+@contextmanager
+def action_polling(enabled: bool, base_url: str, token: str, *job_args):
+    """Keep direct actions independent of slow or failed chat/health/summary polls.
+
+    One consumer processes actions serially and finishes an accepted job before
+    shutdown. The Worker lease remains authoritative across bridge processes.
+    """
+    stop = threading.Event()
+
+    def consume():
+        print(f"Canal directo de acciones listo; consulta independiente cada {ACTION_POLL_SECONDS}s.",
+              flush=True)
+        while not stop.is_set():
+            try:
+                job = request_json(f"{base_url}/api/bridge/next?kind=action", token=token,
+                                   timeout=10).get("job")
+                if job:
+                    process_job(job, base_url, token, *job_args)
+            except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} Canal de acciones sin conexion "
+                      f"({type(error).__name__}); reintenta en {ACTION_POLL_SECONDS}s",
+                      file=sys.stderr, flush=True)
+            stop.wait(ACTION_POLL_SECONDS)
+
+    thread = threading.Thread(target=consume, name="dsta-direct-actions") if enabled else None
+    if thread:
+        thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        if thread:
+            thread.join()
+
+
 def run(*, once: bool, env_file: Path | None) -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME", str(DEFAULT_HERMES_HOME)))
     env_path = env_file or (hermes_home / ".env")
@@ -709,7 +753,9 @@ def run(*, once: bool, env_file: Path | None) -> int:
             push_minute(dashboard_url, bridge_token, record)
         except (HTTPError, URLError, OSError, ValueError):
             break
-    with ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
+    with action_polling(not once, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                        hermes_provider, hermes_model, vikunja_token, vikunja_url, claude_cli, claude_model), \
+            ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
             ThreadPoolExecutor(max_workers=1) as checks, ThreadPoolExecutor(max_workers=1) as chats:
         chat_future: Future | None = None
         summary_future: Future | None = None
@@ -742,7 +788,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
                     granola_future = granola.submit(
                         granola_cycle, dashboard_url, bridge_token, hermes_cli, hermes_home, hermes_provider,
                         hermes_model, claude_cli, claude_model, vikunja_token, vikunja_url, health)
-                action = request_json(f"{dashboard_url}/api/bridge/next?kind=action", token=bridge_token).get("job")
+                action = request_json(f"{dashboard_url}/api/bridge/next?kind=action", token=bridge_token).get("job") if once else None
                 if action:
                     process_job(action, dashboard_url, bridge_token, hermes_cli, hermes_home,
                                 hermes_provider, hermes_model, vikunja_token, vikunja_url,
