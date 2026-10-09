@@ -6,6 +6,8 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import sys
+from types import ModuleType
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -14,7 +16,14 @@ import xml.etree.ElementTree as ET
 SPEC = importlib.util.spec_from_file_location(
     "granola_export", Path(__file__).resolve().parents[1] / "tools/granola_summary_export.py")
 export = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(export)
+# The OAuth call is mocked by these offline tests. Hermes owns this module
+# outside this repository; importing the test must not require its installation.
+oauth_stub = ModuleType("tools.mcp_oauth")
+def offline_oauth(*args, **kwargs):
+    raise AssertionError("Offline tests must mock OAuth")
+oauth_stub.build_oauth_auth = offline_oauth
+with patch.dict(sys.modules, {"tools.mcp_oauth": oauth_stub}):
+    SPEC.loader.exec_module(export)
 
 
 class ExportTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 """Publica snapshots de Vikunja en el Worker de Cloudflare.
 
-Consulta Vikunja cada 30 segundos y escribe en Workers KV únicamente cuando
+Consulta Vikunja cada 30 segundos y publica en el Durable Object únicamente cuando
 hay cambios o cuando corresponde el pulso de cinco minutos.
 """
 
@@ -85,6 +85,11 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
         key=lambda project: (float(project.get("position") or 0), str(project.get("title") or "").casefold()),
     )
 
+    labels = pages(base_url, "/api/v1/labels", token)
+    label_catalog = [{"id": label["id"], "title": label["title"],
+                      "hex_color": str(label.get("hex_color") or "bac7d5").lstrip("#").lower()}
+                     for label in labels]
+    label_ids = {label["id"] for label in label_catalog}
     tasks: list[dict] = []
     project_summary: list[dict] = []
     for project in scope:
@@ -112,11 +117,14 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
                     "source": description_field(description, "SOURCE"),
                     "action_key": description_field(description, "ACTION_KEY"),
                     "description": description,
+                    "label_ids": sorted({label["id"] for label in (raw.get("labels") or [])
+                                         if label.get("id") in label_ids}),
                 }
             )
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "observationStartedAt": observation_started_at,
+        "labels": label_catalog,
         "projects": project_summary,
         "tasks": tasks,
         "stale": False,
@@ -124,7 +132,8 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
 
 
 def content_hash(snapshot: dict) -> str:
-    stable = {"projects": snapshot["projects"], "tasks": snapshot["tasks"]}
+    stable = {"projects": snapshot["projects"], "tasks": snapshot["tasks"],
+              "labels": snapshot.get("labels", [])}
     encoded = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 

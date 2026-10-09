@@ -22,7 +22,8 @@ const server=createServer(async(req,res)=>{
   if(path.startsWith('/api/v1/')){
    assert.equal(req.headers.authorization,'Bearer vikunja-test');
    let value;
-   if(path==='/api/v1/projects')value=projects;
+   if(path==='/api/v1/labels')value=[];
+   else if(path==='/api/v1/projects')value=projects;
    else if(path==='/api/v1/projects/2')value=projects[0];
    else if(path==='/api/v1/projects/3')value=projects[1];
    else if(path==='/api/v1/projects/3/tasks')value=[task];

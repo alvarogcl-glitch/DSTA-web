@@ -33,6 +33,7 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from task_mutation_lock import task_lock
+import label_actions
 
 _publisher_spec = importlib.util.spec_from_file_location(
     "dsta_publish_dashboard", Path(__file__).with_name("publish_dashboard.py"))
@@ -454,13 +455,16 @@ _snapshot_lock = threading.Lock()
 
 
 def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str,
-                     *, action_job: dict | None = None) -> str:
+                     *, action_job: dict | None = None, label_job: dict | None = None,
+                     label_result: dict | None = None) -> str:
     if not vikunja_token:
         raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
     with _snapshot_lock:
         snapshot = fetch_dashboard(vikunja_url, vikunja_token)
         if action_job is not None:
             snapshot["actionConfirmation"] = {"id": action_job["id"], "attempt": action_job["attempt"]}
+        if label_job is not None:
+            snapshot["labelConfirmation"] = {"id": label_job["id"], "attempt": label_job["attempt"], "result": label_result}
         request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
         return snapshot["timestamp"]
 
@@ -612,8 +616,8 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                refresh_error: str = "", snapshot_timestamp: str = "",
                minutes: dict | None = None) -> dict:
     payload: dict = {"id": job["id"]}
-    if job.get("kind") == "action":
-        payload.update(kind="action", attempt=job.get("attempt"))
+    if job.get("kind") in {"action", "label"}:
+        payload.update(kind=job["kind"], attempt=job.get("attempt"))
     if error:
         payload["error"] = error
     elif job.get("kind") == "summary":
@@ -640,7 +644,24 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                 vikunja_url: str = "http://127.0.0.1:3456", claude_cli: str = "",
                 claude_model: str = "sonnet") -> None:
     try:
-        if job.get("kind") == "action":
+        if job.get("kind") == "label":
+            if not vikunja_token:
+                raise ValueError("Falta credencial de Vikunja")
+            def label_request(method, path, **kwargs):
+                if method != 'GET' and job.get('leaseUntil', 0) <= time.time() * 1000 + 30000:
+                    raise RuntimeError('La concesión expiró antes de escribir')
+                return request_json(vikunja_url.rstrip('/') + path, token=vikunja_token,
+                                    method=method, timeout=20, **kwargs)
+            result = label_actions.execute(job, label_request, server_url=vikunja_url,
+                                           cache_dir=hermes_home / 'cache')
+            try:
+                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url,
+                                             label_job=job, label_result=result)
+            except Exception:
+                finish_job(base_url, token, job, refresh_error='No se pudo confirmar el snapshot')
+            else:
+                finish_job(base_url, token, job, snapshot_timestamp=timestamp)
+        elif job.get("kind") == "action":
             started = time.monotonic()
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} action recibido id={job['id']}", flush=True)
             if not vikunja_token:
@@ -701,7 +722,7 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
 
 
 @contextmanager
-def action_polling(enabled: bool, base_url: str, token: str, *job_args):
+def action_polling(enabled: bool, base_url: str, token: str, *job_args, poll_kind: str = "action"):
     """Keep direct actions independent of slow or failed chat/health/summary polls.
 
     One consumer processes actions serially and finishes an accepted job before
@@ -710,11 +731,11 @@ def action_polling(enabled: bool, base_url: str, token: str, *job_args):
     stop = threading.Event()
 
     def consume():
-        print(f"Canal directo de acciones listo; consulta independiente cada {ACTION_POLL_SECONDS}s.",
+        print(f"Canal directo {poll_kind} listo; consulta independiente cada {ACTION_POLL_SECONDS}s.",
               flush=True)
         while not stop.is_set():
             try:
-                job = request_json(f"{base_url}/api/bridge/next?kind=action", token=token,
+                job = request_json(f"{base_url}/api/bridge/next?kind={poll_kind}", token=token,
                                    timeout=10).get("job")
                 if job:
                     process_job(job, base_url, token, *job_args)
@@ -724,7 +745,7 @@ def action_polling(enabled: bool, base_url: str, token: str, *job_args):
                       file=sys.stderr, flush=True)
             stop.wait(ACTION_POLL_SECONDS)
 
-    thread = threading.Thread(target=consume, name="dsta-direct-actions") if enabled else None
+    thread = threading.Thread(target=consume, name="dsta-direct-actions" if poll_kind == "action" else "dsta-label-actions") if enabled else None
     if thread:
         thread.start()
     try:
@@ -765,7 +786,9 @@ def run(*, once: bool, env_file: Path | None) -> int:
             break
     with action_polling(not once, dashboard_url, bridge_token, hermes_cli, hermes_home,
                         hermes_provider, hermes_model, vikunja_token, vikunja_url, claude_cli, claude_model), \
-            ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
+            action_polling(not once, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                           hermes_provider, hermes_model, vikunja_token, vikunja_url, claude_cli, claude_model,
+                           poll_kind="label"), ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
             ThreadPoolExecutor(max_workers=1) as checks, ThreadPoolExecutor(max_workers=1) as chats:
         chat_future: Future | None = None
         summary_future: Future | None = None
@@ -804,6 +827,13 @@ def run(*, once: bool, env_file: Path | None) -> int:
                                 hermes_provider, hermes_model, vikunja_token, vikunja_url,
                                 claude_cli, claude_model)
                     if once:
+                        return 0
+                if once:
+                    label = request_json(f"{dashboard_url}/api/bridge/next?kind=label", token=bridge_token).get("job")
+                    if label:
+                        process_job(label, dashboard_url, bridge_token, hermes_cli, hermes_home,
+                                    hermes_provider, hermes_model, vikunja_token, vikunja_url,
+                                    claude_cli, claude_model)
                         return 0
                 chat_busy = chat_future is not None and not chat_future.done()
                 chat_query = "chat&chatBusy=1" if chat_busy else "chat"

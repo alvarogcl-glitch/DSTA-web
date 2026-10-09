@@ -111,6 +111,14 @@ function validSnapshot(snapshot) {
   const validRecord = item => item && typeof item === "object" && !Array.isArray(item) &&
     Number.isSafeInteger(item.id) && item.id > 0 && typeof item.title === "string";
   if (snapshot.projects.some(item => !validRecord(item)) || snapshot.tasks.some(item => !validRecord(item))) return false;
+  if (snapshot.labels !== undefined) {
+    if (!Array.isArray(snapshot.labels) || snapshot.labels.some(l => !validRecord(l) ||
+        typeof l.hex_color !== "string" || !/^[0-9a-f]{6}$/i.test(l.hex_color)) ||
+        new Set(snapshot.labels.map(l => l.id)).size !== snapshot.labels.length) return false;
+    const labelIds = new Set(snapshot.labels.map(l => l.id));
+    if (snapshot.tasks.some(t => !Array.isArray(t.label_ids) ||
+        new Set(t.label_ids).size !== t.label_ids.length || t.label_ids.some(id => !labelIds.has(id)))) return false;
+  } else if (snapshot.tasks.some(t => t.label_ids !== undefined)) return false;
   const projectIds = new Set(snapshot.projects.map(item => item.id));
   if (projectIds.size !== snapshot.projects.length || new Set(snapshot.tasks.map(item => item.id)).size !== snapshot.tasks.length) return false;
   return snapshot.tasks.every(task =>
@@ -134,14 +142,15 @@ async function receiveSnapshot(request, env, fromBridge = false) {
   const normalized = {
     timestamp: snapshot.timestamp,
     ...(snapshot.observationStartedAt ? { observationStartedAt: snapshot.observationStartedAt } : {}),
+    ...(snapshot.labels !== undefined ? {labels: snapshot.labels} : {}),
     projects: snapshot.projects,
     tasks: snapshot.tasks,
     stale: false,
   };
-  if (snapshot.actionConfirmation !== undefined && !fromBridge) {
+  if ((snapshot.actionConfirmation !== undefined || snapshot.labelConfirmation !== undefined) && !fromBridge) {
     return json({ error: "La confirmación requiere el canal del puente." }, 400);
   }
-  if (!await chatStub(env).saveSnapshot(normalized, snapshot.actionConfirmation ?? null)) {
+  if (!await chatStub(env).saveSnapshot(normalized, snapshot.actionConfirmation ?? null, snapshot.labelConfirmation ?? null)) {
     return json({ error: "Snapshot anterior a la observación vigente; no se reemplazaron los datos." }, 409);
   }
   return json({ ok: true, projects: normalized.projects.length, tasks: normalized.tasks.length }, 202);
@@ -203,6 +212,53 @@ async function createAssistantJob(request, env) {
 }
 
 const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LABEL_COLORS = new Set(['86e2bb','8bbcff','c6a0f6','f5a9cf','ffa194','f6c85f','c4df83','7bd9df','b7baff','bac7d5']);
+const labelName = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+const protectedLabel = label => labelName(label.title) === 'carrera tecnologica';
+function validLabelAction(body) {
+  if (!body || Array.isArray(body) || !ACTION_UUID.test(body.requestId || '')) return false;
+  const fields = {
+    create: ['title','color','taskId'], update: ['labelId','title','color'],
+    delete: ['labelId'], assign: ['taskId','labelId'], unassign: ['taskId','labelId'], reset: [],
+  }[body.action];
+  if (!fields || Object.keys(body).some(key => !['action','requestId',...fields].includes(key))) return false;
+  if (fields.includes('labelId') && (!Number.isSafeInteger(body.labelId) || body.labelId <= 0)) return false;
+  if ((['assign','unassign'].includes(body.action) || body.taskId !== undefined) &&
+      (!Number.isSafeInteger(body.taskId) || body.taskId <= 0)) return false;
+  return !fields.includes('title') || (typeof body.title === 'string' && body.title.trim().length > 0 &&
+    body.title.trim().length <= 100 && LABEL_COLORS.has(body.color));
+}
+async function labelActionRoute(request, url, env) {
+  if (!env.DSTA_BRIDGE_TOKEN) return json({error:'Puente no configurado'},503);
+  if (request.method === 'GET') {
+    const id = url.searchParams.get('id') || '';
+    if (!ACTION_UUID.test(id)) return json({error:'Identificador inválido'},400);
+    return chatStub(env).fetch(`https://chat.internal/labels/status?id=${id}`);
+  }
+  if (request.method !== 'POST') return json({error:'Método no permitido'},405);
+  const parsed = await readJson(request,4096);
+  if (parsed.error) return parsed.error;
+  if (!validLabelAction(parsed.body)) return json({error:'Acción de etiquetas inválida'},400);
+  return forwardToChatObject(env,'/labels/create',parsed.body);
+}
+function labelResultMatches(job, snapshot, result) {
+  if (!Array.isArray(snapshot?.labels) || !result || typeof result !== 'object') return false;
+  const label = snapshot.labels.find(l => l.id === result.labelId);
+  const task = snapshot.tasks.find(t => t.id === job.taskId && t.project_id === job.projectId);
+  if (job.taskId && !task) return false;
+  switch (job.action) {
+    case 'create': return Boolean(label && label.title === job.title.trim() && label.hex_color === job.color &&
+      (!job.taskId || task.label_ids?.includes(label.id)));
+    case 'update': return Boolean(label && label.id === job.labelId && label.title === job.title.trim() && label.hex_color === job.color);
+    case 'assign': return Boolean(label && label.id === job.labelId && task.label_ids?.includes(job.labelId));
+    case 'unassign': return result.labelId === job.labelId && Array.isArray(task?.label_ids) && !task.label_ids.includes(job.labelId);
+    case 'delete': return !snapshot.labels.some(l => l.id === job.labelId);
+    case 'reset': return Boolean(snapshot.labels.some(l => l.id === job.preservedId && protectedLabel(l)) &&
+      job.targets.every(target => !snapshot.labels.some(l => l.id === target.id)));
+    default: return false;
+  }
+}
+
 async function taskActionRoute(request, url, env) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (request.method === "GET") {
@@ -242,6 +298,7 @@ async function takeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const requestedKind = new URL(request.url).searchParams.get("kind");
   if (requestedKind === "health") return json({ request: await chatStub(env).pendingHealthCheck() });
+  if (requestedKind === "label") return chatStub(env).fetch("https://chat.internal/labels/next");
   if (requestedKind === "action") return chatStub(env).fetch("https://chat.internal/actions/next");
   const kind = requestedKind === "summary" ? "summary" : "chat";
   if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
@@ -253,6 +310,7 @@ async function completeBridgeJob(request, env) {
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 400_000);
   if (parsed.error) return parsed.error;
+  if (parsed.body?.kind === "label") return forwardToChatObject(env, "/labels/complete", parsed.body);
   if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body);
   const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
@@ -368,6 +426,8 @@ export class DashboardChatQueue extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const storage = this.ctx.storage.kv;
+
+    if (url.pathname.startsWith("/labels/")) return this.labelRequest(request, url);
 
     if (url.pathname.startsWith("/actions/")) return this.actionRequest(request, url);
 
@@ -511,6 +571,72 @@ export class DashboardChatQueue extends DurableObject {
     return json({ error: "Ruta interna no encontrada." }, 404);
   }
 
+  async labelRequest(request, url) {
+    const body = request.method === 'POST' ? await request.json() : null;
+    const initial = url.pathname === '/labels/create' ? await this.snapshot() : null;
+    const storage = this.ctx.storage.kv, now = Date.now();
+    const jobs = () => [...storage.list({prefix:'label-job:'})];
+    const view = j => ({id:j.id,status:j.status,error:j.error || '',snapshotTimestamp:j.snapshotTimestamp || '',result:j.result || {}});
+    if (url.pathname === '/labels/create' && request.method === 'POST') {
+      const old = storage.get(`label-job:${body.requestId}`);
+      if (old) return JSON.stringify(old.request) === JSON.stringify(body) ? json(view(old),202) : json({error:'Identificador reutilizado'},409);
+      const snapshot = storage.get('data:snapshot') ?? initial;
+      if (!Array.isArray(snapshot?.labels)) return json({error:'El publicador todavía no entrega etiquetas. Actualiza los servicios de la VM.'},503);
+      const label = snapshot.labels.find(l => l.id === body.labelId);
+      if (body.labelId && !label && body.action !== 'unassign') return json({error:'La etiqueta ya no existe'},404);
+      if (body.action === 'delete' && protectedLabel(label)) return json({error:'Carrera tecnológica se conserva'},409);
+      if (['create','update'].includes(body.action) && snapshot.labels.some(l => l.id !== body.labelId && labelName(l.title) === labelName(body.title))) {
+        return json({error:'Ya existe una etiqueta con ese nombre'},409);
+      }
+      const task = body.taskId && snapshot.tasks.find(t => t.id === body.taskId);
+      if (body.taskId && (!task || !snapshot.projects.some(p => p.id === task.project_id))) return json({error:'Tarea fuera del portafolio'},404);
+      const preserved = snapshot.labels.find(protectedLabel);
+      if (body.action === 'reset' && !preserved) return json({error:'No se encontró Carrera tecnológica; no se eliminarán etiquetas.'},409);
+      for (const [key,j] of jobs()) if (['completed','error'].includes(j.status) && now - Date.parse(j.completedAt) > 604800000) storage.delete(key);
+      if (jobs().some(([,j]) => ['queued','running'].includes(j.status))) return json({error:'Ya hay un cambio de etiquetas pendiente. Espera su confirmación.'},409);
+      if (jobs().length >= 500) return json({error:'Cola llena'},429);
+      const job = {...body, id:body.requestId, request:body, kind:'label',status:'queued',attempts:0,createdAt:new Date(now).toISOString(),
+        ...(task ? {projectId:task.project_id} : {}),
+        ...(body.action === 'delete' ? {target:label} : {}),
+        ...(body.action === 'reset' ? {preservedId:preserved.id,targets:snapshot.labels.filter(l => !protectedLabel(l))} : {})};
+      storage.put(`label-job:${job.id}`,job);
+      return json(view(job),202);
+    }
+    if (url.pathname === '/labels/status' && request.method === 'GET') {
+      const job = storage.get(`label-job:${url.searchParams.get('id')}`);
+      return job ? json(view(job)) : json({error:'Solicitud no encontrada'},404);
+    }
+    if (url.pathname === '/labels/next' && request.method === 'GET') {
+      const active = jobs().find(([,j]) => j.status === 'running');
+      if (active && active[1].leaseUntil > now) return json({job:null});
+      if (active) {
+        const j = active[1]; j.status = j.attempts >= 5 ? 'error' : 'queued';
+        if (j.status === 'error') {j.error='Cambio sin confirmación. Revisa las etiquetas.';j.completedAt=new Date(now).toISOString();}
+        storage.put(active[0],j);
+      }
+      const job = jobs().map(([,j]) => j).find(j => j.status === 'queued' && (!j.nextAt || j.nextAt <= now));
+      if (!job) return json({job:null});
+      Object.assign(job,{status:'running',attempt:crypto.randomUUID(),attempts:job.attempts+1,leaseUntil:now+180000});
+      storage.put(`label-job:${job.id}`,job);
+      return json({job});
+    }
+    if (url.pathname === '/labels/complete' && request.method === 'POST') {
+      const job = storage.get(`label-job:${body.id}`);
+      if (!job || job.status !== 'running' || job.attempt !== body.attempt || job.leaseUntil <= now) return json({error:'Intento no activo'},409);
+      const proof = job.confirmation;
+      const verified = proof?.attempt === body.attempt && proof.timestamp === body.snapshotTimestamp &&
+        labelResultMatches(job,storage.get('data:snapshot'),proof.result);
+      job.status = body.error ? 'error' : verified ? 'completed' : job.attempts >= 5 ? 'error' : 'queued';
+      job.error = body.error ? 'No se pudo aplicar el cambio de etiquetas; revisa Vikunja antes de reintentar.' : job.status === 'error' ? 'No se pudo confirmar el cambio actualizado.' : '';
+      if (verified) {job.snapshotTimestamp=proof.timestamp;job.result=proof.result;}
+      if (job.status === 'queued') job.nextAt=now+30000;
+      else job.completedAt=new Date(now).toISOString();
+      storage.put(`label-job:${job.id}`,job);
+      return json({ok:true,status:job.status});
+    }
+    return json({error:'Ruta no encontrada'},404);
+  }
+
   async actionRequest(request, url) {
     // Synchronous KV read-modify-write after body/snapshot awaits: no interleaving.
     const body = request.method === "POST" ? await request.json() : null;
@@ -646,12 +772,13 @@ export class DashboardChatQueue extends DurableObject {
     }
   }
 
-  async saveSnapshot(snapshot, actionConfirmation = null) {
+  async saveSnapshot(snapshot, actionConfirmation = null, labelConfirmation = null) {
     const storage = this.ctx.storage.kv;
     const legacy = storage.get("data:snapshot") === undefined
       ? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json") : null;
     // Re-read after the legacy await: another request may have published meanwhile.
     const current = storage.get("data:snapshot") ?? legacy;
+    if (Array.isArray(current?.labels) && !Array.isArray(snapshot.labels)) return false;
     const observedAt = value => Date.parse(value?.observationStartedAt || value?.timestamp);
     if (current && ((current.observationStartedAt && !snapshot.observationStartedAt) ||
         observedAt(snapshot) < observedAt(current))) return false;
@@ -668,12 +795,24 @@ export class DashboardChatQueue extends DurableObject {
           !snapshot.tasks.some(task => task.id === actionJob.taskId &&
             task.project_id === actionJob.projectId && task.done === true)) return false;
     }
+    let labelJob = null;
+    if (labelConfirmation !== null) {
+      if (!labelConfirmation || typeof labelConfirmation !== 'object' ||
+          Object.keys(labelConfirmation).sort().join(',') !== 'attempt,id,result') return false;
+      labelJob = storage.get(`label-job:${labelConfirmation.id}`);
+      if (!labelJob || labelJob.status !== 'running' || labelJob.attempt !== labelConfirmation.attempt ||
+          labelJob.leaseUntil <= Date.now() || !labelResultMatches(labelJob,snapshot,labelConfirmation.result)) return false;
+    }
     // Synchronous compare+put is atomic within the DO. Ordering uses collection START,
     // not completion time: a slow old collection must not resurrect completed tasks.
     storage.put("data:snapshot", snapshot);
     if (actionJob) {
       actionJob.snapshotConfirmation = { attempt: actionConfirmation.attempt, timestamp: snapshot.timestamp };
       storage.put(`action:${actionJob.id}`, actionJob);
+    }
+    if (labelJob) {
+      labelJob.confirmation = {attempt:labelConfirmation.attempt,timestamp:snapshot.timestamp,result:labelConfirmation.result};
+      storage.put(`label-job:${labelJob.id}`,labelJob);
     }
     await this.enqueueChangedCataTasks(snapshot.tasks);
     return true;
@@ -832,7 +971,7 @@ export default {
 
     // Basic auth is ambient browser authority: reject foreign-site writes before
     // reading a body or scheduling a job. CLI clients without Origin remain valid.
-    if (request.method === "POST" && ["/api/assistant", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
+    if (request.method === "POST" && ["/api/assistant", "/api/label-actions", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
       const origin = request.headers.get("origin");
       const site = request.headers.get("sec-fetch-site");
       if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
@@ -861,6 +1000,7 @@ export default {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return serveSnapshot(env);
     }
+    if (url.pathname === "/api/label-actions") return labelActionRoute(request, url, env);
     if (url.pathname === "/api/task-actions") return taskActionRoute(request, url, env);
     if (url.pathname === "/api/assistant") {
       if (request.method === "POST") return createAssistantJob(request, env);

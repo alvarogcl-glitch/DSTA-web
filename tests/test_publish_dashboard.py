@@ -18,6 +18,8 @@ class DynamicPortfolioTests(unittest.TestCase):
             {"id": 13, "title": "Personal", "parent_project_id": 0},
         ]
         def pages(_, path, __):
+            if path == "/api/v1/labels":
+                return []
             if path == "/api/v1/projects":
                 return projects
             self.assertEqual(path, "/api/v1/projects/11/tasks")
