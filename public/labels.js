@@ -133,11 +133,25 @@
     if(!ready()) {groups.innerHTML='<p class="muted">Las etiquetas estarán disponibles cuando el publicador de la VM entregue el catálogo actualizado.</p>';return;}
     const blocks=catalog().map(l=>({label:l,items:allTasks().filter(t=>(t.label_ids||[]).includes(l.id))}));
     blocks.push({label:null,items:allTasks().filter(t=>!t.label_ids?.length)});
-    groups.innerHTML=blocks.map(({label,items})=>`<section class="label-group"><h3>${label?chip(label):'Sin etiquetas'} <small>${items.filter(t=>!t.done).length} abiertas · ${items.length} total</small></h3><div class="label-task-list">${items.map(t=>`<button type="button" class="task-card" data-label-task="${t.id}">#${t.id} · ${e(t.title)}<small>${e(t.project)} · ${t.done?'Completada':'Abierta'}</small></button>`).join('')||'<p class="muted">Sin tareas con esta etiqueta.</p>'}</div></section>`).join('');
+    groups.innerHTML=blocks.map(({label,items})=>{
+      const open=items.filter(t=>!t.done).length;
+      return `<button type="button" class="project label-group" data-label-group="${label?.id??'none'}"><span class="kicker">${label?'Etiqueta':'Sin clasificación'}</span><h2>${label?chip(label):'Sin etiquetas'}</h2><strong>${open} abiertas</strong><small>${items.length-open} completadas · ${items.length} total</small></button>`;
+    }).join('');
     document.querySelectorAll('.task-labels').forEach(host=>updateTask(host));
     document.getElementById('customize-labels').disabled=Boolean(pending);
   }
-  document.getElementById('label-groups').addEventListener('click',event=>{const item=event.target.closest('[data-label-task]');if(item)showTask(item.dataset.labelTask);});
+  function labelView(id) {
+    const label=catalog().find(l=>String(l.id)===id);
+    if(id!=='none'&&!label)return null;
+    const items=allTasks().filter(t=>id==='none'?!t.label_ids?.length:t.label_ids?.includes(label.id));
+    const open=items.filter(t=>!t.done);
+    return {title:label?.title||'Sin etiquetas',labelId:id,fields:[['Tareas totales',items.length],['Abiertas',open.length],['Completadas',items.length-open.length]],items:open};
+  }
+  document.getElementById('label-groups').addEventListener('click',event=>{
+    const item=event.target.closest('[data-label-group]');if(!item)return;
+    const view=labelView(item.dataset.labelGroup);
+    if(view)inspector(view.title,view.fields,view.items,{labelId:view.labelId});
+  });
   const manager=document.createElement('dialog');manager.className='label-dialog';manager.setAttribute('aria-labelledby','label-manager-title');
   manager.innerHTML='<header><h2 id="label-manager-title">Personalizar etiquetas</h2><button type="button" data-close aria-label="Cerrar personalización">×</button></header><p class="muted">Los cambios afectan la etiqueta en todas las tareas de Vikunja que la utilizan.</p><button type="button" id="new-label">+ Crear etiqueta</button><div id="label-manager-list"></div><div class="label-cleanup"><button type="button" id="reset-labels">Eliminar etiquetas anteriores</button><p class="muted">Conserva Carrera tecnológica y elimina las demás etiquetas del catálogo. Guarda un respaldo en la VM antes de eliminarlas.</p></div>';
   document.body.append(manager);
@@ -193,7 +207,9 @@
       host.innerHTML='<h3 class="detail-label">Etiquetas</h3><div class="task-label-chips"></div><div class="label-combobox"></div>';
       combobox(host.querySelector('.label-combobox'),catalog,id=>allTasks().find(t=>String(t.id)===view.taskId)?.label_ids?.includes(id),id=>{
         const t=allTasks().find(t=>String(t.id)===view.taskId);void submit({action:t?.label_ids?.includes(id)?'unassign':'assign',taskId:Number(view.taskId),labelId:id});
-      },()=>'+ Agregar o quitar etiquetas',title=>openEditor(null,view.taskId,title));
+      },()=>'+',title=>openEditor(null,view.taskId,title));
+      const add=host.querySelector('.label-select');
+      add.setAttribute('aria-label','Agregar o quitar etiquetas');add.title='Agregar o quitar etiquetas';
       host.addEventListener('click',event=>{
         const remove=event.target.closest('[data-remove-label]'),edit=event.target.closest('[data-inline-edit]');
         if(remove)void submit({action:'unassign',taskId:Number(view.taskId),labelId:Number(remove.dataset.removeLabel)});
@@ -202,7 +218,7 @@
     }
     document.getElementById('detail-body').prepend(host);updateTask(host);
   }
-  window.DstaLabels={matches,chips,render,mount,capture};
+  window.DstaLabels={matches,chips,render,mount,capture,labelView};
   window.addEventListener('dsta-ai-summaries',render);
   fetch('/label-palette.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Paleta no disponible');return r.json();}).then(value=>{palette=value;render();}).catch(error=>notify(error.message));
   try {
