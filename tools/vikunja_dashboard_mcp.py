@@ -18,6 +18,8 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from task_mutation_lock import task_lock, task_lock_owned
+import label_actions
+from urllib.error import HTTPError
 
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
 HERMES_ENV = Path(os.environ.get("HERMES_HOME", str(DEFAULT_HERMES_HOME))) / ".env"
@@ -113,11 +115,11 @@ def project_tasks(project_id: int) -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = []
     for page in range(1, 101):
         batch = request("GET", f"/api/v1/projects/{project_id}/tasks",
-                        params={"page": page, "per_page": 100})
+                        params={"page": page, "per_page": 50})
         if not isinstance(batch, list):
             raise RuntimeError("Vikunja devolvió una página de tareas inválida; no se modificó la línea.")
         tasks.extend(batch)
-        if len(batch) < 100:
+        if len(batch) < 50:
             return tasks
     raise RuntimeError("La paginación de tareas no terminó; no se modificó la línea.")
 
@@ -335,6 +337,7 @@ def pmo_open_tasks() -> dict[str, Any]:
                 continue
             tasks.append({"id": task["id"], "project_id": project["id"], "line": project["title"],
                           "title": task.get("title", ""),
+                          "labels": task.get("labels") or [],
                           "description": str(task.get("description") or "")[:1200]})
     return {"lines": [{"id": project["id"], "title": project["title"]} for project in lines],
             "open_tasks": tasks}
@@ -454,7 +457,123 @@ def pmo_add_comment(task_id: int, comment: str) -> dict[str, Any]:
         return request("PUT", f"/api/v1/tasks/{task_id}/comments", json={"comment": comment})
 
 
-READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_open_tasks"}
+def _label_request(method: str, path: str, payload=None):
+    try:
+        return request(method, path, **({"json": payload} if payload is not None else {}))
+    except httpx.HTTPStatusError as error:
+        # Shared label operations distinguish absent labels from failed requests.
+        raise HTTPError(path, error.response.status_code, "Vikunja label request failed", {}, None) from error
+
+
+def _label_operation(action: str, **fields) -> dict[str, Any]:
+    result = label_actions.execute({"id": str(uuid.uuid4()), "action": action, **fields},
+                                   _label_request, server_url=BASE_URL,
+                                   cache_dir=HERMES_ENV.parent / "cache")
+    return {"ok": True, "verified": True, **result}
+
+
+@mcp.tool()
+def pmo_list_labels() -> dict[str, Any]:
+    """List all native labels (transversal task classifications), including IDs and colors."""
+    return {"labels": label_actions.list_all(_label_request, "/api/v1/labels")}
+
+
+@mcp.tool()
+def pmo_list_label_tasks(label_id: int, include_completed: bool = True) -> dict[str, Any]:
+    """List tasks classified with one native label in active PMO-DSTA lines."""
+    if not any(l["id"] == label_id for l in pmo_list_labels()["labels"]):
+        raise ValueError("La etiqueta no existe.")
+    tasks = []
+    for project in pmo_projects():
+        if is_pmo_line(project):
+            tasks.extend(t for t in project_tasks(project["id"])
+                         if (include_completed or not t.get("done"))
+                         and label_id in {l["id"] for l in t.get("labels") or []})
+    return {"label_id": label_id, "tasks": tasks}
+
+
+@mcp.tool()
+def pmo_create_label(title: str, hex_color: str = "86e2bb") -> dict[str, Any]:
+    """Create a native label. Use a color from the dashboard palette, without #."""
+    return _label_operation("create", title=title.strip(), color=hex_color.lstrip("#").lower())
+
+
+@mcp.tool()
+def pmo_update_label(label_id: int, title: str | None = None,
+                     hex_color: str | None = None) -> dict[str, Any]:
+    """Rename or recolor a native label globally; preserve omitted fields and description."""
+    with task_lock(BASE_URL + "/labels-catalog", 1):
+        current = label_actions.label_or_none(_label_request, label_id)
+        if not current:
+            raise ValueError("La etiqueta ya no existe.")
+        if title is None and hex_color is None:
+            raise ValueError("Indica nombre o color para modificar.")
+        return _label_operation("update", labelId=label_id,
+                                title=current["title"] if title is None else title.strip(),
+                                color=str(current.get("hex_color") or "bac7d5").lstrip("#").lower()
+                                if hex_color is None else hex_color.lstrip("#").lower())
+
+
+@mcp.tool()
+def pmo_delete_label(label_id: int) -> dict[str, Any]:
+    """Delete a native label globally with backup of its assignments; protect Carrera tecnológica.
+
+    Only use when the user explicitly requests global deletion, not removing it from one task.
+    """
+    with task_lock(BASE_URL + "/labels-catalog", 1):
+        current = label_actions.label_or_none(_label_request, label_id)
+        if not current:
+            raise ValueError("La etiqueta ya no existe.")
+        target = {"id": label_id, "title": current["title"],
+                  "hex_color": str(current.get("hex_color") or "bac7d5").lstrip("#").lower()}
+        return _label_operation("delete", target=target)
+
+
+@mcp.tool()
+def pmo_edit_task_labels(task_id: int, add_ids: list[int] | None = None,
+                         remove_ids: list[int] | None = None,
+                         new_title: str = "", hex_color: str = "86e2bb") -> dict[str, Any]:
+    """Classify an active PMO task by adding/removing label IDs, preserving other labels.
+
+    Optionally create/reuse new_title and assign it. On failure inspect before retrying:
+    multiple requested changes can be partially applied. This does not move the task's LT/TR.
+    """
+    add, remove = set(add_ids or []), set(remove_ids or [])
+    if any(type(i) is not int or i <= 0 for i in add | remove) or add & remove:
+        raise ValueError("IDs de etiquetas inválidos o presentes en ambas listas.")
+    if not add and not remove and not new_title.strip():
+        raise ValueError("Indica etiquetas para agregar o quitar.")
+    with task_lock(BASE_URL + "/labels-catalog", 1), task_lock(BASE_URL, task_id):
+        current = request("GET", f"/api/v1/tasks/{task_id}")
+        if current.get("id") != task_id:
+            raise ValueError("Vikunja devolvió una tarea distinta.")
+        project = require_line(int(current.get("project_id") or 0), pmo_projects())
+        catalog = pmo_list_labels()["labels"]
+        if not add.issubset({l["id"] for l in catalog}):
+            raise ValueError("Una etiqueta solicitada no existe.")
+        if new_title.strip():
+            matches = [l for l in catalog if label_actions.normalized(l["title"]) == label_actions.normalized(new_title)]
+            if len(matches) > 1:
+                raise ValueError("Hay etiquetas con el mismo nombre; usa su ID.")
+            if matches and matches[0]["id"] in remove:
+                raise ValueError("La nueva etiqueta también se solicitó quitar.")
+            label_id = matches[0]["id"] if matches else pmo_create_label(new_title, hex_color)["labelId"]
+            add.add(label_id)
+        existing = {l["id"] for l in current.get("labels") or []}
+        try:
+            for label_id in sorted(remove & existing):
+                _label_operation("unassign", taskId=task_id, projectId=project["id"], labelId=label_id)
+            for label_id in sorted(add - existing):
+                _label_operation("assign", taskId=task_id, projectId=project["id"], labelId=label_id)
+            verified = request("GET", f"/api/v1/tasks/{task_id}")
+            if verified.get("id") != task_id or {l["id"] for l in verified.get("labels") or []} != (existing - remove) | add:
+                raise RuntimeError("La clasificación devuelta no coincide.")
+        except Exception as error:
+            raise RuntimeError("Cambio de etiquetas incompleto o sin confirmar; consulta la tarea antes de reintentar.") from error
+        return {"ok": True, "verified": True, "task": verified}
+
+
+READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_open_tasks", "pmo_list_labels", "pmo_list_label_tasks"}
 
 
 def restrict_to_read_only() -> None:

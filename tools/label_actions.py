@@ -74,7 +74,12 @@ def execute(job, request, *, server_url, cache_dir):
         if action in {'create', 'update'}:
             title = job.get('title', '').strip()
             color = job.get('color')
-            if not title or len(title) > 100 or color not in PALETTE:
+            current_color = None
+            if action == 'update':
+                current = label_or_none(request, job.get('labelId'))
+                if current:
+                    current_color = str(current.get('hex_color') or 'bac7d5').lstrip('#').lower()
+            if not title or len(title) > 100 or (color not in PALETTE and color != current_color):
                 raise ValueError('Nombre o color inválido')
             labels = list_all(request, '/api/v1/labels')
             marker = f'DSTA_REQUEST:{job["id"]}'

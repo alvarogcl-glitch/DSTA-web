@@ -16,6 +16,19 @@ No se usa `dist` porque no hay un framework que compilar. Wrangler publica direc
 
 ## Acciones en el detalle de una tarea
 
+El copiloto también gestiona la clasificación mediante etiquetas nativas. Puede
+listar etiquetas y sus tareas, crear etiquetas, renombrarlas o cambiar su color,
+asignarlas o quitarlas de una tarea y eliminarlas del catálogo con respaldo previo.
+Quitar una asignación conserva la etiqueta global y las otras clasificaciones de
+la tarea. El borrado global protege Carrera tecnológica. Las mismas operaciones
+verificadas de la interfaz se usan desde Hermes y desde el respaldo Claude; al
+terminar el chat, el puente publica un snapshot fresco antes de confirmar.
+
+Ejemplos: «Agrega Carrera Tecnológica a la tarea #123», «Quita Seguimiento de la
+tarea #123», «Crea Prioritario en ámbar y asígnala a la tarea #123», «Renombra
+Seguimiento a En revisión». Cambiar la LT/TR usa la operación de mover tarea.
+El modo de análisis de minutas solo expone las consultas de etiquetas.
+
 El inspector muestra un visto bueno **✓** junto al estado de una tarea abierta; al
 pasar el cursor o enfocarlo con teclado se expande a **Marcar como completada**.
 En móvil (hasta 620 px) y pantallas táctiles, la etiqueta siempre está visible y

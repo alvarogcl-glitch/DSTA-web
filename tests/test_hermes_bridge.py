@@ -42,6 +42,10 @@ class HermesWindowTests(unittest.TestCase):
         self.assertEqual(popen.call_args.kwargs["creationflags"], expected)
 
     def test_chat_prompt_lists_scoped_tools(self):
+        prompt = bridge.chat_prompt({"message": "Clasificar tarea", "history": []})
+        for name in ("pmo_list_labels", "pmo_list_label_tasks", "pmo_create_label", "pmo_update_label",
+                     "pmo_delete_label", "pmo_edit_task_labels"):
+            self.assertIn(name, prompt)
         with patch.object(bridge, "run_watched", return_value=(0, "Hola", False)) as run:
             self.assertEqual(
                 bridge.run_hermes({"message": "hola"}, "hermes", Path.cwd(),
