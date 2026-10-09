@@ -1,6 +1,6 @@
 {
   "name": "dsta-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Dashboard ejecutivo PMO-DSTA con datos de Vikunja",
   "scripts": {
@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "preview": "wrangler versions upload",
     "check": "wrangler deploy --dry-run",
-    "test": "python -m unittest discover -s tests -v && node tests/test_assistant_worker.mjs && node tests/test_security_worker.mjs && node tests/test_inspector_refresh.mjs && node tests/test_inspector_minutes.mjs && node tests/test_portfolio_selection.mjs && node tests/test_health_refresh.mjs && node tests/test_task_actions.mjs && node tests/test_direct_actions_worker.mjs && node tests/test_direct_actions_recovery.mjs && node tests/test_direct_actions_e2e.mjs && node tests/test_snapshot_watermark.mjs && node tests/test_direct_action_storage.mjs && node tests/test_pwa.mjs"
+    "test": "python -m unittest discover -s tests -v && node tests/test_assistant_worker.mjs && node tests/test_security_worker.mjs && node tests/test_inspector_refresh.mjs && node tests/test_inspector_minutes.mjs && node tests/test_portfolio_selection.mjs && node tests/test_health_refresh.mjs && node tests/test_task_actions.mjs && node tests/test_direct_actions_worker.mjs && node tests/test_direct_actions_recovery.mjs && node tests/test_direct_actions_e2e.mjs && node tests/test_snapshot_watermark.mjs && node tests/test_direct_action_storage.mjs && node tests/test_pwa.mjs && node tests/test_labels_worker.mjs",
+    "test:browser": "node tests/test_labels_browser.mjs"
   },
   "devDependencies": {
     "wrangler": "4.147.0"

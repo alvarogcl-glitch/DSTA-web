@@ -443,3 +443,95 @@ Activación de este cambio: instalar la copia actualizada del exportador operati
 reiniciar solo la tarea `DSTA Hermes Bridge` y publicar el Worker con los assets.
 Requiere la aprobación operativa del proyecto. No se descartan reuniones reales
 como parte de las pruebas.
+
+## Etiquetas nativas · versión 1.1.0
+
+Las etiquetas se guardan en Vikunja, con nombre y color. El snapshot incluye el
+catálogo `labels: [{id, title, hex_color}]` y los `label_ids` de cada tarea. La
+interfaz nunca crea una clasificación paralela en el navegador.
+
+- **Inventario operativo completo:** desplegable con búsqueda y selección múltiple.
+  Al elegir varias etiquetas aparecen las tareas con **al menos una** de ellas.
+  Este filtro se combina con búsqueda, línea y estado; **Limpiar filtro** muestra
+  nuevamente todas las etiquetas. La selección se conserva al actualizar y se
+  retiran IDs que ya no existen.
+- **Tareas por etiqueta:** muestra las tareas de cada etiqueta, su estado y línea,
+  junto a un grupo **Sin etiquetas**. Una tarea con varias etiquetas aparece en
+  cada grupo correspondiente. Las tarjetas abren el inspector habitual.
+- **Personalizar etiquetas:** abre una ventana para crear, modificar nombre/color
+  o eliminar. La modificación es global: cambia la etiqueta en todas las tareas
+  de Vikunja que la utilizan. Eliminar quita la etiqueta y sus asignaciones,
+  conservando las tareas. **Carrera tecnológica** está protegida de eliminación.
+- **Inspector:** las etiquetas y sus controles están en el mismo bloque. El
+  desplegable agrega o quita etiquetas; **×** quita una asignación y **✎** modifica
+  la etiqueta. **+ Crear etiqueta** toma el texto buscado, abre el editor y asigna
+  la nueva etiqueta a la tarea al confirmar.
+- **Colores:** diez opciones predeterminadas en `public/label-palette.json`, sin
+  selector RGB. Las etiquetas usan el color de relleno y texto con contraste;
+  los colores antiguos se muestran tal como están hasta que se modifiquen.
+
+### Contrato de escritura y recuperación
+
+`POST /api/label-actions` acepta solo acciones estructuradas `create`, `update`,
+`delete`, `assign`, `unassign` y `reset`, con UUID `requestId`. Se aplica Basic,
+JSON, límite de cuerpo y protección de origen. El navegador guarda el UUID antes
+de enviar y consulta `GET /api/label-actions?id=…`; recargar retoma el mismo trabajo.
+Si no puede guardar el identificador, no escribe. Los resultados inciertos no se
+reenvían con otro UUID. Un error terminal ofrece **Actualizar y revisar etiquetas**.
+
+El Durable Object conserva una cola separada de chat y de completado. El puente
+consulta `kind=label` en otro hilo cada dos segundos, reclama una concesión de
+180 segundos y ejecuta `tools/label_actions.py` sin IA. Las asignaciones validan la
+pertenencia actual a una línea activa PMO-DSTA y comparten el bloqueo por tarea con
+el resto de las escrituras. Se usan los endpoints específicos de etiquetas: no se
+reemplaza el resto de la tarea ni se sobrescriben otras asignaciones.
+
+Crear incluye un marcador `DSTA_REQUEST` en la descripción de la etiqueta para
+reconocer reintentos después de una respuesta perdida. Renombrar conserva la
+descripción original. Se rechazan nombres duplicados sin distinguir mayúsculas o
+acentos, y colores fuera de la paleta. Cada operación se relee antes de publicar.
+El snapshot autenticado lleva `labelConfirmation: {id, attempt, result}`; el Worker
+verifica su contenido y la concesión vigente antes de confirmar éxito. Un
+publicador anterior sin catálogo de etiquetas se rechaza una vez recibido el
+primer snapshot del nuevo protocolo, para impedir que borre la clasificación.
+
+### Limpieza inicial solicitada
+
+**Personalizar etiquetas → Eliminar etiquetas anteriores** elimina las etiquetas
+existentes excepto **Carrera tecnológica**. La confirmación presenta el número de
+etiquetas afectadas. El trabajo captura IDs, nombres y colores al encolarse: no
+incluye etiquetas creadas después, y se detiene si una etiqueta cambió o no existe
+la etiqueta que se debe conservar. No se dispara automáticamente al cargar la web.
+
+Antes de eliminar, la VM guarda las etiquetas nativas y las asignaciones de todas
+las tareas accesibles al token en `hermes/cache/label-backups/<requestId>.json`.
+El respaldo se conserva en los reintentos. Restaurar requiere recrear las etiquetas
+mediante la API y asignarlas usando los nuevos IDs; Vikunja no garantiza conservar
+los IDs eliminados. El respaldo no hace reversible el borrado nativo por sí solo.
+
+### Activación y pruebas
+
+1. Publicar el Worker y los assets de la versión 1.1.0.
+2. Actualizar el checkout de la VM, incluidos `tools/label_actions.py` y
+   `public/label-palette.json`. Reiniciar **DSTA Dashboard Cloud Sync** y
+   **DSTA Hermes Bridge** con el procedimiento operativo ya documentado.
+3. Verificar un snapshot con `labels` y `label_ids` y un solo proceso de cada
+   servicio. Un token sin permisos para leer etiquetas impide publicar un snapshot
+   parcial y conserva los últimos datos válidos.
+4. Ejecutar la limpieza inicial desde la ventana de personalización, revisar la
+   confirmación y verificar el respaldo y que permanezca Carrera tecnológica.
+
+`npm test` incluye pruebas de etiquetas, seguridad, concesiones, snapshots,
+idempotencia, respaldo, alcance y conservación de campos. Las pruebas Granola
+simulan su dependencia OAuth de Hermes únicamente durante la importación del test;
+el exportador operativo sigue usando el módulo real de Hermes.
+
+La prueba de navegador requiere Playwright, Chromium, `.dev.vars` local y un
+Wrangler local **sin datos reales**. En una terminal iniciar `npm run dev`; en otra
+usar `npm run test:browser`. Si no está instalado Playwright, preparar la herramienta
+con `npm install --no-save --package-lock=false playwright`. Por defecto Chromium
+se encuentra en `/usr/bin/chromium`; `CHROMIUM_PATH` permite elegir otra instalación.
+`DSTA_BROWSER_BASE` permite cambiar puerto, exclusivamente en localhost. La prueba
+publica datos sintéticos y simula el puente contra el Worker local; nunca ejecutarla
+contra producción. Cubre selección múltiple, filtros combinados, clasificación,
+asignación, creación desde tarea, edición, paleta, limpieza protegida y móvil.
