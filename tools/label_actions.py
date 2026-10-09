@@ -47,6 +47,11 @@ def label_or_none(request, label_id):
     except HTTPError as error:
         if error.code == 404:
             return None
+        # Vikunja can return 403 for a deleted label because access is checked
+        # before existence. Confirm absence through the accessible catalog.
+        if error.code == 403 and not any(
+                item.get('id') == label_id for item in list_all(request, '/api/v1/labels')):
+            return None
         raise
     if label.get('id') != label_id:
         raise ValueError('Vikunja devolvió una etiqueta distinta')

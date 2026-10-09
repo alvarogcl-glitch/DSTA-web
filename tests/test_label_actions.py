@@ -44,6 +44,15 @@ class NativeLabels:
 
 
 class LabelActionTests(unittest.TestCase):
+    def test_forbidden_label_is_absent_only_when_catalog_confirms(self):
+        def request(method, path):
+            if path.startswith('/api/v1/labels?'):
+                return [{'id': 1}]
+            raise HTTPError(path, 403, 'forbidden', {}, None)
+        self.assertIsNone(actions.label_or_none(request, 2))
+        with self.assertRaises(HTTPError):
+            actions.label_or_none(request, 1)
+
     def test_backup_pagination_reads_associations_beyond_server_limit(self):
         from urllib.parse import urlparse, parse_qs
         rows = [{'id': i} for i in range(1, 122)]
