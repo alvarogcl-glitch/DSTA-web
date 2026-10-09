@@ -77,7 +77,9 @@ assert.equal((await worker.fetch(new Request('https://example.com/api/label-acti
 for(const bad of [{...body,taskId:99},{...body,labelId:99}]) assert.equal((await call(env,'POST','/api/label-actions',bad)).status,404);
 for(const bad of [{...body,extra:true},{...body,taskId:'15'},{...body,requestId:'bad'},
  {action:'create',title:'X',color:'123456',requestId:crypto.randomUUID()}]) assert.equal((await call(env,'POST','/api/label-actions',bad)).status,400);
-assert.equal((await call(env,'POST','/api/label-actions',{action:'delete',labelId:1,requestId:crypto.randomUUID()})).status,409);
+const deleteEnv=environment();
+assert.equal((await call(deleteEnv,'POST','/api/ingest',snapshot,'Bearer ingest')).status,202);
+assert.equal((await call(deleteEnv,'POST','/api/label-actions',{action:'delete',labelId:1,requestId:crypto.randomUUID()})).status,202);
 assert.equal((await call(env,'POST','/api/label-actions',body)).status,202);
 assert.equal((await call(env,'POST','/api/label-actions',body)).body.id,body.requestId);
 assert.equal((await call(env,'POST','/api/label-actions',{...body,labelId:2})).status,409);

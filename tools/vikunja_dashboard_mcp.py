@@ -516,7 +516,7 @@ def pmo_update_label(label_id: int, title: str | None = None,
 
 @mcp.tool()
 def pmo_delete_label(label_id: int) -> dict[str, Any]:
-    """Delete a native label globally with backup of its assignments; protect Carrera tecnológica.
+    """Delete any native label globally with backup of its assignments.
 
     Only use when the user explicitly requests global deletion, not removing it from one task.
     """

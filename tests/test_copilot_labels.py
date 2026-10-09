@@ -57,12 +57,12 @@ class CopilotLabelTests(unittest.TestCase):
                 vk.pmo_edit_task_labels(15, new_title='No crear')
         self.assertEqual(self.native.writes, [])
 
-    def test_delete_backups_and_protects_carrera(self):
-        with self.assertRaises(ValueError):
-            vk.pmo_delete_label(1)
+    def test_delete_backups_including_carrera(self):
+        vk.pmo_update_label(1,title='Carrera tecnológica',hex_color='f6c85f')
+        vk.pmo_delete_label(1)
         vk.pmo_delete_label(2)
-        self.assertEqual(set(self.native.labels), {1})
-        self.assertEqual(len(list((Path(self.tmp.name) / 'cache/label-backups').glob('*.json'))), 1)
+        self.assertEqual(set(self.native.labels), set())
+        self.assertEqual(len(list((Path(self.tmp.name) / 'cache/label-backups').glob('*.json'))), 2)
 
     def test_readonly_allowlist_exposes_catalog_without_mutations(self):
         self.assertIn('pmo_list_labels', vk.READ_ONLY_TOOLS)

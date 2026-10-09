@@ -7,7 +7,6 @@
   const allTasks = () => typeof tasks === 'undefined' ? [] : tasks;
   const ready = () => typeof labelsReady !== 'undefined' && labelsReady;
   const nameKey = value => value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
-  const protectedLabel = label => nameKey(label.title) === 'carrera tecnologica';
   const color = label => /^[0-9a-f]{6}$/i.test(label.hex_color || '') ? label.hex_color : 'bac7d5';
   function foreground(hex) {
     const rgb = [0,2,4].map(i => parseInt(hex.slice(i,i+2),16)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
@@ -74,10 +73,6 @@
   function updatePendingControls() {
     editor.querySelectorAll('button,input').forEach(el => {if (!el.matches('[data-close]')) el.disabled=Boolean(pending);});
     manager.querySelectorAll('button').forEach(el => {if (!el.matches('[data-close]')) el.disabled=Boolean(pending)||!ready();});
-    manager.querySelectorAll('[data-delete-label]').forEach(button=>{
-      const label=catalog().find(l=>l.id===Number(button.dataset.deleteLabel));
-      if(label && protectedLabel(label)) button.disabled=true;
-    });
     manager.querySelector('#new-label').disabled=Boolean(pending)||!ready()||!palette.length;
     if (pending && !polling) {
       const button = document.createElement('button');button.type='button';
@@ -156,9 +151,8 @@
   document.body.append(manager);
   manager.querySelector('[data-close]').addEventListener('click',()=>manager.close());
   function renderManager() {
-    manager.querySelector('#label-manager-list').innerHTML=catalog().map(l=>`<div class="label-manager-row">${chip(l)}<span class="muted">${allTasks().filter(t=>t.label_ids?.includes(l.id)).length} tareas del portafolio</span><button type="button" data-edit-label="${l.id}">Modificar</button><button type="button" data-delete-label="${l.id}"${protectedLabel(l)?' disabled':''}>Eliminar</button></div>`).join('')||'<p class="muted">No hay etiquetas.</p>';
+    manager.querySelector('#label-manager-list').innerHTML=catalog().map(l=>`<div class="label-manager-row">${chip(l)}<span class="muted">${allTasks().filter(t=>t.label_ids?.includes(l.id)).length} tareas del portafolio</span><button type="button" data-edit-label="${l.id}">Modificar</button><button type="button" data-delete-label="${l.id}">Eliminar</button></div>`).join('')||'<p class="muted">No hay etiquetas.</p>';
     updatePendingControls();
-    manager.querySelectorAll('[data-delete-label]').forEach(button=>{if(protectedLabel(catalog().find(l=>l.id===Number(button.dataset.deleteLabel))))button.disabled=true;});
   }
   document.getElementById('customize-labels').addEventListener('click',()=>{renderManager();manager.showModal();});
   manager.querySelector('#new-label').addEventListener('click',()=>openEditor());

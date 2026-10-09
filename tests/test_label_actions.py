@@ -109,9 +109,14 @@ class LabelActionTests(unittest.TestCase):
         self.native.labels[1]['title']='Carrera tecnológica';self.native.labels[2]['title']='Renombrada'
         with self.assertRaises(ValueError):self.run_job(action='reset',preservedId=1,targets=[target])
         self.assertEqual(self.native.writes,[])
-    def test_cannot_delete_protected_label(self):
-        with self.assertRaises(ValueError):self.run_job(action='delete',target=self.native.labels[1].copy())
-        self.assertEqual(self.native.writes,[])
+    def test_carrera_can_be_deleted_with_backup_like_any_label(self):
+        self.native.tasks[15]['labels'].append(self.native.labels[1])
+        self.run_job(action='delete',target=self.native.labels[1].copy())
+        self.assertNotIn(1,self.native.labels)
+        self.assertEqual([l['id'] for l in self.native.tasks[15]['labels']],[2])
+        backup=json.loads((Path(self.temp.name)/'label-backups/test-request.json').read_text())
+        self.assertEqual(backup['labels'][0]['title'],'Carrera tecnológica')
+        self.assertEqual(backup['associations'],[{'taskId':15,'labelIds':[1]}])
     def test_publisher_exposes_native_labels_and_hash_changes_with_colors(self):
         spec=importlib.util.spec_from_file_location('label_publisher',Path(__file__).resolve().parents[1]/'tools/publish_dashboard.py')
         publisher=importlib.util.module_from_spec(spec);spec.loader.exec_module(publisher)

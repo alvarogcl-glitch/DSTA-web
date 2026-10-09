@@ -134,7 +134,7 @@ def execute(job, request, *, server_url, cache_dir):
                 raise ValueError('No se encontró Carrera tecnológica; no se eliminó ninguna etiqueta')
         for target in targets:
             current = label_or_none(request, target['id'])
-            if current and (normalized(current['title']) == PROTECTED or
+            if current and ((action == 'reset' and normalized(current['title']) == PROTECTED) or
                             current['title'] != target['title'] or
                             str(current.get('hex_color') or 'bac7d5').lstrip('#').lower() != target['hex_color']):
                 raise ValueError('Una etiqueta cambió desde la solicitud; revisa el catálogo')
@@ -163,7 +163,7 @@ def execute(job, request, *, server_url, cache_dir):
             current = label_or_none(request, target['id'])
             if not current:
                 continue
-            if normalized(current['title']) == PROTECTED:
+            if action == 'reset' and normalized(current['title']) == PROTECTED:
                 raise ValueError('Carrera tecnológica se conserva')
             if current['title'] != target['title'] or str(current.get('hex_color') or 'bac7d5').lstrip('#').lower() != target['hex_color']:
                 raise ValueError('Una etiqueta cambió desde la solicitud; revisa el catálogo')

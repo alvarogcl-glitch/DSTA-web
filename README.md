@@ -20,7 +20,7 @@ El copiloto también gestiona la clasificación mediante etiquetas nativas. Pued
 listar etiquetas y sus tareas, crear etiquetas, renombrarlas o cambiar su color,
 asignarlas o quitarlas de una tarea y eliminarlas del catálogo con respaldo previo.
 Quitar una asignación conserva la etiqueta global y las otras clasificaciones de
-la tarea. El borrado global protege Carrera tecnológica. Las mismas operaciones
+la tarea. Todas las etiquetas se pueden modificar o eliminar. Las mismas operaciones
 verificadas de la interfaz se usan desde Hermes y desde el respaldo Claude; al
 terminar el chat, el puente publica un snapshot fresco antes de confirmar.
 
@@ -474,7 +474,8 @@ interfaz nunca crea una clasificación paralela en el navegador.
 - **Personalizar etiquetas:** abre una ventana para crear, modificar nombre/color
   o eliminar. La modificación es global: cambia la etiqueta en todas las tareas
   de Vikunja que la utilizan. Eliminar quita la etiqueta y sus asignaciones,
-  conservando las tareas. **Carrera tecnológica** está protegida de eliminación.
+  conservando las tareas. Todas las etiquetas, incluida **Carrera tecnológica**,
+  ofrecen las mismas opciones de modificación y eliminación.
 - **Inspector:** las etiquetas y sus controles están en el mismo bloque. El
   desplegable agrega o quita etiquetas; **×** quita una asignación y **✎** modifica
   la etiqueta. **+ Crear etiqueta** toma el texto buscado, abre el editor y asigna
@@ -510,11 +511,10 @@ primer snapshot del nuevo protocolo, para impedir que borre la clasificación.
 
 ### Limpieza inicial solicitada
 
-**Personalizar etiquetas → Eliminar etiquetas anteriores** elimina las etiquetas
-existentes excepto **Carrera tecnológica**. La confirmación presenta el número de
-etiquetas afectadas. El trabajo captura IDs, nombres y colores al encolarse: no
-incluye etiquetas creadas después, y se detiene si una etiqueta cambió o no existe
-la etiqueta que se debe conservar. No se dispara automáticamente al cargar la web.
+La limpieza inicial solicitada el 09-10-2026 conservó **Carrera tecnológica**.
+El control temporal de limpieza se retiró de Personalizar etiquetas después de
+completar ese paso. Esa conservación no aplica a las operaciones habituales:
+Carrera tecnológica se puede modificar y eliminar igual que las otras etiquetas.
 
 Antes de eliminar, la VM guarda las etiquetas nativas y las asignaciones de todas
 las tareas accesibles al token en `hermes/cache/label-backups/<requestId>.json`.
@@ -531,8 +531,8 @@ los IDs eliminados. El respaldo no hace reversible el borrado nativo por sí sol
 3. Verificar un snapshot con `labels` y `label_ids` y un solo proceso de cada
    servicio. Un token sin permisos para leer etiquetas impide publicar un snapshot
    parcial y conserva los últimos datos válidos.
-4. Ejecutar la limpieza inicial desde la ventana de personalización, revisar la
-   confirmación y verificar el respaldo y que permanezca Carrera tecnológica.
+4. Verificar creación, modificación y eliminación con datos de prueba locales;
+   no borrar etiquetas reales para validar el despliegue.
 
 `npm test` incluye pruebas de etiquetas, seguridad, concesiones, snapshots,
 idempotencia, respaldo, alcance y conservación de campos. Las pruebas Granola
@@ -547,4 +547,4 @@ se encuentra en `/usr/bin/chromium`; `CHROMIUM_PATH` permite elegir otra instala
 `DSTA_BROWSER_BASE` permite cambiar puerto, exclusivamente en localhost. La prueba
 publica datos sintéticos y simula el puente contra el Worker local; nunca ejecutarla
 contra producción. Cubre selección múltiple, filtros combinados, clasificación,
-asignación, creación desde tarea, edición, paleta, limpieza protegida y móvil.
+asignación, creación desde tarea, edición, paleta, eliminación de cualquier etiqueta y móvil.

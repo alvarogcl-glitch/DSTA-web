@@ -584,7 +584,6 @@ export class DashboardChatQueue extends DurableObject {
       if (!Array.isArray(snapshot?.labels)) return json({error:'El publicador todavía no entrega etiquetas. Actualiza los servicios de la VM.'},503);
       const label = snapshot.labels.find(l => l.id === body.labelId);
       if (body.labelId && !label && body.action !== 'unassign') return json({error:'La etiqueta ya no existe'},404);
-      if (body.action === 'delete' && protectedLabel(label)) return json({error:'Carrera tecnológica se conserva'},409);
       if (['create','update'].includes(body.action) && snapshot.labels.some(l => l.id !== body.labelId && labelName(l.title) === labelName(body.title))) {
         return json({error:'Ya existe una etiqueta con ese nombre'},409);
       }
