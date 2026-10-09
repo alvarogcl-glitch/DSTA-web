@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from task_mutation_lock import task_lock
 
 PALETTE = {item['hex'] for item in json.loads(
-    (Path(__file__).resolve().parents[1] / 'public' / 'label-palette.json').read_text())}
+    (Path(__file__).resolve().parents[1] / 'public' / 'label-palette.json').read_text(encoding='utf-8'))}
 PROTECTED = 'carrera tecnologica'
 
 
@@ -20,11 +20,11 @@ def normalized(title):
 def list_all(request, path):
     result = []
     for page in range(1, 101):
-        batch = request('GET', f'{path}?page={page}&per_page=100')
+        batch = request('GET', f'{path}?page={page}&per_page=50')
         if not isinstance(batch, list):
             raise ValueError('Respuesta inválida de Vikunja')
         result.extend(batch)
-        if len(batch) < 100:
+        if len(batch) < 50:
             return result
     raise ValueError('No se obtuvo el catálogo completo')
 

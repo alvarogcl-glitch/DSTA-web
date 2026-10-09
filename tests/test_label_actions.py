@@ -44,6 +44,16 @@ class NativeLabels:
 
 
 class LabelActionTests(unittest.TestCase):
+    def test_backup_pagination_reads_associations_beyond_server_limit(self):
+        from urllib.parse import urlparse, parse_qs
+        rows = [{'id': i} for i in range(1, 122)]
+        def request(method, path):
+            query = parse_qs(urlparse(path).query)
+            page = int(query['page'][0])
+            size = min(int(query['per_page'][0]), 50)
+            return rows[(page - 1) * size:page * size]
+        self.assertEqual(actions.list_all(request, '/api/v1/tasks'), rows)
+
     def setUp(self):
         self.native=NativeLabels();self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
     def run_job(self, **job):
