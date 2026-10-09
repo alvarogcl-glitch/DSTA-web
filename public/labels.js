@@ -78,7 +78,6 @@
       const label=catalog().find(l=>l.id===Number(button.dataset.deleteLabel));
       if(label && protectedLabel(label)) button.disabled=true;
     });
-    manager.querySelector('#reset-labels').disabled=Boolean(pending)||!ready()||!catalog().some(protectedLabel)||!catalog().some(l=>!protectedLabel(l));
     manager.querySelector('#new-label').disabled=Boolean(pending)||!ready()||!palette.length;
     if (pending && !polling) {
       const button = document.createElement('button');button.type='button';
@@ -153,14 +152,13 @@
     if(view)inspector(view.title,view.fields,view.items,{labelId:view.labelId});
   });
   const manager=document.createElement('dialog');manager.className='label-dialog';manager.setAttribute('aria-labelledby','label-manager-title');
-  manager.innerHTML='<header><h2 id="label-manager-title">Personalizar etiquetas</h2><button type="button" data-close aria-label="Cerrar personalización">×</button></header><p class="muted">Los cambios afectan la etiqueta en todas las tareas de Vikunja que la utilizan.</p><button type="button" id="new-label">+ Crear etiqueta</button><div id="label-manager-list"></div><div class="label-cleanup"><button type="button" id="reset-labels">Eliminar etiquetas anteriores</button><p class="muted">Conserva Carrera tecnológica y elimina las demás etiquetas del catálogo. Guarda un respaldo en la VM antes de eliminarlas.</p></div>';
+  manager.innerHTML='<header><h2 id="label-manager-title">Personalizar etiquetas</h2><button type="button" data-close aria-label="Cerrar personalización">×</button></header><p class="muted">Los cambios afectan la etiqueta en todas las tareas de Vikunja que la utilizan.</p><button type="button" id="new-label">+ Crear etiqueta</button><div id="label-manager-list"></div>';
   document.body.append(manager);
   manager.querySelector('[data-close]').addEventListener('click',()=>manager.close());
   function renderManager() {
     manager.querySelector('#label-manager-list').innerHTML=catalog().map(l=>`<div class="label-manager-row">${chip(l)}<span class="muted">${allTasks().filter(t=>t.label_ids?.includes(l.id)).length} tareas del portafolio</span><button type="button" data-edit-label="${l.id}">Modificar</button><button type="button" data-delete-label="${l.id}"${protectedLabel(l)?' disabled':''}>Eliminar</button></div>`).join('')||'<p class="muted">No hay etiquetas.</p>';
     updatePendingControls();
     manager.querySelectorAll('[data-delete-label]').forEach(button=>{if(protectedLabel(catalog().find(l=>l.id===Number(button.dataset.deleteLabel))))button.disabled=true;});
-    manager.querySelector('#reset-labels').disabled=Boolean(pending)||!catalog().some(protectedLabel)||!catalog().some(l=>!protectedLabel(l));
   }
   document.getElementById('customize-labels').addEventListener('click',()=>{renderManager();manager.showModal();});
   manager.querySelector('#new-label').addEventListener('click',()=>openEditor());
@@ -169,7 +167,6 @@
     if(edit)openEditor(catalog().find(l=>l.id===Number(edit.dataset.editLabel)));
     if(remove){const l=catalog().find(l=>l.id===Number(remove.dataset.deleteLabel));confirmDelete({action:'delete',labelId:l.id},'Eliminar «'+l.title+'»','Se quitará de todas las tareas que la usan. Las tareas se conservan.');}
   });
-  manager.querySelector('#reset-labels').addEventListener('click',()=>confirmDelete({action:'reset'},'Eliminar etiquetas anteriores','Se conservará Carrera tecnológica y se eliminarán las otras '+catalog().filter(l=>!protectedLabel(l)).length+' etiquetas y sus asignaciones. Las tareas se conservan.'));
   const confirmation=document.createElement('dialog');confirmation.className='label-dialog';confirmation.setAttribute('aria-labelledby','label-confirm-title');
   confirmation.innerHTML='<h2 id="label-confirm-title"></h2><p></p><div class="label-dialog-actions"><button type="button" data-cancel>Cancelar</button><button type="button" data-confirm>Eliminar</button></div>';document.body.append(confirmation);
   let deletion=null;

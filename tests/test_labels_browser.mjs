@@ -74,8 +74,11 @@ try {
  await page.locator('[data-color="c6a0f6"]').click();await page.locator('dialog form button[type=submit]').click();
  await page.waitForFunction(()=>document.querySelector('#label-manager-list').textContent.includes('Innovación aplicada')&&!sessionStorage.getItem('dsta-label-pending-v1'));
  assert.equal(await page.locator('[data-delete-label="1"]').isDisabled(),true);
- await page.locator('#reset-labels').click();await page.locator('[data-confirm]').click();
- await page.waitForFunction(()=>document.querySelectorAll('#label-manager-list .label-manager-row').length===1&&!sessionStorage.getItem('dsta-label-pending-v1'));
+ assert.equal(await page.locator('#reset-labels').count(),0);
+ for(const id of snapshot.labels.filter(l=>l.id!==1).map(l=>l.id)){
+  await page.locator(`[data-delete-label="${id}"]`).click();await page.locator('[data-confirm]').click();
+  await page.waitForFunction(id=>!document.querySelector(`[data-delete-label="${id}"]`)&&!sessionStorage.getItem('dsta-label-pending-v1'),id);
+ }
  assert.deepEqual(snapshot.labels.map(l=>l.title),['Carrera tecnológica']);
  await page.locator('#label-manager-title').locator('..').locator('[data-close]').click();
  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,document.getElementById('label-section').offsetTop));
