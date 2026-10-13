@@ -53,8 +53,20 @@
       }
     }
   }
+  // Accounts mode is detected once, when a task is first inspected (never at page load), and
+  // read synchronously on save so a double click can never send two requests.
+  let directLog = false, modeChecked = false;
+  function detectMode() {
+    if (modeChecked) return;
+    modeChecked = true;
+    try {
+      Promise.resolve(fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }))
+        .then(response => { directLog = Boolean(response?.ok); }).catch(() => {});
+    } catch { /* single-user default */ }
+  }
   function mount(view) {
     if (!view.taskId) return;
+    detectMode();
     const id = view.taskId, draft = state(id), task = tasks.find(t => String(t.id) === id);
     if (!task) return;
     const section = document.createElement('section');
@@ -125,7 +137,7 @@
         if (response.status === 404 && job.endpoint === '/api/task-actions') {
           // A reload can occur before the initial POST. Reuse the durable request ID.
           response = await fetch(job.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ action: 'complete', taskId: Number(job.taskId), requestId: job.id }) });
+            body: JSON.stringify(job.body || { action: 'complete', taskId: Number(job.taskId), requestId: job.id }) });
         }
         result = await response.json();
         if (!response.ok || result.status === 'error') throw Error(result.error || 'No se pudo completar la solicitud.');
@@ -169,14 +181,20 @@
     sending = true;
     let job = { taskId: id, kind, expected, draft: { ...draft } };
     if (kind === 'complete') Object.assign(job, { id: crypto.randomUUID(), endpoint: '/api/task-actions' });
+    // Accounts mode: the Copilot has no tools, so the entry goes through the verified action queue.
+    if (kind === 'log' && directLog) {
+      const requestId = crypto.randomUUID();
+      Object.assign(job, { id: requestId, endpoint: '/api/task-actions',
+        body: { action: 'task.log', requestId, taskId: Number(id), entry, entryDate: draft.date, logKind: draft.kind } });
+    }
     try { savePending(job); }
     catch (error) { sending = false; draft.status = error.message; feedback(id, draft.status); redraw(); return; }
     draft.status = progress({ kind });
     feedback(id, draft.status); redraw();
     try {
-      const response = await fetch(job.endpoint || '/api/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(kind === 'complete'
+      const response = await fetch(job.endpoint || '/api/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(job.body || (kind === 'complete'
         ? { action: 'complete', requestId: job.id, taskId: Number(id) }
-        : { message, history: [], taskId: Number(id) }) });
+        : { message, history: [], taskId: Number(id) })) });
       const queued = await response.json();
       if (!response.ok) {
         // A 5xx may follow durable acceptance: never discard its idempotency key.

@@ -276,7 +276,11 @@ const ACTION_SCHEMAS = {
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
   "lt.archive": { required: ["projectId"], optional: [] },
+  // Same entry format as pmo_append_log: "<kind> <YYYY-MM-DD>: <entry>" appended to the description.
+  "task.log": { required: ["taskId", "entry", "entryDate"], optional: ["logKind"] },
 };
+const LOG_KINDS = new Set(["Actualización", "Avance", "Seguimiento", "Nota", "Cierre"]);
+const logLine = job => `${job.logKind || "Actualización"} ${job.entryDate}: ${String(job.entry).trim()}`;
 function validAction(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
   const schema = ACTION_SCHEMAS[body.action];
@@ -289,6 +293,12 @@ function validAction(body) {
   if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 250)) return false;
   if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 20_000)) return false;
   if (body.dueDate !== undefined && (typeof body.dueDate !== "string" || !/^(\d{4}-\d{2}-\d{2})?$/.test(body.dueDate))) return false;
+  if (body.action === "task.log") {
+    if (typeof body.entry !== "string" || !body.entry.trim() || body.entry.trim().length > 2500) return false;
+    if (typeof body.entryDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.entryDate) ||
+        new Date(`${body.entryDate}T00:00:00Z`).toISOString().slice(0, 10) !== body.entryDate) return false;
+    if (body.logKind !== undefined && !LOG_KINDS.has(body.logKind)) return false;
+  }
   return true;
 }
 // The bridge proves a structure action with its post-write snapshot plus the ids it touched.
@@ -317,6 +327,7 @@ function actionResultMatches(job, snapshot, result) {
     }
     case "lt.rename": return result.projectId === job.projectId && project(job.projectId)?.title === job.title.trim();
     case "lt.archive": return result.projectId === job.projectId && !project(job.projectId);
+    case "task.log": return result.taskId === job.taskId && String(task(job.taskId)?.description || "").includes(logLine(job));
     default: return false;
   }
 }

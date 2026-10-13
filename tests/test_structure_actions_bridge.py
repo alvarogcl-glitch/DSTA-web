@@ -112,6 +112,17 @@ class StructureActionsTest(unittest.TestCase):
         self.run_action({"action": "lt.archive", "projectId": 9})
         self.assertTrue(self.vk.projects[9]["is_archived"])
 
+    def test_registro_en_bitacora_preserva_campos(self):
+        result = self.run_action({"action": "task.log", "taskId": 100, "sourceProjectId": 8, "entry": " Avance real ",
+                                  "entryDate": "2026-10-13", "logKind": "Avance"})
+        self.assertEqual(result, {"taskId": 100})
+        task = self.vk.tasks[100]
+        self.assertEqual(task["description"], "desc\n\nAvance 2026-10-13: Avance real", "mismo formato que pmo_append_log")
+        for key, value in TASK_EXTRA.items():
+            self.assertEqual(task[key], value, f"{key} preservado")
+        with self.assertRaises(ValueError):
+            self.run_action({"action": "task.log", "taskId": 100, "sourceProjectId": 8, "entry": "x", "entryDate": "2026-10-13", "logKind": "Chisme"})
+
     def test_accion_desconocida(self):
         with self.assertRaises(ValueError):
             self.run_action({"action": "lt.delete", "projectId": 8})

@@ -9,6 +9,7 @@ creating a duplicate. Returns the ids the Worker uses to verify the post-write s
 from __future__ import annotations
 
 import json
+import re
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -28,7 +29,8 @@ TASK_FIELDS = (
 PROJECT_FIELDS = ("id", "title", "description", "parent_project_id", "is_archived", "hex_color", "identifier",
                   "position", "is_favorite", "background_blur_hash", "background_information")
 NO_DUE_DATE = "0001-01-01T00:00:00Z"
-ACTIONS = {"task.create", "task.update", "task.move", "lt.create", "lt.rename", "lt.archive"}
+ACTIONS = {"task.create", "task.update", "task.move", "task.log", "lt.create", "lt.rename", "lt.archive"}
+LOG_KINDS = {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}
 
 
 def _read(request: Callable, path: str) -> dict:
@@ -105,6 +107,22 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
                 raise RuntimeError("Vikunja no confirmó la tarea creada")
             return {"taskId": created["id"]}
         return _remembered(cache_dir, job["id"], create)
+
+    if action == "task.log":
+        kind = job.get("logKind") or "Actualización"
+        entry = str(job.get("entry") or "").strip()
+        if kind not in LOG_KINDS or not entry or len(entry) > 2500 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(job.get("entryDate", ""))):
+            raise ValueError("Registro inválido")
+        task_id = job["taskId"]
+        with lock(server_url, task_id):
+            current = _task(request, task_id, job["sourceProjectId"])
+            payload = {field: current[field] for field in TASK_FIELDS}
+            original = str(current.get("description") or "")
+            payload["description"] = original + ("\n\n" if original else "") + f"{kind} {job['entryDate']}: {entry}"
+            written = request("POST", f"/api/v1/tasks/{task_id}", payload=payload)
+            if not isinstance(written, dict) or written.get("id") != task_id:
+                raise RuntimeError("Vikunja no confirmó el registro")
+        return {"taskId": task_id}
 
     if action in ("task.update", "task.move"):
         task_id = job["taskId"]

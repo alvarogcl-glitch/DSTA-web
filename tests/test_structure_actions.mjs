@@ -46,6 +46,7 @@ const valid = [
   { action: 'lt.create', requestId: uuid(), title: 'LT nueva' },
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
   { action: 'lt.archive', requestId: uuid(), projectId: 4 },
+  { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'Avance con el proveedor', entryDate: '2026-10-13', logKind: 'Avance' },
 ];
 const invalid = [
   { action: 'task.create', requestId: uuid(), projectId: 3 },
@@ -59,6 +60,10 @@ const invalid = [
   { action: 'lt.delete', requestId: uuid(), projectId: 4 },
   { action: 'task.create', requestId: 'bad', projectId: 3, title: 'ok' },
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'ok', description: 'x'.repeat(20001) },
+  { action: 'task.log', requestId: uuid(), taskId: 15, entry: ' ', entryDate: '2026-10-13' },
+  { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'ok', entryDate: '13-10-2026' },
+  { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'ok', entryDate: '2026-10-13', logKind: 'Chisme' },
+  { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'x'.repeat(2501), entryDate: '2026-10-13' },
 ];
 for (const body of invalid) assert.equal((await call(env, 'POST', '/api/task-actions', body)).status, 400, JSON.stringify(body).slice(0, 80));
 
@@ -79,6 +84,7 @@ const proofs = {
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
   'lt.rename': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2 renombrada' }] })],
   'lt.archive': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0]], tasks: s.tasks.filter(t => t.project_id !== 4) })],
+  'task.log': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], description: 'd\n\nAvance 2026-10-13: Avance con el proveedor' }] })],
 };
 for (const body of valid) {
   const e = environment();
