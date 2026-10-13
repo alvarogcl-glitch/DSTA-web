@@ -26,12 +26,12 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 ## Checklist
 
 ### F0 · Cuentas y cajones separados (staging, datos sintéticos)
-- [ ] F0.1 Auth del piloto (D1: users, sessions, login_limits, invitations) integrada en `worker.js`, reemplazando Basic Auth.
-- [ ] F0.2 `chatStub` por actor (`u:<actorId>`): snapshot, chat, jobs y acciones aislados por usuario.
-- [ ] F0.3 Ingest y bridge autenticados por usuario o despachador; no se puede escribir el cajón de otro.
-- [ ] F0.4 UI: pantalla de login, invitación y logout; el dashboard carga datos del usuario.
-- [ ] F0.5 Pruebas locales de aislamiento A/B (snapshot, minutas, jobs, acciones → 404/403 cruzado).
-- [ ] F0.6 Deploy de `dsta-web-staging` y pruebas de aislamiento contra la URL real.
+- [x] F0.1 Auth del piloto (D1: users, sessions, login_limits, invitations) integrada en `worker.js`, reemplazando Basic Auth. Se activa solo con `AUTH_MODE=accounts`; sin esa variable, producción no cambia y su suite completa pasa. Commit 01c949f.
+- [x] F0.2 `chatStub` por actor (`u:<actorId>` o `users.do_name`): snapshot, chat, jobs y acciones aislados por usuario. El fallback KV legado queda desactivado en los cajones de usuario.
+- [x] F0.3 El puente exige `X-DSTA-Actor` y el cajón se resuelve desde D1. Sin usuario: 400; usuario inexistente: 404; token inválido: 401.
+- [x] F0.4 UI: `/login`, `/invite` (token en `#`) y barra de cuenta con logout. Verificado en navegador a 390 px: invitación → login → dashboard propio → logout. Commit aa96eab.
+- [x] F0.5 `tests/test_multiuser_worker.mjs` (11 bloques) incluido en `npm test`; además 25/25 con `staging_isolation_check.py` contra wrangler dev.
+- [x] F0.6 `dsta-web-staging` desplegado en https://dsta-web-staging.alvaro-gcl.workers.dev (versión bd94c2f1; D1 `dsta-web-staging-db` aa680c9d). 25/25 pruebas contra la URL real. Producción `dsta-web` sin cambios (deployments idénticos).
 
 ### F1 · Puente multiusuario
 - [ ] F1.1 Despachador `/api/bridge/next` multiplexado (una consulta para N usuarios).
@@ -69,3 +69,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 
 ## Bitácora
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.
+- 2026-10-12 23:25: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.

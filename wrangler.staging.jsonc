@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "dsta-web-staging-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "aa680c9d-efb2-43c8-86a9-a81ddc6932fb",
       "migrations_dir": "./migrations"
     }
   ],
