@@ -259,6 +259,23 @@ assert.equal(gjob.op, 'disconnect');
 await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { id: gjob.id, status: 'disconnected' } });
 assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).status, 'disconnected');
 
+// 15b. Copilot proposals: the bridge sends structured proposals with the reply; the Worker keeps
+// only valid ones (strict action schema, max 5) and returns them with the job status.
+const pjob = await (await call('/api/assistant', { method: 'POST', cookie: c, body: { message: 'propón cambios' } })).json();
+const pnext = await (await call('/u/demo-c/api/bridge/next', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.equal(pnext.job.id, pjob.id);
+await call('/u/demo-c/api/bridge/complete', { method: 'POST', headers: bh, body: { id: pjob.id, reply: 'Listo', proposals: [
+  { action: 'task.create', projectId: 3, title: 'Nueva desde copiloto' },
+  { action: 'complete', taskId: 30, requestId: 'no-debe-pasar' },
+  { action: 'lt.delete', projectId: 3 },
+  { action: 'task.create', projectId: 3, title: '' },
+  ...Array.from({ length: 6 }, (_, i) => ({ action: 'lt.create', title: `LT ${i}` })),
+] } });
+const pstatus = await (await call(`/api/assistant?id=${pjob.id}`, { cookie: c })).json();
+assert.equal(pstatus.status, 'completed');
+assert.deepEqual(pstatus.proposals.slice(0, 2), [{ action: 'task.create', projectId: 3, title: 'Nueva desde copiloto' }, { action: 'complete', taskId: 30 }]);
+assert.equal(pstatus.proposals.length, 5, 'invalid ones dropped, at most 5 kept, requestId never trusted from the model');
+
 // 16. F6 rehearsal: the CEO account maps to the existing production box ("pmo-dsta") with no data
 // migration, sees the legacy data, and today's single-user bridge keeps working unchanged just by
 // pointing its base URL at /u/ceo (snapshot, ingest and queues).

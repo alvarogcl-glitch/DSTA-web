@@ -97,5 +97,41 @@ class UserCopilotTest(unittest.TestCase):
             self.copilot(Runner()).answer("../ceo", {}, JOB, SNAP_A, MINUTES_A)
 
 
+class ProposalsTest(unittest.TestCase):
+    SNAP = {"projects": [{"id": 8, "title": "LT Ana"}, {"id": 9, "title": "LT B"}],
+            "tasks": [{"id": 81, "title": "Abierta", "project_id": 8, "done": False},
+                      {"id": 82, "title": "Cerrada", "project_id": 8, "done": True}]}
+
+    def test_extrae_y_valida_propuestas(self):
+        reply = ("Te sugiero dos cambios.\n```acciones\n["
+                 '{"action":"task.create","projectId":8,"title":"Llamar a proveedor","dueDate":"2026-11-02"},'
+                 '{"action":"complete","taskId":81},'
+                 '{"action":"complete","taskId":82},'
+                 '{"action":"task.move","taskId":81,"projectId":999},'
+                 '{"action":"lt.delete","projectId":8},'
+                 '{"action":"task.update","taskId":777,"title":"x"},'
+                 '{"action":"lt.rename","projectId":9,"title":"LT B renombrada","extra":"campo"}'
+                 "]\n```")
+        text, proposals = uc.split_proposals(reply, self.SNAP)
+        self.assertEqual(text, "Te sugiero dos cambios.")
+        self.assertEqual(proposals, [
+            {"action": "task.create", "projectId": 8, "title": "Llamar a proveedor", "dueDate": "2026-11-02"},
+            {"action": "complete", "taskId": 81},
+            {"action": "lt.rename", "projectId": 9, "title": "LT B renombrada"},
+        ], "solo acciones válidas, sobre elementos del usuario y aún aplicables; sin campos extra")
+
+    def test_campos_opcionales_vacios_se_ignoran(self):
+        reply = 'Ok\n```acciones\n[{"action":"task.create","projectId":8,"title":"T","description":"","dueDate":""}]\n```'
+        self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.create", "projectId": 8, "title": "T"}])
+
+    def test_sin_bloque_o_json_invalido(self):
+        self.assertEqual(uc.split_proposals("Solo texto.", self.SNAP), ("Solo texto.", []))
+        self.assertEqual(uc.split_proposals("Hola\n```acciones\nno es json\n```", self.SNAP), ("Hola", []))
+
+    def test_maximo_cinco(self):
+        many = "\n```acciones\n" + str([{"action": "lt.create", "title": f"LT {i}"} for i in range(9)]).replace("'", '"') + "\n```"
+        self.assertEqual(len(uc.split_proposals("x" + many, self.SNAP)[1]), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

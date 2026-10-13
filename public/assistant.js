@@ -144,6 +144,76 @@
   viewer.querySelector('#dsta-minute-close').addEventListener('click', () => { viewer.hidden = true; });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !viewer.hidden) viewer.hidden = true; });
 
+  // Copilot proposals (multiuser): each one is applied only when the user clicks, through the
+  // same verified action queue as the dashboard buttons (/api/task-actions).
+  const lineName = id => (typeof projects !== 'undefined' && projects.find(p => p.id === id)?.title) || `LT ${id}`;
+  const taskName = id => (typeof tasks !== 'undefined' && tasks.find(t => t.id === id)?.title) || `#${id}`;
+  function describeProposal(p) {
+    switch (p.action) {
+      case 'task.create': return `Crear tarea «${p.title}» en ${lineName(p.projectId)}${p.dueDate ? ` (fecha ${p.dueDate})` : ''}`;
+      case 'task.update': return `Editar «${taskName(p.taskId)}» → «${p.title}»`;
+      case 'task.move': return `Mover «${taskName(p.taskId)}» a ${lineName(p.projectId)}`;
+      case 'complete': return `Completar «${taskName(p.taskId)}»`;
+      case 'lt.create': return `Crear línea «${p.title}»`;
+      case 'lt.rename': return `Renombrar ${lineName(p.projectId)} → «${p.title}»`;
+      case 'lt.archive': return `Archivar ${lineName(p.projectId)}`;
+      default: return p.action;
+    }
+  }
+  // refresh() returns false while another refresh is running: retry like the dashboard's own
+  // 'dsta-snapshot-ready' handler until the confirmed snapshot is shown.
+  async function refreshUntil(timestamp) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (typeof refresh === 'function' && await refresh(timestamp)) return true;
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    return false;
+  }
+  async function applyProposal(proposal, button, note) {
+    button.disabled = true;
+    note.textContent = 'Aplicando…';
+    const requestId = crypto.randomUUID();
+    try {
+      const response = await fetch('/api/task-actions', { method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...proposal, requestId }) });
+      const queued = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
+      for (let i = 0; i < 80; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const job = await (await fetch(`/api/task-actions?id=${requestId}`, { cache: 'no-store' })).json();
+        if (job.status === 'completed') {
+          note.textContent = 'Actualizando el dashboard…';
+          const shown = await refreshUntil(job.snapshotTimestamp || '');
+          note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
+          return;
+        }
+        if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
+      }
+      note.textContent = 'Sigue en proceso; revisa en unos minutos.';
+    } catch (error) {
+      note.textContent = error.message;
+      button.disabled = false;
+    }
+  }
+  function renderProposals(bubble, proposals) {
+    if (!proposals.length) return;
+    const box = document.createElement('div');
+    box.className = 'dsta-proposals';
+    box.style.cssText = 'margin-top:10px;display:grid;gap:6px';
+    for (const proposal of proposals) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+      const button = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Aplicar' });
+      button.style.cssText = 'width:auto;padding:4px 10px';
+      const label = Object.assign(document.createElement('span'), { textContent: describeProposal(proposal) });
+      const note = Object.assign(document.createElement('small'), { className: 'muted' });
+      button.addEventListener('click', () => void applyProposal(proposal, button, note));
+      row.append(button, label, note);
+      box.append(row);
+    }
+    bubble.append(box);
+  }
+
   async function waitForReply(id) {
     const deadline = Date.now() + 360_000;
     while (Date.now() < deadline) {
@@ -163,6 +233,7 @@
       const result = await waitForReply(id);
       const reply = result.reply;
       renderReply(replyBubble, reply, result.minutes || {});
+      renderProposals(replyBubble, result.proposals || []);
       replyBubble.classList.remove('pending');
       history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
       if (history.length > 20) history.splice(0, history.length - 20);

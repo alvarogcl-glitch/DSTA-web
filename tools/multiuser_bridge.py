@@ -153,7 +153,8 @@ class MultiuserBridge:
             with using_root(user["rootProjectId"]):
                 snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
             reply = self.copilot.answer(actor, user, job, snapshot, user_copilot.minutes_for(user))
-            self.finish_job(base, self.token, job, reply=reply)
+            reply, proposals = user_copilot.split_proposals(reply, snapshot)
+            self.finish_job(base, self.token, job, reply=reply, **({"proposals": proposals} if proposals else {}))
         except user_copilot.CopilotUnavailable as error:
             self.finish_job(base, self.token, job, error=str(error))
         except Exception as error:

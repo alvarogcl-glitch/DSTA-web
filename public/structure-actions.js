@@ -42,6 +42,15 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     form.append(wrap);
   }
 
+  // refresh() returns false while another refresh is running: retry like the dashboard's own
+  // 'dsta-snapshot-ready' handler until the confirmed snapshot is shown.
+  async function refreshUntil(timestamp) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (typeof refresh === 'function' && await refresh(timestamp)) return true;
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    return false;
+  }
   async function track(requestId, status, dialog) {
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
@@ -53,7 +62,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
       } catch { continue; }
       if (job.status === 'completed') {
         status.textContent = 'Listo. Actualizando el dashboard…';
-        await refresh(job.snapshotTimestamp || '');
+        await refreshUntil(job.snapshotTimestamp || '');
         dialog.close();
         return;
       }

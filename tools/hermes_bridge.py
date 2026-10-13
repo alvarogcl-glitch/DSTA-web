@@ -631,7 +631,7 @@ def execute_completion(job: dict, request: Callable, *, server_url: str | None =
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                summaries: list[dict] | None = None, error: str = "",
                refresh_error: str = "", snapshot_timestamp: str = "",
-               minutes: dict | None = None) -> dict:
+               minutes: dict | None = None, proposals: list | None = None) -> dict:
     payload: dict = {"id": job["id"]}
     if job.get("kind") in {"action", "label"}:
         payload.update(kind=job["kind"], attempt=job.get("attempt"))
@@ -643,6 +643,8 @@ def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
         payload["reply"] = reply
         if minutes:
             payload["minutes"] = minutes
+        if proposals:
+            payload["proposals"] = proposals
         if refresh_error:
             payload["refreshError"] = refresh_error
         if snapshot_timestamp:

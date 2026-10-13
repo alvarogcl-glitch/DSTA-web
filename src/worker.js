@@ -320,6 +320,23 @@ function actionResultMatches(job, snapshot, result) {
     default: return false;
   }
 }
+// Copilot proposals: structured actions the user may apply with one click. Never trusted from the
+// model as-is: same strict schema as /api/task-actions, no requestId (the browser creates it), max 5.
+function cleanProposals(proposals) {
+  if (!Array.isArray(proposals)) return [];
+  const clean = [];
+  for (const item of proposals.slice(0, 20)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const schema = ACTION_SCHEMAS[item.action];
+    if (!schema) continue;
+    const fields = Object.fromEntries([...schema.required, ...schema.optional]
+      .filter(key => item[key] !== undefined).map(key => [key, item[key]]));
+    const candidate = { action: item.action, ...fields };
+    if (validAction({ ...candidate, requestId: "00000000-0000-4000-8000-000000000000" })) clean.push(candidate);
+    if (clean.length === 5) break;
+  }
+  return clean;
+}
 const actionTarget = job => job.taskId ? `t:${job.taskId}` :
   (String(job.action || "").startsWith("lt.") && job.projectId ? `p:${job.projectId}` : null);
 
@@ -378,12 +395,13 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
   if (parsed.error) return parsed.error;
   if (parsed.body?.kind === "label") return forwardToChatObject(env, "/labels/complete", parsed.body, box);
   if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body, box);
-  const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes } = parsed.body || {};
+  const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes, proposals } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
   const chatResponse = await chatStub(env, box).fetch(new Request("https://chat.internal/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes) }),
+    body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes),
+      proposals: cleanProposals(proposals) }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const done = await chatStub(env, box).completeSummaryJob(id, Boolean(error), summaries);
@@ -726,7 +744,7 @@ export class DashboardChatQueue extends DurableObject {
       if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
       return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "",
         refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "",
-        minutes: job.minutes || {} });
+        minutes: job.minutes || {}, proposals: job.proposals || [] });
     }
 
     if (url.pathname === "/next" && request.method === "GET") {
@@ -810,7 +828,7 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/complete" && request.method === "POST") {
-      const { id, reply, error, refreshError, snapshotTimestamp, minutes } = await request.json();
+      const { id, reply, error, refreshError, snapshotTimestamp, minutes, proposals } = await request.json();
       const job = storage.get(`job:${id}`);
       if (!job || job.status !== "running" || storage.get("current") !== id) {
         return json({ error: "Trabajo no encontrado o no está activo." }, 404);
@@ -821,6 +839,7 @@ export class DashboardChatQueue extends DurableObject {
       job.refreshError = typeof refreshError === "string" ? refreshError.slice(0, 300) : "";
       job.snapshotTimestamp = typeof snapshotTimestamp === "string" ? snapshotTimestamp.slice(0, 40) : "";
       job.minutes = minutes && typeof minutes === "object" ? minutes : {};
+      job.proposals = Array.isArray(proposals) && !error ? proposals : [];
       job.completedAt = new Date().toISOString();
       storage.put(`job:${id}`, job);
       storage.delete("current");

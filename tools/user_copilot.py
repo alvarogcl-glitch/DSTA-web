@@ -34,7 +34,13 @@ INSTRUCTIONS = (
     "Usa SOLO el contexto de abajo: son sus líneas de trabajo, tareas y minutas. No inventes datos; "
     "si algo no está en el contexto, dilo. No tienes herramientas para modificar nada: si conviene un "
     "cambio, propónlo para que la persona lo aplique desde el dashboard (crear, editar, mover o "
-    "completar tareas y líneas).")
+    "completar tareas y líneas). Si propones cambios concretos, al final agrega un bloque\n"
+    "```acciones\n[{...}]\n```\ncon como máximo 5 objetos JSON, usando SOLO ids del contexto. Formatos: "
+    '{"action":"task.create","projectId":<LT>,"title":"...","description":"...","dueDate":"AAAA-MM-DD"}, '
+    '{"action":"task.update","taskId":<id>,"title":"...","description":"...","dueDate":"AAAA-MM-DD"}, '
+    '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, '
+    '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
+    '{"action":"lt.archive","projectId":<LT>}. La persona decide si aplicarlos.')
 
 
 class CopilotUnavailable(RuntimeError):
@@ -72,6 +78,63 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
     context = "\n".join(lines)[:MAX_CONTEXT_CHARS]
     history = "\n".join(f"{item['role']}: {item['content'][:2000]}" for item in (job.get("history") or [])[-10:])
     return f"{context}\n\n## Conversación\n{history}\nuser: {job.get('message', '')}\n"
+
+
+PROPOSALS_BLOCK = re.compile(r"```acciones\s*(.*?)```", re.DOTALL)
+SCHEMAS = {
+    "complete": (("taskId",), ()), "task.create": (("projectId", "title"), ("description", "dueDate")),
+    "task.update": (("taskId", "title"), ("description", "dueDate")), "task.move": (("taskId", "projectId"), ()),
+    "lt.create": (("title",), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
+}
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
+    if not isinstance(item, dict) or item.get("action") not in SCHEMAS:
+        return None
+    required, optional = SCHEMAS[item["action"]]
+    # Models often send empty optional fields ("dueDate": ""): treat them as absent.
+    clean = {"action": item["action"], **{k: item[k] for k in required if item.get(k) is not None},
+             **{k: item[k] for k in optional if item.get(k) not in (None, "")}}
+    if any(k not in clean for k in required):
+        return None
+    tasks = {t.get("id"): t for t in snapshot.get("tasks", [])}
+    projects = {p.get("id") for p in snapshot.get("projects", [])}
+    if "taskId" in clean and (type(clean["taskId"]) is not int or clean["taskId"] not in tasks):
+        return None
+    if "projectId" in clean and (type(clean["projectId"]) is not int or clean["projectId"] not in projects):
+        return None
+    if "title" in clean and (not isinstance(clean["title"], str) or not clean["title"].strip() or len(clean["title"].strip()) > 250):
+        return None
+    if "description" in clean and (not isinstance(clean["description"], str) or len(clean["description"]) > 20_000):
+        return None
+    if "dueDate" in clean and (not isinstance(clean["dueDate"], str) or not DATE.match(clean["dueDate"])):
+        return None
+    if clean["action"] == "complete" and tasks[clean["taskId"]].get("done"):
+        return None
+    if clean["action"] == "task.move" and tasks[clean["taskId"]].get("project_id") == clean["projectId"]:
+        return None
+    return clean
+
+
+def split_proposals(reply: str, snapshot: dict | None) -> tuple[str, list[dict]]:
+    """Strip the ```acciones block from the reply and keep only valid, applicable proposals (max 5)."""
+    match = PROPOSALS_BLOCK.search(reply or "")
+    if not match:
+        return (reply or "").strip(), []
+    text = (reply[:match.start()] + reply[match.end():]).strip()
+    try:
+        items = json.loads(match.group(1).strip())
+    except ValueError:
+        return text, []
+    proposals = []
+    for item in items if isinstance(items, list) else []:
+        valid = _valid_proposal(item, snapshot or {})
+        if valid and valid not in proposals:
+            proposals.append(valid)
+        if len(proposals) == 5:
+            break
+    return text, proposals
 
 
 def clean(text: str) -> str:
