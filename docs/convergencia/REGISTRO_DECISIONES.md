@@ -41,6 +41,11 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D23 | decidido | Mismo. | «Editar descripción» en el menú «⋯» de la LT; el copiloto también puede (`lt.describe`). La descripción se ve en el inspector y la recibe el copiloto como contexto. | Igual al converger. | Ninguno. | Entrega E05. |
 | D24 | decidido | Mismo. | No puede haber dos líneas activas con el mismo nombre (sin distinguir mayúsculas, tildes ni espacios). Lo validan el Worker (409), el puente (contra Vikunja, antes de escribir) y el copiloto. Renombrar una línea a su propio nombre con otras mayúsculas está permitido. | Producción además valida códigos LT/TR; se revisará al converger. | Ninguno. | Entrega E05. |
 | D25 | decidido | Mismo. | Solo se archiva una línea sin tareas abiertas. Las completadas se archivan con ella y no se borran. El mensaje indica cuántas quedan abiertas. | Producción exige línea vacía; al converger rige la regla del piloto. | Ninguno. | Entrega E05. |
+| D26 | decidido | Telegram 13-10 23:12: «D26: dejarlo igual que como es en producción». | Igual que producción: solo por copiloto (`lt.merge`). Mueve todas las tareas, abiertas y completadas, conservando sus campos, y luego archiva el origen vacío. Rechaza si el origen tiene subproyectos. Si falla a mitad, informa cuántas movió y deja el origen activo. Un reintento devuelve el mismo resultado. | Igual. | Ninguno. | Entrega E06. |
+| D27 | decidido | Mismo mensaje: «Resto ok». | ⚙ Configuración › «Líneas archivadas» con «Restaurar», y el copiloto (`lt.restore`). Conserva el ID. Se rechaza si una línea activa ya tiene ese nombre (D24). | Igual al converger. | Ninguno. | Entrega E06. |
+| D28 | decidido | Mismo. | Copiloto: descripciones completas de las tareas abiertas (hasta 4.000 caracteres cada una) y resumen de las completadas (300). Límite total de 60.000 caracteres. Si algo no cabe, se le avisa al modelo que lo diga en vez de suponer. | Igual al converger. | Ninguno. | Entrega E06. |
+| D29 | decidido | Mismo. | El snapshot incluye `created`. El copiloto ve «creada AAAA-MM-DD» en hora de Chile y la fecha de hoy en Chile. | Igual al converger. | Ninguno. | Entrega E06. |
+| D30 | decidido | Mismo. | El copiloto conoce el catálogo de etiquetas y las de cada tarea, y propone `label.assign`/`label.unassign` sobre etiquetas existentes. Regla D03: lo pedido se ejecuta por la cola de etiquetas verificada; lo sugerido queda con «Aplicar». Las demás etiquetas no se tocan. | Igual al converger. | Ninguno. | Entrega E06. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -149,6 +154,23 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Navegador con usuarios sintéticos: 12 de 12. Incluye archivar con tarea abierta (rechazado con mensaje), renombrar a un nombre ocupado (rechazado) y editar la descripción, que luego se ve en el inspector.
 - Versiones: Worker staging deec1978-3ab2-452f-8992-bf0d4b34e9ac; puente reiniciado con aba5565.
 - Rollback: revertir aba5565, redeploy de staging y reiniciar el puente.
+
+### Entrega E06 · D26 a D30: fusionar y restaurar líneas, contexto del copiloto, fecha de creación, etiquetas por chat
+
+- Autorización: Telegram 13-10 23:12, «D26: dejarlo igual que como es en producción / Resto ok».
+- Estado: verificado en local y publicado en el piloto. El navegador cubre D27; D26 y D30 desde el chat se cubren con pruebas unitarias, del Worker y del puente, porque en el laboratorio no hay modelo. Falta la prueba del CEO.
+- Commit base y resultado: 2303649 → 98e48f4 (rama feat/multiusuario).
+- Cambios:
+  - `publish_dashboard`: agrega `archivedProjects` y `created` por tarea.
+  - Worker: nuevas acciones `lt.restore` y `lt.merge` con su alcance y verificación; las propuestas `label.*` pasan por `validLabelAction` y se ejecutan por /labels/create.
+  - Puente: acciones `lt.restore` y `lt.merge`; después del chat drena la cola de etiquetas si corresponde.
+  - Copiloto: contexto priorizado y nuevas propuestas.
+  - Interfaz: sección «Líneas archivadas» en ⚙ y textos de las propuestas nuevas.
+- Pruebas:
+  - `npm test`: 172 Python OK, más todas las suites JS.
+  - Navegador con usuarios sintéticos: 13 de 13. Incluye archivar y luego restaurar desde ⚙.
+- Versiones: Worker staging dd6ee1a2-8c15-4412-9fef-2369defb8b1c; puente reiniciado con 98e48f4.
+- Rollback: revertir 98e48f4, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 
