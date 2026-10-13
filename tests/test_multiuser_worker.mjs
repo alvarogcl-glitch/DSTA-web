@@ -253,4 +253,24 @@ assert.equal(gjob.op, 'disconnect');
 await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { id: gjob.id, status: 'disconnected' } });
 assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).status, 'disconnected');
 
+// 16. F6 rehearsal: the CEO account maps to the existing production box ("pmo-dsta") with no data
+// migration, sees the legacy data, and today's single-user bridge keeps working unchanged just by
+// pointing its base URL at /u/ceo (snapshot, ingest and queues).
+env.INGEST_TOKEN = 'ingest-test';
+const ceoToken = 'ceo-session-token-0123456789abcdef0123';
+const ceoHash = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ceoToken)));
+sqlite.prepare('INSERT INTO sessions(token_hash,actor_id,expires_at) VALUES(?,?,?)').run(ceoHash, 'ceo', Math.floor(Date.now() / 1000) + 3600);
+const ceoCookie = `__Host-dsta_session=${ceoToken}`;
+const ceoDash = await (await call('/api/dashboard', { cookie: ceoCookie })).json();
+assert.deepEqual(ceoDash.tasks.map(t => t.title), ['Tarea real del CEO'], 'the CEO keeps the production data without migration');
+const legacySnap = { timestamp: new Date(Date.now() + 1000).toISOString(), projects: [{ id: 2, title: 'PMO-DSTA real' }],
+  tasks: [{ id: 999, title: 'Tarea real del CEO', project_id: 2, done: true }] };
+assert.equal((await call('/u/ceo/api/bridge/snapshot', { method: 'POST', body: legacySnap, headers: { authorization: 'Bearer bridge-test', noOrigin: '1' } })).status, 202);
+assert.equal((await call('/u/ceo/api/ingest', { method: 'POST', body: { ...legacySnap, timestamp: new Date(Date.now() + 2000).toISOString() },
+  headers: { authorization: 'Bearer ingest-test', noOrigin: '1' } })).status, 202, 'the periodic publisher works through /u/ceo');
+assert.equal((await (await call('/api/dashboard', { cookie: ceoCookie })).json()).tasks[0].done, true);
+assert.ok(boxes.has('pmo-dsta'), 'writes land in the production box');
+assert.equal((await (await call('/api/dashboard', { cookie: b })).json()).tasks?.some?.(t => t.title === 'Tarea real del CEO') ?? false, false,
+  'other users never see the CEO box');
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');

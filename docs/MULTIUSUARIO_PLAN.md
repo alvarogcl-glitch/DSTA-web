@@ -63,9 +63,9 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F5.5 Canarios en vivo con Hermes real (`tests/e2e_copilot_lab.py`), 6/6: A recibe su tarea y nada de B, B no obtiene nada de A, el Copilot no conoce al CEO ("NO_SE") y no quedan sesiones de usuarios en el Hermes del CEO. La primera corrida detectó que el `session_id` sale por stderr; se corrigió con una purga por usuario, y las 3 sesiones de prueba que habían quedado se borraron. Además hay 7 tests unitarios y 1 de integración en el puente.
 
 ### F6 · Paso a producción (REQUIERE APROBACIÓN DEL CEO)
-- [ ] F6.1 Mapeo del CEO al DO `pmo-dsta`, su token y la raíz 2, sin migrar datos.
-- [ ] F6.2 Plan de rollback (`wrangler rollback`) probado.
-- [ ] F6.3 Deploy aprobado y 2 usuarios piloto durante 2 semanas.
+- [~] F6.1 **Preparado y ensayado, no ejecutado.** `users.do_name='pmo-dsta'`; el bloque 16 del test prueba que el CEO ve sus datos sin migración y que el puente actual funciona sin cambios de código apuntando a `/u/ceo`. El runbook está en `docs/F6_CUTOVER.md`.
+- [~] F6.2 Rollback documentado en `docs/F6_CUTOVER.md` (menos de 5 minutos, sin datos que revertir). **No ensayado contra producción**, por regla.
+- [ ] F6.3 Pendiente: requiere la aprobación del CEO, Workers Paid, los usuarios piloto y la decisión sobre Granola real.
 
 ## Bitácora
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.
@@ -74,3 +74,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:42: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
 - 2026-10-12 23:50: **F4 completa con Granola sintético.** La prueba real queda pendiente de una cuenta de prueba.
 - 2026-10-12 23:59: **F5 completa.** Canarios en vivo 6/6 y respaldo Claude verificado en vivo. **Decisión operativa:** el puente de staging no queda corriendo toda la noche, porque sumaría ~10.000 requests/día a la cuenta donde producción ya usa casi todo el plan gratis de Workers y podría tumbarla.
+- 2026-10-13 00:02: F6 preparada: ensayo de cutover en test (bloque 16) y runbook. **No se tocó producción.**
