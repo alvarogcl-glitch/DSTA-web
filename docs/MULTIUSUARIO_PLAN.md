@@ -38,7 +38,7 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F1.2 `tools/multiuser_bridge.py` y `tools/user_vault.py` (DPAPI). Cada trabajo corre con el token, la raíz y el directorio de su usuario; los usuarios sin vault se ignoran (4 tests del puente y 4 del vault).
 - [x] F1.3 `tools/user_context.py`: contextvar con default 2. Se usa en el publicador, la completación, las etiquetas y el MCP (`DSTA_ROOT_PROJECT_ID`). La suite de producción sigue pasando.
 - [x] F1.4 `tests/e2e_multiuser_lab.py`: 23/23 con Vikunja de laboratorio :14701 y wrangler dev. La acción de A se ejecuta con el token de A, la tarea de B no cambia y el token de A recibe 403 sobre la raíz de B.
-- [~] F1.5 Cálculo (no medido en Cloudflare): despacho cada 3 s = 28.800/día, más un snapshot cada 120 s por usuario (720/día). Con 15 usuarios son unas 40.000/día del puente multiusuario, frente a 100.000-120.000/día del puente actual. **Pendiente:** medirlo con datos reales de Cloudflare en F6.
+- [~] F1.5 **Medición real de producción** (Cloudflare GraphQL, 13-10 00:30): `dsta-web` registra 80.348 (09-10), 110.077 (10-10), 112.759 (11-10) y 112.477 (12-10) requests/día, **por encima del límite gratis de 100.000/día**. El token no puede leer el plan (403): falta confirmar si la cuenta ya está en Workers Paid; si no lo está, producción probablemente se corta a diario al llegar al tope. El diseño multiusuario usa un sondeo de despacho (unas 28.800/día) más un snapshot por usuario cada 120 s, contra unos 112.000/día del puente actual de un solo usuario. **Recomendación:** confirmar el plan y llevar el sondeo por despacho también al puente actual.
 
 ### F2 · Alta de usuarios
 - [x] F2.1 `tools/provision_user.py provision`: cuenta Vikunja con contraseña aleatoria, raíz propia, token API acotado a 7 grupos y 365 días, vault DPAPI e invitación de un solo uso (solo hash en D1).
@@ -79,3 +79,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-13 00:01: Granola: refresh del token implementado y probado; una conexión vencida se ve en el dashboard. 138 tests de Python OK.
 - 2026-10-13 00:02: reporte horario 1 enviado por Telegram.
 - 2026-10-13 00:23: Copilot con propuestas aplicables con un clic. Se corrigieron dos bugs: las propuestas con campos opcionales vacíos se descartaban, y «Aplicado» se mostraba antes de refrescar el dashboard.
+- 2026-10-13 00:30: F1.5 medido en producción: unos 112.000 requests/día (sobre el límite gratis). Plan de la cuenta sin confirmar (403).
