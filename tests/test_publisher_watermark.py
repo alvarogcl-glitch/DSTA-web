@@ -12,7 +12,7 @@ class PublisherWatermarkTests(unittest.TestCase):
         times=iter([datetime(2026,10,6,14,0,tzinfo=timezone.utc),datetime(2026,10,6,14,2,tzinfo=timezone.utc)])
         def clock(*args):
             events.append('clock');return next(times)
-        def pages(base,path,token):
+        def pages(base,path,token,params=None):
             events.append('read')
             return [{'id':2,'parent_project_id':0,'title':'PMO-DSTA','is_archived':False},
                     {'id':3,'parent_project_id':2,'title':'LT1','is_archived':False}] if path=='/api/v1/projects' else []

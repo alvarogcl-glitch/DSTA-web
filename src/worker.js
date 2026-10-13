@@ -119,6 +119,8 @@ function validSnapshot(snapshot) {
     Number.isSafeInteger(item.id) && item.id > 0 && typeof item.title === "string";
   if (snapshot.projects.some(item => !validRecord(item) || (item.description !== undefined && typeof item.description !== "string")) ||
       snapshot.tasks.some(item => !validRecord(item))) return false;
+  if (snapshot.archivedProjects !== undefined && (!Array.isArray(snapshot.archivedProjects) ||
+      snapshot.archivedProjects.some(item => !validRecord(item)))) return false;
   if (snapshot.labels !== undefined) {
     if (!Array.isArray(snapshot.labels) || snapshot.labels.some(l => !validRecord(l) ||
         typeof l.hex_color !== "string" || !/^[0-9a-f]{6}$/i.test(l.hex_color)) ||
@@ -132,7 +134,7 @@ function validSnapshot(snapshot) {
   return snapshot.tasks.every(task =>
     (task.project_id === undefined || projectIds.has(task.project_id)) &&
     (task.done === undefined || typeof task.done === "boolean") &&
-    ["project", "owner", "date", "dependency", "criterion", "source", "action_key", "description"]
+    ["project", "owner", "date", "dependency", "criterion", "source", "action_key", "description", "created"]
       .every(key => task[key] === undefined || typeof task[key] === "string"));
 }
 
@@ -152,6 +154,7 @@ async function receiveSnapshot(request, env, fromBridge = false, box = LEGACY_BO
     ...(snapshot.observationStartedAt ? { observationStartedAt: snapshot.observationStartedAt } : {}),
     ...(snapshot.labels !== undefined ? {labels: snapshot.labels} : {}),
     projects: snapshot.projects,
+    ...(Array.isArray(snapshot.archivedProjects) ? { archivedProjects: snapshot.archivedProjects } : {}),
     tasks: snapshot.tasks,
     stale: false,
   };
@@ -281,6 +284,8 @@ const ACTION_SCHEMAS = {
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
   "lt.describe": { required: ["projectId", "description"], optional: [] },
+  "lt.restore": { required: ["projectId"], optional: [] },
+  "lt.merge": { required: ["projectId", "targetProjectId"], optional: [] },
   "lt.archive": { required: ["projectId"], optional: [] },
   // Same entry format as pmo_append_log: "<kind> <YYYY-MM-DD>: <entry>" appended to the description.
   "task.log": { required: ["taskId", "entry", "entryDate"], optional: ["logKind"] },
@@ -307,7 +312,7 @@ function validAction(body) {
   if (!schema || typeof body.requestId !== "string" || !ACTION_UUID.test(body.requestId)) return false;
   const allowed = new Set(["action", "requestId", ...schema.required, ...schema.optional]);
   if (Object.keys(body).some(key => !allowed.has(key)) || schema.required.some(key => body[key] === undefined)) return false;
-  for (const key of ["taskId", "projectId"]) {
+  for (const key of ["taskId", "projectId", "targetProjectId"]) {
     if (body[key] !== undefined && (!Number.isSafeInteger(body[key]) || body[key] <= 0)) return false;
   }
   if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 250)) return false;
@@ -356,6 +361,10 @@ function actionResultMatches(job, snapshot, result) {
     }
     case "lt.rename": return result.projectId === job.projectId && project(job.projectId)?.title === job.title.trim();
     case "lt.describe": return result.projectId === job.projectId && project(job.projectId)?.description === job.description.trim();
+    case "lt.restore": return result.projectId === job.projectId && Boolean(project(job.projectId));
+    case "lt.merge": return result.projectId === job.projectId && !project(job.projectId) && Boolean(project(job.targetProjectId)) &&
+      Array.isArray(result.movedTaskIds) && result.movedTaskIds.every(id => task(id)?.project_id === job.targetProjectId) &&
+      !snapshot.tasks.some(t => t.project_id === job.projectId);
     case "lt.archive": return result.projectId === job.projectId && !project(job.projectId);
     case "task.log": return result.taskId === job.taskId && String(task(job.taskId)?.description || "").includes(logLine(job));
     default: return false;
@@ -363,11 +372,20 @@ function actionResultMatches(job, snapshot, result) {
 }
 // Copilot proposals: structured actions the user may apply with one click. Never trusted from the
 // model as-is: same strict schema as /api/task-actions, no requestId (the browser creates it), max 5.
+const labelQueueAction = proposal => proposal.action === "label.assign" ? "assign" : "unassign";
 function cleanProposals(proposals) {
   if (!Array.isArray(proposals)) return [];
   const clean = [];
   for (const item of proposals.slice(0, 20)) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    // D30: label changes go through the label queue (same proof as the label buttons).
+    if (item.action === "label.assign" || item.action === "label.unassign") {
+      const candidate = { action: item.action, taskId: item.taskId, labelId: item.labelId };
+      if (validLabelAction({ action: labelQueueAction(candidate), taskId: item.taskId, labelId: item.labelId,
+        requestId: "00000000-0000-4000-8000-000000000000" })) clean.push(item.execute === true ? { ...candidate, execute: true } : candidate);
+      if (clean.length === 5) break;
+      continue;
+    }
     const schema = ACTION_SCHEMAS[item.action];
     if (!schema) continue;
     const fields = Object.fromEntries([...schema.required, ...schema.optional]
@@ -451,8 +469,12 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
       if (!proposal.execute) continue;
       const { execute, ...action } = proposal;
       const requestId = id.slice(0, 34) + index.toString(16).padStart(2, "0");
-      const response = await forwardToChatObject(env, "/actions/create", { ...action, requestId }, box);
-      if (response.status === 202) proposal.requestId = requestId;
+      const isLabel = action.action.startsWith("label.");
+      const response = isLabel
+        ? await forwardToChatObject(env, "/labels/create",
+          { action: labelQueueAction(action), taskId: action.taskId, labelId: action.labelId, requestId }, box)
+        : await forwardToChatObject(env, "/actions/create", { ...action, requestId }, box);
+      if (response.status === 202) Object.assign(proposal, { requestId }, isLabel ? { queue: "label" } : {});
       else proposal.executeError = String((await response.json().catch(() => ({}))).error || "No se pudo aplicar.").slice(0, 200);
     }
   }
@@ -1178,8 +1200,18 @@ export class DashboardChatQueue extends DurableObject {
           !snapshot.projects.some(p => p.id === task.project_id))) {
         return json({ error: "La tarea no está en el snapshot actual." }, 404);
       }
-      if (body.projectId !== undefined && !snapshot.projects.some(p => p.id === body.projectId)) {
+      // D27: a restore targets an archived line; everything else, an active one.
+      const archived = body.action === "lt.restore" ? (snapshot.archivedProjects || []).find(p => p.id === body.projectId) : null;
+      if (body.action === "lt.restore" && !archived) return json({ error: "La línea archivada no está en el snapshot actual." }, 404);
+      if (archived && snapshot.projects.some(p => lineKey(p.title) === lineKey(archived.title))) {
+        return json({ error: "Ya existe una línea activa con ese nombre; renómbrala antes de restaurar." }, 409);
+      }
+      if (body.projectId !== undefined && !archived && !snapshot.projects.some(p => p.id === body.projectId)) {
         return json({ error: "La línea de trabajo no está en el snapshot actual." }, 404);
+      }
+      if (body.targetProjectId !== undefined && (body.targetProjectId === body.projectId ||
+          !snapshot.projects.some(p => p.id === body.targetProjectId))) {
+        return json({ error: "La línea de destino no es válida." }, 404);
       }
       // D24/D25 early feedback (the bridge re-checks against Vikunja before writing).
       if (["lt.create", "lt.rename"].includes(body.action) &&

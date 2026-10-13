@@ -17,7 +17,7 @@ class DynamicPortfolioTests(unittest.TestCase):
             {"id": 12, "title": "TR2 - Antigua", "parent_project_id": 2, "is_archived": True},
             {"id": 13, "title": "Personal", "parent_project_id": 0},
         ]
-        def pages(_, path, __):
+        def pages(_, path, __, params=None):
             if path == "/api/v1/labels":
                 return []
             if path == "/api/v1/projects":
@@ -28,6 +28,7 @@ class DynamicPortfolioTests(unittest.TestCase):
             snapshot = publisher.fetch_dashboard("http://local", "test")
         self.assertEqual([project["id"] for project in snapshot["projects"]], [11])
         self.assertEqual(snapshot["tasks"][0]["project"], "LT9 - Nueva")
+        self.assertEqual(snapshot["archivedProjects"], [{"id": 12, "title": "TR2 - Antigua"}], "D27: archived lines can be restored")
 
     def test_missing_root_fails_without_publishing_partial_portfolio(self):
         with patch.object(publisher, "pages", return_value=[]):

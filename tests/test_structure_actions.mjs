@@ -33,7 +33,7 @@ async function call(env, method, path, body, authorization = auth) {
 }
 const uuid = () => crypto.randomUUID();
 const later = ms => new Date(Date.now() + ms).toISOString();
-const base = { projects: [{ id: 3, title: 'LT1' }, { id: 4, title: 'LT2' }],
+const base = { projects: [{ id: 3, title: 'LT1' }, { id: 4, title: 'LT2' }], archivedProjects: [{ id: 7, title: 'LT vieja' }, { id: 8, title: 'lt1' }],
   tasks: [{ id: 15, title: 'Tarea', project_id: 3, done: false, description: 'd' }] };
 
 // 1. Strict schema.
@@ -47,6 +47,8 @@ const valid = [
   { action: 'lt.create', requestId: uuid(), title: 'LT nueva' },
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
   { action: 'lt.describe', requestId: uuid(), projectId: 4, description: ' Objetivo ' },
+  { action: 'lt.restore', requestId: uuid(), projectId: 7 },
+  { action: 'lt.merge', requestId: uuid(), projectId: 4, targetProjectId: 3 },
   { action: 'lt.archive', requestId: uuid(), projectId: 4 },
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'Avance con el proveedor', entryDate: '2026-10-13', logKind: 'Avance' },
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'Con estructura', owner: 'Paula', dependency: 'Finanzas', criterion: 'Enviado', origin: 'form' },
@@ -79,6 +81,7 @@ for (const [body, message] of [
   [{ action: 'lt.create', requestId: uuid(), title: '  lt1 ' }, /Ya existe una línea/],
   [{ action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT1' }, /Ya existe una línea/],
   [{ action: 'lt.archive', requestId: uuid(), projectId: 3 }, /1 tareas abiertas/],
+  [{ action: 'lt.restore', requestId: uuid(), projectId: 8 }, /Ya existe una línea activa con ese nombre/],
 ]) {
   const refused = await call(env, 'POST', '/api/task-actions', body);
   assert.equal(refused.status, 409, body.action);
@@ -89,6 +92,9 @@ assert.equal((await call(env, 'POST', '/api/task-actions', { action: 'lt.rename'
 
 // 2. Scope: references must exist in the current snapshot.
 for (const body of [
+  { action: 'lt.restore', requestId: uuid(), projectId: 3 },
+  { action: 'lt.merge', requestId: uuid(), projectId: 4, targetProjectId: 4 },
+  { action: 'lt.merge', requestId: uuid(), projectId: 4, targetProjectId: 99 },
   { action: 'task.create', requestId: uuid(), projectId: 99, title: 'fuera' },
   { action: 'task.update', requestId: uuid(), taskId: 999, title: 'fuera' },
   { action: 'task.move', requestId: uuid(), taskId: 15, projectId: 99 },
@@ -105,6 +111,8 @@ const proofs = {
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
   'lt.rename': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2 renombrada' }] })],
   'lt.describe': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2', description: 'Objetivo' }] })],
+  'lt.restore': [{ projectId: 7 }, s => ({ ...s, projects: [...s.projects, { id: 7, title: 'LT vieja' }], archivedProjects: [s.archivedProjects[1]] })],
+  'lt.merge': [{ projectId: 4, movedTaskIds: [] }, s => ({ ...s, projects: [s.projects[0]], archivedProjects: [...s.archivedProjects, { id: 4, title: 'LT2' }] })],
   'lt.archive': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0]], tasks: s.tasks.filter(t => t.project_id !== 4) })],
   'task.log': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], description: 'd\n\nAvance 2026-10-13: Avance con el proveedor' }] })],
 };

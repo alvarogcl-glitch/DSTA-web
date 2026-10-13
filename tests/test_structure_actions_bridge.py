@@ -175,6 +175,31 @@ class StructureActionsTest(unittest.TestCase):
         self.assertTrue(self.vk.projects[8]["is_archived"])
         self.assertIn(100, self.vk.tasks, "completed tasks are kept")
 
+    def test_restaurar_linea_archivada(self):
+        """D27: restore keeps the ID; refused if an active line now has its name."""
+        self.vk.projects[30] = {"id": 30, "title": "LT archivada", "parent_project_id": 7, "is_archived": True, "hex_color": "abcdef"}
+        self.vk.projects[31] = {"id": 31, "title": "LT A2", "parent_project_id": 7, "is_archived": True}
+        self.assertEqual(self.run_action({"action": "lt.restore", "projectId": 30}), {"projectId": 30})
+        self.assertFalse(self.vk.projects[30]["is_archived"])
+        self.assertEqual(self.vk.projects[30]["hex_color"], "abcdef")
+        with self.assertRaisesRegex(ValueError, "Ya existe una línea con ese nombre"):
+            self.run_action({"action": "lt.restore", "projectId": 31, "id": "req-2"})
+        with self.assertRaises(ValueError):
+            self.run_action({"action": "lt.restore", "projectId": 50, "id": "req-3"})  # another user's root
+
+    def test_fusionar_lineas_como_produccion(self):
+        """D26: move every task (open and done) keeping its fields, then archive the empty source."""
+        self.vk.tasks[101] = {**self.vk.tasks[100], "id": 101, "title": "Hecha", "done": True}
+        result = self.run_action({"action": "lt.merge", "projectId": 8, "targetProjectId": 9})
+        self.assertEqual(result, {"projectId": 8, "movedTaskIds": [100, 101]})
+        self.assertEqual({self.vk.tasks[i]["project_id"] for i in (100, 101)}, {9})
+        self.assertEqual(self.vk.tasks[101]["assignees"], [{"id": 9}])
+        self.assertTrue(self.vk.projects[8]["is_archived"])
+        self.assertEqual(self.run_action({"action": "lt.merge", "projectId": 8, "targetProjectId": 9}), result,
+                         "a retry after success returns the same result")
+        with self.assertRaises(ValueError):
+            self.run_action({"action": "lt.merge", "projectId": 9, "targetProjectId": 51, "id": "req-2"})  # foreign target
+
     def test_descripcion_de_linea(self):
         """D23: editing a line's description keeps its other fields."""
         self.run_action({"action": "lt.describe", "projectId": 8, "description": " Objetivo de la línea "})

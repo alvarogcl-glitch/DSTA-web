@@ -222,6 +222,37 @@ class ExecuteProposalsBridgeTest(unittest.TestCase):
         self.assertEqual(processed, ["act-1"], "the queued action is executed without waiting for the next dispatch")
 
 
+class ExecuteLabelProposalsBridgeTest(unittest.TestCase):
+    def test_etiqueta_pedida_se_aplica_de_inmediato(self):
+        """D30: an explicit label request drains the label queue right after the answer."""
+        processed, polled = [], []
+
+        class FakeCopilot:
+            def answer(self, actor, user, job, snapshot, minutes):
+                return 'Hecho.\n```acciones\n[{"action":"label.assign","taskId":5,"labelId":2,"ejecutar":true}]\n```'
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if url.endswith("/api/bridge/dispatch") and method == "GET":
+                return {"now": 1, "pending": {"demo-a": {"chat": 1}}}
+            if "kind=" in url:
+                polled.append(url.rsplit("kind=", 1)[1])
+            if "kind=label" in url:
+                return {"job": {"id": "lab-1", "kind": "label", "action": "assign"}} if not processed else {"job": None}
+            if "kind=chat" in url:
+                return {"job": {"id": "chat-1", "kind": "chat", "message": "ponle 2"}} if "chat" not in polled[:-1] else {"job": None}
+            return {"job": None}
+
+        snapshot = {"projects": [{"id": 1}], "labels": [{"id": 2, "title": "Urgente"}],
+                    "tasks": [{"id": 5, "project_id": 1, "done": False, "label_ids": []}]}
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json,
+                                    process_job=lambda job, *a: processed.append(job["id"]),
+                                    finish_job=lambda *a, **kw: None, users_dir=Path("C:/tmp/x"),
+                                    copilot=FakeCopilot(), fetch_snapshot=lambda user: snapshot)
+        bridge.dispatch_once()
+        self.assertEqual(processed, ["lab-1"])
+        self.assertNotIn("action", polled, "only the queue that received work is drained")
+
+
 class FakeGranolaService:
     def __init__(self):
         self.calls = []

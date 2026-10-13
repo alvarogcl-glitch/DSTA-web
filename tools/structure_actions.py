@@ -30,7 +30,8 @@ TASK_FIELDS = (
 PROJECT_FIELDS = ("id", "title", "description", "parent_project_id", "is_archived", "hex_color", "identifier",
                   "position", "is_favorite", "background_blur_hash", "background_information")
 NO_DUE_DATE = "0001-01-01T00:00:00Z"
-ACTIONS = {"task.create", "task.update", "task.move", "task.reopen", "task.log", "lt.create", "lt.rename", "lt.describe", "lt.archive"}
+ACTIONS = {"task.create", "task.update", "task.move", "task.reopen", "task.log", "lt.create", "lt.rename", "lt.describe",
+           "lt.archive", "lt.restore", "lt.merge"}
 LOG_KINDS = {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}
 
 
@@ -266,6 +267,55 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
                 raise RuntimeError("Vikunja no confirmó la línea creada")
             return {"projectId": created["id"]}
         return _remembered(cache_dir, job["id"], create)
+
+    if action == "lt.restore":  # D27: same IDs; refused if an active line already took its name (D24)
+        root_id = _root(request)
+        project = _read(request, f"/api/v1/projects/{job['projectId']}")
+        if project.get("id") != job["projectId"] or project.get("parent_project_id") != root_id:
+            raise ValueError("La línea no pertenece a la raíz del usuario")
+        if project.get("is_archived"):
+            _unique_line_title(request, str(project.get("title") or ""), job["projectId"])
+            payload = {field: project[field] for field in PROJECT_FIELDS if field in project}
+            payload["is_archived"] = False
+            written = request("POST", f"/api/v1/projects/{job['projectId']}", payload=payload)
+            if not isinstance(written, dict) or written.get("id") != job["projectId"]:
+                raise RuntimeError("Vikunja no confirmó la línea")
+        return {"projectId": job["projectId"]}
+
+    if action == "lt.merge":  # D26, as production's pmo_merge_projects
+        def merge() -> dict:
+            source, target = job["projectId"], job["targetProjectId"]
+            if source == target:
+                raise ValueError("La línea de origen y la de destino deben ser distintas")
+            _work_line(request, source)
+            _work_line(request, target)
+            if any(p.get("parent_project_id") == source for p in _pages(request, "/api/v1/projects")):
+                raise ValueError("La línea de origen tiene subproyectos; muévelos en Vikunja antes de fusionarla")
+            moved: list[int] = []
+            tasks = _line_tasks(request, source)
+            for item in tasks:
+                try:
+                    with lock(server_url, item["id"]):
+                        current = _task(request, item["id"], source)
+                        payload = {field: current[field] for field in TASK_FIELDS}
+                        payload["project_id"] = target
+                        written = request("POST", f"/api/v1/tasks/{item['id']}", payload=payload)
+                        if not isinstance(written, dict) or written.get("id") != item["id"]:
+                            raise RuntimeError("Vikunja no confirmó la tarea")
+                except Exception as error:
+                    raise RuntimeError(f"Fusión incompleta: se movieron {len(moved)} de {len(tasks)} tareas; "
+                                       f"el origen sigue activo. Falló la tarea #{item['id']}") from error
+                moved.append(item["id"])
+            if _line_tasks(request, source):
+                raise RuntimeError(f"Se movieron {len(moved)} tareas, pero el origen aún tiene tareas; no se archivó")
+            project = _work_line(request, source)
+            payload = {field: project[field] for field in PROJECT_FIELDS if field in project}
+            payload["is_archived"] = True
+            written = request("POST", f"/api/v1/projects/{source}", payload=payload)
+            if not isinstance(written, dict) or written.get("id") != source:
+                raise RuntimeError(f"Se movieron {len(moved)} tareas, pero Vikunja no confirmó el archivo del origen")
+            return {"projectId": source, "movedTaskIds": moved}
+        return _remembered(cache_dir, job["id"], merge)
 
     project = _work_line(request, job["projectId"])
     payload = {field: project[field] for field in PROJECT_FIELDS if field in project}

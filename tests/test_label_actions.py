@@ -121,7 +121,7 @@ class LabelActionTests(unittest.TestCase):
         spec=importlib.util.spec_from_file_location('label_publisher',Path(__file__).resolve().parents[1]/'tools/publish_dashboard.py')
         publisher=importlib.util.module_from_spec(spec);spec.loader.exec_module(publisher)
         from unittest.mock import patch
-        def pages(base,path,token):
+        def pages(base,path,token,params=None):
             if path=='/api/v1/projects':return [{'id':2},{'id':3,'parent_project_id':2,'title':'LT1'}]
             if path=='/api/v1/labels':return list(self.native.labels.values())
             return list(self.native.tasks.values())

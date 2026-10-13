@@ -148,6 +148,39 @@ class ProposalsTest(unittest.TestCase):
         prompt = uc.build_prompt(JOB, {"projects": [{"id": 9, "title": "LT B", "description": "Objetivo B"}], "tasks": []}, [])
         self.assertIn("Descripción de la línea: Objetivo B", prompt)
 
+    def test_restaurar_fusionar_y_etiquetas(self):
+        """D26/D27/D30: proposals only over what exists and makes sense right now."""
+        snap = {**self.SNAP, "archivedProjects": [{"id": 20, "title": "LT vieja"}, {"id": 21, "title": "lt ana"}],
+                "labels": [{"id": 5, "title": "Urgente"}, {"id": 6, "title": "Cata"}],
+                "tasks": [{**self.SNAP["tasks"][0], "label_ids": [6]}, self.SNAP["tasks"][1]]}
+        reply = ('x\n```acciones\n['
+                 '{"action":"lt.restore","projectId":20},{"action":"lt.restore","projectId":21},{"action":"lt.restore","projectId":8},'
+                 '{"action":"lt.merge","projectId":9,"targetProjectId":8},{"action":"lt.merge","projectId":8,"targetProjectId":8},'
+                 '{"action":"label.assign","taskId":81,"labelId":5},{"action":"label.assign","taskId":81,"labelId":6},'
+                 '{"action":"label.unassign","taskId":81,"labelId":6},{"action":"label.assign","taskId":81,"labelId":99}'
+                 ']\n```')
+        self.assertEqual(uc.split_proposals(reply, snap)[1], [
+            {"action": "lt.restore", "projectId": 20},
+            {"action": "lt.merge", "projectId": 9, "targetProjectId": 8},
+            {"action": "label.assign", "taskId": 81, "labelId": 5},
+            {"action": "label.unassign", "taskId": 81, "labelId": 6},
+        ], "restore only archived lines whose name is free; merge into another line; labels only if they change something")
+
+    def test_contexto_completo_y_fechas_de_chile(self):
+        """D28/D29: full description of open tasks, creation date in Chile, notice when something did not fit."""
+        long_log = "Detalle\n\n" + "\n\n".join(f"Avance 2026-10-{d:02d}: paso {d}" for d in range(1, 13)) + "\n\nNota 2026-10-13: DATO-FINAL"
+        snap = {"projects": [{"id": 8, "title": "LT Ana"}], "labels": [{"id": 5, "title": "Urgente"}],
+                "tasks": [{"id": 81, "title": "Abierta", "project_id": 8, "done": False, "description": long_log,
+                           "created": "2026-10-14T01:30:00Z", "label_ids": [5]}]}
+        prompt = uc.build_prompt(JOB, snap, [])
+        self.assertIn("DATO-FINAL", prompt, "the end of a long open-task description is visible")
+        self.assertIn("creada 2026-10-13", prompt, "01:30 UTC on the 14th is still the 13th in Santiago")
+        self.assertIn("etiquetas: Urgente", prompt)
+        self.assertNotIn("[Aviso:", prompt)
+        big = {"projects": [{"id": 8, "title": "LT"}], "tasks": [
+            {"id": i, "title": f"T{i}", "project_id": 8, "done": True, "description": "x" * 300} for i in range(1, 400)]}
+        self.assertIn("[Aviso: parte del contexto no cupo", uc.build_prompt(JOB, big, []))
+
     def test_reabrir_solo_tareas_completadas(self):
         reply = 'x\n```acciones\n[{"action":"task.reopen","taskId":82},{"action":"task.reopen","taskId":81}]\n```'
         self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.reopen", "taskId": 82}])

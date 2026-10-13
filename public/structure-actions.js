@@ -239,13 +239,38 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     minute.before(button);
   }
 
+  // D27: archived lines live in ⚙ Configuración, each with "Restaurar" (same verified queue).
+  function addArchivedSection() {
+    if (!window.DstaSettings || document.querySelector('.structure-archived')) return;
+    const box = Object.assign(document.createElement('div'), { className: 'structure-archived structure-actions' });
+    box.style.cssText = 'display:grid;gap:6px;margin:0';
+    const render = () => {
+      const archived = window.__dstaArchived || [];
+      box.replaceChildren(...(archived.length ? archived.map(line => {
+        const row = Object.assign(document.createElement('div'), { className: 'structure-actions' });
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:0;flex-wrap:wrap';
+        const name = Object.assign(document.createElement('span'), { textContent: line.title });
+        name.style.flex = '1 1 auto';
+        const restore = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Restaurar' });
+        restore.addEventListener('click', () => { restore.disabled = true; void runDirect('lt.restore', { projectId: line.id }, row); });
+        row.append(name, restore);
+        return row;
+      }) : [Object.assign(document.createElement('small'), { className: 'muted', textContent: 'No hay líneas archivadas.' })]));
+    };
+    render();
+    window.addEventListener('dsta-archived', render);
+    window.DstaSettings.addSection('Líneas archivadas', box, 40);
+  }
+
   // Only in accounts mode (the single-user dashboard keeps its legacy surface).
   let enabled = false;
   window.DstaStructure = { mount: view => { if (enabled) mount(view); } };
   fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then(response => {
     if (!response.ok) return;
     enabled = true;
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addNewLineButton);
-    else addNewLineButton();
+    const start = () => { addNewLineButton(); addArchivedSection(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+    window.addEventListener('dsta-settings-ready', addArchivedSection);
   }).catch(() => {});
 })();

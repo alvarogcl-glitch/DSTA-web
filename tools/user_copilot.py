@@ -20,7 +20,9 @@ import os
 import re
 import subprocess
 import unicodedata
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Callable
 
 ACTOR_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -28,7 +30,7 @@ SESSION_ID = re.compile(r"^session_id:\s*(\S+)\s*$", re.MULTILINE)
 LISTED_SESSION = re.compile(r"\b(\d{8}_\d{6}_[0-9a-f]{6})\b")
 HERMES_TIMEOUT = 180
 CLAUDE_TIMEOUT = 150
-MAX_CONTEXT_CHARS = 30_000
+MAX_CONTEXT_CHARS = 60_000
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
@@ -47,7 +49,10 @@ INSTRUCTIONS = (
     '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, {"action":"task.reopen","taskId":<id completada>}, '
     '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
     '{"action":"lt.describe","projectId":<LT>,"description":"..."}, '
-    '{"action":"lt.archive","projectId":<LT>}. Omite los campos que no sepas. Pedido explícito, por ejemplo: '
+    '{"action":"lt.archive","projectId":<LT>} (solo sin tareas abiertas), {"action":"lt.restore","projectId":<LT archivada>}, '
+    '{"action":"lt.merge","projectId":<LT origen>,"targetProjectId":<LT destino>} (mueve todas sus tareas y archiva el origen), '
+    '{"action":"label.assign","taskId":<id>,"labelId":<id etiqueta>}, {"action":"label.unassign","taskId":<id>,"labelId":<id etiqueta>}. '
+    'Omite los campos que no sepas. Pedido explícito, por ejemplo: '
     '{"action":"complete","taskId":<id>,"ejecutar": true}.')
 
 
@@ -63,29 +68,60 @@ def default_run(args, *, input_text=None, cwd=None, env=None, timeout=None):
 
 
 def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
+    """D28: open tasks go in full (by priority); completed ones and minutes are summarized, and the
+    model is told when something did not fit. D29: creation date in Chile time. D30: labels."""
     snapshot = snapshot or {"projects": [], "tasks": []}
-    lines = [INSTRUCTIONS, "", "## Líneas de trabajo y tareas"]
+    labels = {label.get("id"): label.get("title", "") for label in snapshot.get("labels") or []}
     by_project: dict[int, list[dict]] = {}
     for task in snapshot.get("tasks", []):
         by_project.setdefault(task.get("project_id"), []).append(task)
-    for project in snapshot.get("projects", []):
-        lines.append(f"### {project.get('title', '')} (LT {project.get('id')})")
-        if project.get("description"):
-            lines.append(f"Descripción de la línea: {project['description']}")
-        for task in by_project.get(project.get("id"), []):
-            state = "completada" if task.get("done") else "abierta"
-            extra = " · ".join(v for v in (task.get("owner"), task.get("date")) if v)
-            lines.append(f"- #{task.get('id')} {task.get('title', '')} [{state}]" + (f" ({extra})" if extra else ""))
-            if task.get("description"):
-                lines.append("  " + str(task["description"])[:400].replace("\n", " "))
-    if minutes:
-        lines += ["", "## Minutas recientes"]
-        for minute in minutes[:15]:
-            lines.append(f"- {minute.get('date', '')} · {minute.get('title', '')}: {str(minute.get('summary', ''))[:600]}")
+
+    def head(task: dict) -> str:
+        extra = " · ".join(v for v in (task.get("owner") and f"responsable {task['owner']}", task.get("date") and f"fecha {task['date']}",
+                                        task.get("created") and f"creada {local_date(task['created'])}") if v)
+        names = [labels[i] for i in task.get("label_ids") or [] if i in labels]
+        tags = f" · etiquetas: {', '.join(names)}" if names else ""
+        return f"- #{task.get('id')} {task.get('title', '')}" + (f" ({extra})" if extra else "") + tags
+
+    essential = [INSTRUCTIONS, "", f"Hoy es {today_local()} (hora de Chile).", "", "## Líneas de trabajo y tareas abiertas"]
     if job.get("task"):
         task = job["task"]
-        lines += ["", f"## Tarea seleccionada: #{task.get('id')} {task.get('title', '')}"]
-    context = "\n".join(lines)[:MAX_CONTEXT_CHARS]
+        essential[4:4] = [f"## Tarea seleccionada: #{task.get('id')} {task.get('title', '')}", ""]
+    for project in snapshot.get("projects", []):
+        essential.append(f"### {project.get('title', '')} (LT {project.get('id')})")
+        if project.get("description"):
+            essential.append(f"Descripción de la línea: {project['description']}")
+        for task in (t for t in by_project.get(project.get("id"), []) if not t.get("done")):
+            essential.append(head(task))
+            if task.get("description"):
+                essential.append("  " + str(task["description"])[:4000].replace("\n", "\n  "))
+    secondary = []
+    if labels:
+        secondary.append(["", "## Etiquetas disponibles"] + [f"- {title} (id {i})" for i, title in labels.items()])
+    if snapshot.get("archivedProjects"):
+        secondary.append(["", "## Líneas archivadas (se pueden restaurar)"] +
+                         [f"- {p.get('title', '')} (LT {p.get('id')})" for p in snapshot["archivedProjects"]])
+    done = [t for t in snapshot.get("tasks", []) if t.get("done")]
+    if done:
+        secondary.append(["", "## Tareas completadas (resumen)"] +
+                         [head(t) + f" [LT {t.get('project_id')}]" + (f": {str(t['description'])[:300]}".replace("\n", " ") if t.get("description") else "")
+                          for t in done])
+    if minutes:
+        secondary.append(["", "## Minutas recientes"] + [
+            f"- {m.get('date', '')} · {m.get('title', '')}: {str(m.get('summary', ''))[:600]}" for m in minutes[:15]])
+    context = "\n".join(essential)
+    omitted = 0
+    if len(context) > MAX_CONTEXT_CHARS:
+        context, omitted = context[:MAX_CONTEXT_CHARS], 1
+    for section in secondary:
+        text = "\n".join(section)
+        if len(context) + len(text) <= MAX_CONTEXT_CHARS:
+            context += "\n" + text
+        else:
+            omitted += 1
+    if omitted:
+        context += ("\n\n[Aviso: parte del contexto no cupo por tamaño. Si te preguntan algo que no aparece arriba, "
+                    "dilo explícitamente en vez de suponer.]")
     history = "\n".join(f"{item['role']}: {item['content'][:2000]}" for item in (job.get("history") or [])[-10:])
     return f"{context}\n\n## Conversación\n{history}\nuser: {job.get('message', '')}\n"
 
@@ -98,8 +134,27 @@ SCHEMAS = {
     "task.update": (("taskId", "title"), ("detail", "dueDate", "owner", "dependency", "criterion")),
     "task.move": (("taskId", "projectId"), ()), "task.reopen": (("taskId",), ()),
     "lt.create": (("title",), ()), "lt.describe": (("projectId", "description"), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
+    # D27 restore an archived line; D26 merge like production (move every task, archive the empty source).
+    "lt.restore": (("projectId",), ()), "lt.merge": (("projectId", "targetProjectId"), ()),
+    # D30: labels from the chat, one task and one existing label at a time.
+    "label.assign": (("taskId", "labelId"), ()), "label.unassign": (("taskId", "labelId"), ()),
 }
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+CHILE = ZoneInfo("America/Santiago")
+
+
+def local_date(value: str) -> str:
+    """Vikunja timestamp → date in Chile (D29: "today"/"yesterday" follow Santiago, not UTC)."""
+    try:
+        return datetime.fromisoformat(str(value)).astimezone(CHILE).date().isoformat()
+    except ValueError:
+        return str(value)[:10]
+
+
+def today_local() -> str:
+    return datetime.now(CHILE).date().isoformat()
 
 
 def line_key(title) -> str:
@@ -119,9 +174,23 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
         return None
     tasks = {t.get("id"): t for t in snapshot.get("tasks", [])}
     projects = {p.get("id") for p in snapshot.get("projects", [])}
+    archived = {p.get("id"): p for p in snapshot.get("archivedProjects") or []}
+    labels = {label.get("id") for label in snapshot.get("labels") or []}
     if "taskId" in clean and (type(clean["taskId"]) is not int or clean["taskId"] not in tasks):
         return None
-    if "projectId" in clean and (type(clean["projectId"]) is not int or clean["projectId"] not in projects):
+    scope = archived if clean["action"] == "lt.restore" else projects
+    if "projectId" in clean and (type(clean["projectId"]) is not int or clean["projectId"] not in scope):
+        return None
+    if "targetProjectId" in clean and (type(clean["targetProjectId"]) is not int or clean["targetProjectId"] not in projects
+                                       or clean["targetProjectId"] == clean["projectId"]):
+        return None
+    if "labelId" in clean:
+        current = tasks[clean["taskId"]].get("label_ids") or []
+        if type(clean["labelId"]) is not int or clean["labelId"] not in labels or \
+                (clean["labelId"] in current) == (clean["action"] == "label.assign"):
+            return None
+    if clean["action"] == "lt.restore" and any(line_key(p.get("title")) == line_key(archived[clean["projectId"]].get("title"))
+                                               for p in snapshot.get("projects", [])):
         return None
     if "title" in clean and (not isinstance(clean["title"], str) or not clean["title"].strip() or len(clean["title"].strip()) > 250):
         return None

@@ -55,11 +55,11 @@ def request_json(url: str, *, headers: dict[str, str], timeout: int = 30):
         return json.load(response), response.headers
 
 
-def pages(base_url: str, path: str, token: str) -> list[dict]:
+def pages(base_url: str, path: str, token: str, params: dict | None = None) -> list[dict]:
     items: list[dict] = []
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     for page in range(1, 101):
-        query = urlencode({"page": page, "per_page": 100})
+        query = urlencode({**(params or {}), "page": page, "per_page": 100})
         batch, response_headers = request_json(
             f"{base_url}{path}?{query}", headers=headers
         )
@@ -90,6 +90,13 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
          if int(project.get("parent_project_id") or 0) == root_id and not project.get("is_archived")),
         key=lambda project: (float(project.get("position") or 0), str(project.get("title") or "").casefold()),
     )
+
+    # D27: archived lines of this root, so they can be found and restored.
+    archived = sorted(
+        ({"id": project["id"], "title": project["title"]}
+         for project in pages(base_url, "/api/v1/projects", token, {"is_archived": "true"})
+         if int(project.get("parent_project_id") or 0) == root_id and project.get("is_archived")),
+        key=lambda project: str(project["title"]).casefold())
 
     labels = pages(base_url, "/api/v1/labels", token)
     label_catalog = [{"id": label["id"], "title": label["title"],
@@ -124,6 +131,7 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
                     "source": description_field(description, "SOURCE"),
                     "action_key": description_field(description, "ACTION_KEY"),
                     "description": description,
+                    "created": str(raw.get("created") or ""),
                     "label_ids": sorted({label["id"] for label in (raw.get("labels") or [])
                                          if label.get("id") in label_ids}),
                 }
@@ -133,6 +141,7 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
         "observationStartedAt": observation_started_at,
         "labels": label_catalog,
         "projects": project_summary,
+        "archivedProjects": archived,
         "tasks": tasks,
         "stale": False,
     }

@@ -149,6 +149,10 @@
   // same verified action queue as the dashboard buttons (/api/task-actions).
   const lineName = id => (typeof projects !== 'undefined' && projects.find(p => p.id === id)?.title) || `LT ${id}`;
   const taskName = id => (typeof tasks !== 'undefined' && tasks.find(t => t.id === id)?.title) || `#${id}`;
+  const labelName = id => (typeof labels !== 'undefined' && labels.find(l => l.id === id)?.title) || `#${id}`;
+  // D30: label changes use the label queue; everything else the structure/action queue.
+  const isLabel = proposal => proposal.queue === 'label' || String(proposal.action).startsWith('label.');
+  const queueUrl = proposal => (isLabel(proposal) ? '/api/label-actions' : '/api/task-actions');
   function describeProposal(p) {
     switch (p.action) {
       case 'task.create': return `Crear tarea «${p.title}» en ${lineName(p.projectId)}${p.dueDate ? ` (fecha ${p.dueDate})` : ''}`;
@@ -160,6 +164,10 @@
       case 'lt.rename': return `Renombrar ${lineName(p.projectId)} → «${p.title}»`;
       case 'lt.describe': return `Cambiar la descripción de ${lineName(p.projectId)}`;
       case 'lt.archive': return `Archivar ${lineName(p.projectId)}`;
+      case 'lt.restore': return `Restaurar la línea archivada ${(window.__dstaArchived || []).find(l => l.id === p.projectId)?.title || `LT ${p.projectId}`}`;
+      case 'lt.merge': return `Fusionar ${lineName(p.projectId)} en ${lineName(p.targetProjectId)} (mueve sus tareas y archiva el origen)`;
+      case 'label.assign': return `Poner la etiqueta «${labelName(p.labelId)}» a «${taskName(p.taskId)}»`;
+      case 'label.unassign': return `Quitar la etiqueta «${labelName(p.labelId)}» de «${taskName(p.taskId)}»`;
       default: return p.action;
     }
   }
@@ -173,10 +181,10 @@
     return false;
   }
   // Follows a queued action until the snapshot confirms it (same proof as the dashboard buttons).
-  async function watchAction(requestId, note) {
+  async function watchAction(requestId, note, url = '/api/task-actions') {
     for (let i = 0; i < 80; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 1500));
-      const job = await (await fetch(`/api/task-actions?id=${requestId}`, { cache: 'no-store' })).json();
+      const job = await (await fetch(`${url}?id=${requestId}`, { cache: 'no-store' })).json();
       if (job.status === 'completed') {
         note.textContent = 'Actualizando el dashboard…';
         const shown = await refreshUntil(job.snapshotTimestamp || '');
@@ -191,13 +199,16 @@
     button.disabled = true;
     note.textContent = 'Aplicando…';
     const requestId = crypto.randomUUID();
-    const { execute, requestId: _executed, executeError, ...action } = proposal;
+    const { execute, requestId: _executed, executeError, queue, ...action } = proposal;
+    const body = isLabel(proposal)
+      ? { action: action.action === 'label.assign' ? 'assign' : 'unassign', taskId: action.taskId, labelId: action.labelId, requestId }
+      : { ...action, requestId };
     try {
-      const response = await fetch('/api/task-actions', { method: 'POST', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...action, requestId }) });
+      const response = await fetch(queueUrl(proposal), { method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const queued = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
-      await watchAction(requestId, note);
+      await watchAction(requestId, note, queueUrl(proposal));
     } catch (error) {
       note.textContent = error.message;
       button.disabled = false;
@@ -220,7 +231,7 @@
       if (proposal.requestId) {
         button.hidden = true;
         note.textContent = 'Ejecutando…';
-        watchAction(proposal.requestId, note).catch(error => {
+        watchAction(proposal.requestId, note, queueUrl(proposal)).catch(error => {
           note.textContent = `${error.message} Puedes reintentar.`;
           button.textContent = 'Reintentar';
           button.hidden = false;

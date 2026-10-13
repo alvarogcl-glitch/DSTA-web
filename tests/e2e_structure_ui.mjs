@@ -128,6 +128,19 @@ await a.click('.structure-more button:has-text("Archivar línea")');
 await submitDialog(a, {});
 assert.ok(!(await a.evaluate(() => projects.some(p => p.title.startsWith('LT renombrada'))))); step('A renombra y archiva la línea');
 
+await a.evaluate(() => { const d = document.querySelector('#drawer'); if (d?.classList.contains('open')) document.querySelector('#close')?.click(); });
+await a.click('#dsta-settings-toggle');
+const archivedRow = a.locator('.structure-archived > div', { hasText: 'LT renombrada desde UI' });
+await archivedRow.locator('button:has-text("Restaurar")').click();
+await a.waitForFunction(() => projects.some(p => p.title === 'LT renombrada desde UI'), null, { timeout: 90000 });
+if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/e06-settings.png` });
+await a.click('#dsta-settings-toggle');
+step('D27: A restaura la línea desde ⚙ Configuración y vuelve a aparecer');
+await openProject(a, 'LT renombrada desde UI');
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Archivar línea")');
+await submitDialog(a, {});
+
 const b = await session(cfg.B);
 const seenByB = await b.evaluate(() => [...projects.map(p => p.title), ...tasks.map(t => t.title)].join('|'));
 assert.doesNotMatch(seenByB, /desde UI/); step('B no ve nada de lo que hizo A');

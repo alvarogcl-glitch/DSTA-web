@@ -306,6 +306,20 @@ const queuedAction = (await (await call('/u/demo-c/api/bridge/next?kind=action',
 assert.deepEqual([queuedAction.action, queuedAction.title, queuedAction.owner, queuedAction.origin], ['task.create', 'Informe', 'Paula', 'copilot']);
 assert.equal((await (await call(`/api/task-actions?id=${xstatus.proposals[0].requestId}`, { cookie: c })).json()).status, 'running');
 
+// 15d. D30: an explicit label request from the chat goes through the label queue.
+await call('/u/demo-c/api/bridge/snapshot', { method: 'POST', headers: bh,
+  body: { timestamp: new Date(Date.now() + 1000).toISOString(), labels: [{ id: 1, title: 'Urgente', hex_color: 'f6c85f' }],
+    projects: [{ id: 3, title: 'LT C' }], tasks: [{ id: 31, title: 'Existente', project_id: 3, done: false, label_ids: [] }] } });
+const ljob = await (await call('/api/assistant', { method: 'POST', cookie: c, body: { message: 'ponle Urgente a Existente' } })).json();
+await call('/u/demo-c/api/bridge/next', { headers: { authorization: 'Bearer bridge-test' } });
+await call('/u/demo-c/api/bridge/complete', { method: 'POST', headers: bh, body: { id: ljob.id, reply: 'Listo.', proposals: [
+  { action: 'label.assign', taskId: 31, labelId: 1, execute: true }, { action: 'label.assign', taskId: 31, labelId: 'x' },
+] } });
+const lstatus = await (await call(`/api/assistant?id=${ljob.id}`, { cookie: c })).json();
+assert.equal(lstatus.proposals.length, 1, 'invalid label proposal dropped');
+assert.equal(lstatus.proposals[0].queue, 'label');
+assert.equal((await (await call(`/api/label-actions?id=${lstatus.proposals[0].requestId}`, { cookie: c })).json()).status, 'queued');
+
 // 16. F6 rehearsal: the CEO account maps to the existing production box ("pmo-dsta") with no data
 // migration, sees the legacy data, and today's single-user bridge keeps working unchanged just by
 // pointing its base URL at /u/ceo (snapshot, ingest and queues).
