@@ -211,4 +211,46 @@ const legacyEnv = { DASHBOARD_USER: 'u', DASHBOARD_PASSWORD: 'p', INGEST_TOKEN: 
 assert.equal((await worker.fetch(new Request(`${ORIGIN}/api/bridge/wipe`, { method: 'POST', headers: { authorization: 'Bearer bridge-test' } }), legacyEnv)).status, 401,
   'single-user mode has no wipe route (falls back to Basic Auth)');
 
+// 15. F4: per-user Granola connection. The Worker only coordinates OAuth; the code is exchanged
+// on the VM and tokens never reach the Worker or the browser.
+const bh = { authorization: 'Bearer bridge-test', noOrigin: '1' };
+const c = await login({ email: 'c@dsta.test', password: 'synthetic-C-password-2026', id: 'demo-c' });
+assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).status, 'disconnected');
+assert.equal((await call('/api/granola/connect', { method: 'POST', cookie: c, body: {} })).status, 202);
+const dg = await (await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.ok(Object.keys(dg.pending['demo-c'] || {}).includes('granola'), 'connect is announced to the bridge');
+let gjob = (await (await call('/u/demo-c/api/bridge/next?kind=granola', { headers: { authorization: 'Bearer bridge-test' } })).json()).granola;
+assert.equal(gjob.op, 'authorize');
+const authorizationUrl = 'https://mcp-auth.granola.ai/oauth2/authorize?state=st-123&code_challenge=x';
+assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh,
+  body: { id: gjob.id, status: 'authorize', authorizationUrl, state: 'st-123' } })).status, 200);
+const gs = await (await call('/api/granola/status', { cookie: c })).json();
+assert.equal(gs.status, 'authorize');
+assert.equal(gs.authorizationUrl, authorizationUrl);
+assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh,
+  body: { id: gjob.id, status: 'authorize', authorizationUrl: 'javascript:alert(1)', state: 'st-123' } })).status, 400, 'only https authorization URLs');
+// Callback: needs the session of the same user and the exact state.
+assert.equal((await call('/oauth/granola/callback?code=abc&state=st-123')).status, 302, 'no session: back to login');
+assert.equal((await call('/oauth/granola/callback?code=abc&state=otro', { cookie: c })).status, 400, 'wrong state rejected');
+assert.equal((await call('/oauth/granola/callback?code=abc&state=st-123', { cookie: b })).status, 400, 'another user cannot finish C\'s flow');
+const cb = await call('/oauth/granola/callback?code=abc&state=st-123', { cookie: c });
+assert.equal(cb.status, 302);
+assert.match(cb.headers.get('location'), /^\/\?granola=/);
+assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).status, 'exchanging');
+assert.equal((await call('/oauth/granola/callback?code=abc&state=st-123', { cookie: c })).status, 400, 'state is single use');
+gjob = (await (await call('/u/demo-c/api/bridge/next?kind=granola', { headers: { authorization: 'Bearer bridge-test' } })).json()).granola;
+assert.deepEqual([gjob.op, gjob.code, gjob.state], ['exchange', 'abc', 'st-123']);
+assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { id: gjob.id, status: 'connected' } })).status, 200);
+const connected = await (await call('/api/granola/status', { cookie: c })).json();
+assert.equal(connected.status, 'connected');
+assert.ok(!JSON.stringify(connected).includes('abc'), 'the code is gone after the exchange');
+assert.equal((await (await call('/api/granola/status', { cookie: b })).json()).status, 'disconnected', 'B is unaffected');
+assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { status: 'synced', count: 3 } })).status, 200);
+assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).count, 3);
+assert.equal((await call('/api/granola/disconnect', { method: 'POST', cookie: c, body: {} })).status, 202);
+gjob = (await (await call('/u/demo-c/api/bridge/next?kind=granola', { headers: { authorization: 'Bearer bridge-test' } })).json()).granola;
+assert.equal(gjob.op, 'disconnect');
+await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { id: gjob.id, status: 'disconnected' } });
+assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).status, 'disconnected');
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');

@@ -51,9 +51,9 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F3.3 `tests/e2e_structure_lab.py` y `e2e_structure_ui.mjs`: navegador, puente multiusuario real en bucle, Vikunja de laboratorio y wrangler dev. 7/7: A crea, edita, mueve, renombra y archiva (unos 3 s por acción) y B no ve nada.
 
 ### F4 · Granola por usuario
-- [ ] F4.1 OAuth Granola: callback vía Worker, canje y refresh en la VM.
-- [ ] F4.2 Bandeja de minutas por usuario.
-- [ ] F4.3 Prueba con mock; prueba real pendiente de una cuenta Granola de prueba (decisión del CEO).
+- [x] F4.1 OAuth Granola por usuario. El Worker coordina la URL de autorización y el `state`, y el callback `/oauth/granola/callback` exige la sesión del mismo usuario y un state de un solo uso. El canje PKCE se hace en la VM (`tools/granola_user.py` sobre el cliente vendorizado de Codex, `tools/granola_client.py`), con los tokens cifrados en el vault. **Pendiente:** refresh del token; hoy, al vencer, el usuario debe reconectar.
+- [x] F4.2 El puente importa las reuniones del usuario conectado (al conectar y cada hora) en SU bandeja: título, fecha y resumen. Las notas privadas no salen de la VM. Las acciones propuestas llegan con F5.
+- [~] F4.3 Probado contra un Granola sintético (`tests/fake_granola.py`): 2 tests de la VM, 3 del puente, el bloque 15 del Worker y el E2E en navegador 7/7 (`e2e_granola_lab.py`). **Pendiente:** la prueba con Granola real, que requiere una cuenta de prueba y que Granola acepte el redirect en workers.dev (decisión del CEO).
 
 ### F5 · Copilot por usuario
 - [ ] F5.1 Hermes con home dedicado, `--ignore-rules`, sin memoria del CEO y sin fallback Ollama.
@@ -72,3 +72,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:25: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.
 - 2026-10-12 23:38: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.
 - 2026-10-12 23:42: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
+- 2026-10-12 23:50: **F4 completa con Granola sintético.** La prueba real queda pendiente de una cuenta de prueba.

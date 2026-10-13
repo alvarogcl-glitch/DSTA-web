@@ -27,11 +27,13 @@ if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from user_context import using_root  # noqa: E402
 
-KINDS = ("action", "label", "chat", "health")
+KINDS = ("action", "label", "chat", "health", "granola")
 DRAIN_LIMIT = 5
 DISPATCH_SECONDS = 3
 SWEEP_SECONDS = 300
 PUBLISH_SECONDS = 120
+GRANOLA_SYNC_SECONDS = 3600
+GRANOLA_FAILED = "No se pudo completar la conexión con Granola. Inténtalo de nuevo."
 COPILOT_PENDING = ("El Copilot multiusuario aún no está habilitado en este entorno (fase F5). "
                    "Tu consulta no fue procesada.")
 INBOX_PENDING = "La bandeja de minutas multiusuario aún no está habilitada (fase F4)."
@@ -45,7 +47,8 @@ def log(message: str) -> None:
 class MultiuserBridge:
     def __init__(self, base_url: str, token: str, *, load_user: Callable[[str], dict | None],
                  request_json: Callable, process_job: Callable, finish_job: Callable, users_dir: Path,
-                 publish_snapshot: Callable | None = None, check_vikunja: Callable | None = None):
+                 publish_snapshot: Callable | None = None, check_vikunja: Callable | None = None,
+                 granola=None):
         self.base = base_url.rstrip("/")
         self.token = token
         self.load_user = load_user
@@ -55,6 +58,7 @@ class MultiuserBridge:
         self.users_dir = users_dir
         self.publish_snapshot = publish_snapshot
         self.check_vikunja = check_vikunja or (lambda user: (True, "sin verificar"))
+        self.granola = granola
 
     def user_base(self, actor: str) -> str:
         return f"{self.base}/u/{actor}"
@@ -104,6 +108,11 @@ class MultiuserBridge:
                     self.report_health(actor, user, result["request"])
                     handled += 1
                 return handled
+            if kind == "granola":
+                if result.get("granola"):
+                    self.handle_granola(actor, result["granola"])
+                    handled += 1
+                return handled
             if result.get("decision"):
                 self.request_json(f"{base}/api/bridge/decision-done", token=self.token, method="POST",
                                   payload={"id": result["decision"]["id"], "error": INBOX_PENDING}, timeout=20)
@@ -125,13 +134,57 @@ class MultiuserBridge:
             return
         self.finish_job(base, self.token, job, error=COPILOT_PENDING)
 
+    def _granola_post(self, actor: str, payload: dict) -> None:
+        self.request_json(f"{self.user_base(actor)}/api/bridge/granola", token=self.token, method="POST",
+                          payload=payload, timeout=20)
+
+    def handle_granola(self, actor: str, op: dict) -> None:
+        if not self.granola:
+            self._granola_post(actor, {"id": op.get("id"), "status": "error", "error": "Granola no está habilitado en este puente."})
+            return
+        try:
+            if op.get("op") == "authorize":
+                started = self.granola.authorize(actor, op["id"])
+                self._granola_post(actor, {"id": op["id"], "status": "authorize", **started})
+            elif op.get("op") == "exchange":
+                self.granola.exchange(actor, op["id"], op["state"], op["code"])
+                self._granola_post(actor, {"id": op["id"], "status": "connected"})
+                self.sync_granola([actor])
+            elif op.get("op") == "disconnect":
+                self.granola.disconnect(actor)
+                self._granola_post(actor, {"id": op["id"], "status": "disconnected"})
+        except Exception as error:  # provider/OAuth failures: report a generic message, never details
+            log(f"granola de {actor[:20]} falló ({type(error).__name__})")
+            self._granola_post(actor, {"id": op.get("id"), "status": "error", "error": GRANOLA_FAILED})
+
+    def sync_granola(self, actors: list[str]) -> int:
+        """Import each connected user's meetings into THEIR inbox (title, date, summary)."""
+        if not self.granola:
+            return 0
+        import granola_user
+        imported = 0
+        for actor in actors:
+            if not self.granola.connected(actor):
+                continue
+            try:
+                records = self.granola.sync(actor)
+                for record in records:
+                    self.request_json(f"{self.user_base(actor)}/api/bridge/minute", token=self.token, method="POST",
+                                      payload=granola_user.inbox_record(record), timeout=20)
+                self._granola_post(actor, {"status": "synced", "count": len(records)})
+                imported += len(records)
+            except Exception as error:
+                log(f"sync granola de {actor[:20]} falló ({type(error).__name__})")
+        return imported
+
     def report_health(self, actor: str, user: dict, request: dict) -> None:
         ok, detail = self.check_vikunja(user)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.request_json(f"{self.user_base(actor)}/api/bridge/health", token=self.token, method="POST", timeout=20,
                           payload={"vikunja": {"ok": ok, "detail": detail, "checkedAt": now, "requestId": request["id"]},
-                                   "granola": {"ok": False, "detail": "Granola no conectado (fase F4)",
-                                               "checkedAt": now, "requestId": request["id"]}})
+                                   "granola": {"ok": bool(self.granola and self.granola.connected(actor)),
+                                               "detail": "Granola conectado" if self.granola and self.granola.connected(actor)
+                                               else "Granola no conectado", "checkedAt": now, "requestId": request["id"]}})
 
     def publish_all(self, actors: list[str]) -> int:
         published = 0
@@ -172,13 +225,18 @@ def build(env_file: Path) -> MultiuserBridge:
     if not token:
         raise RuntimeError("Falta DSTA_BRIDGE_TOKEN")
     users_dir = user_vault.vault_dir().parent / "users"
+    import granola_user
+    test_origin = hb.setting("DSTA_GRANOLA_TEST_ORIGIN", values) or None
+    granola = granola_user.GranolaService(f"{base}/oauth/granola/callback", test_origin=test_origin)
     return MultiuserBridge(base, token, load_user=user_vault.load, request_json=hb.request_json,
                            process_job=hb.process_job, finish_job=hb.finish_job, users_dir=users_dir,
-                           publish_snapshot=hb.publish_snapshot, check_vikunja=vikunja_checker(hb.request_json))
+                           publish_snapshot=hb.publish_snapshot, check_vikunja=vikunja_checker(hb.request_json),
+                           granola=granola)
 
 
 def run(bridge: MultiuserBridge, actors: Callable[[], list[str]], *, once: bool) -> int:
     next_sweep = next_publish = 0.0
+    next_granola = time.monotonic() + 60
     log("Puente multiusuario listo (solo conexiones salientes).")
     while True:
         try:
@@ -189,6 +247,9 @@ def run(bridge: MultiuserBridge, actors: Callable[[], list[str]], *, once: bool)
             if time.monotonic() >= next_sweep:
                 next_sweep = time.monotonic() + SWEEP_SECONDS
                 bridge.sweep(actors())
+            if time.monotonic() >= next_granola:
+                next_granola = time.monotonic() + GRANOLA_SYNC_SECONDS
+                bridge.sync_granola(actors())
         except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
             log(f"puente sin conexión ({type(error).__name__}); reintenta")
         if once:

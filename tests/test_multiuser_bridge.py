@@ -92,5 +92,84 @@ class MultiuserBridgeTest(unittest.TestCase):
         self.assertEqual(processed[0]["vikunja_token"], "token-de-B")
 
 
+class FakeGranolaService:
+    def __init__(self):
+        self.calls = []
+        self.ready = set()
+
+    def authorize(self, actor, request_id):
+        self.calls.append(("authorize", actor, request_id))
+        return {"authorizationUrl": "https://granola.example/authorize?x=1", "state": f"st-{actor}"}
+
+    def exchange(self, actor, request_id, state, code):
+        self.calls.append(("exchange", actor, request_id, state, code))
+        self.ready.add(actor)
+
+    def connected(self, actor):
+        return actor in self.ready
+
+    def sync(self, actor):
+        self.calls.append(("sync", actor))
+        return [{"source_id": f"{actor}-m1", "version": "v1", "title": "Reunión", "date": "2026-10-12", "summary": "s"}]
+
+    def disconnect(self, actor):
+        self.calls.append(("disconnect", actor))
+        self.ready.discard(actor)
+
+
+class GranolaBridgeTest(unittest.TestCase):
+    def setUp(self):
+        self.posts = []
+        self.granola = FakeGranolaService()
+
+    def make(self, queue):
+        test = self
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if method == "POST":
+                test.posts.append((url, payload))
+                return {"ok": True}
+            if url.endswith("/api/bridge/dispatch"):
+                return {"now": 5, "pending": {"demo-a": {"granola": 1}}}
+            return {"granola": queue.pop(0) if queue else None}
+        return mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json,
+                                  process_job=None, finish_job=None, users_dir=Path("C:/tmp/x"), granola=self.granola)
+
+    def test_flujo_conectar_intercambiar_y_sincronizar(self):
+        bridge = self.make([{"op": "authorize", "id": "g1"}])
+        bridge.dispatch_once()
+        self.assertEqual(self.granola.calls[0], ("authorize", "demo-a", "g1"))
+        url, payload = self.posts[0]
+        self.assertEqual(url, f"{BASE}/u/demo-a/api/bridge/granola")
+        self.assertEqual(payload["status"], "authorize")
+        self.assertEqual(payload["state"], "st-demo-a")
+
+        self.posts.clear()
+        bridge = self.make([{"op": "exchange", "id": "g1", "code": "c0de", "state": "st-demo-a"}])
+        bridge.dispatch_once()
+        self.assertIn(("exchange", "demo-a", "g1", "st-demo-a", "c0de"), self.granola.calls)
+        statuses = [p["status"] for u, p in self.posts if u.endswith("/api/bridge/granola")]
+        self.assertEqual(statuses[:1], ["connected"])
+        minutes = [p for u, p in self.posts if u.endswith("/api/bridge/minute")]
+        self.assertEqual(len(minutes), 1, "tras conectar se importan las minutas del usuario")
+        self.assertTrue(minutes[0]["id"].startswith("g-"))
+        self.assertIn("synced", statuses)
+
+    def test_error_de_granola_se_informa_sin_detalles(self):
+        def boom(actor, request_id):
+            raise RuntimeError("detalle interno con token secreto")
+        self.granola.authorize = boom
+        self.make([{"op": "authorize", "id": "g9"}]).dispatch_once()
+        url, payload = self.posts[0]
+        self.assertEqual(payload["status"], "error")
+        self.assertNotIn("secreto", payload["error"])
+
+    def test_sync_periodico_solo_usuarios_conectados(self):
+        self.granola.ready = {"demo-b"}
+        bridge = self.make([])
+        bridge.sync_granola(["demo-a", "demo-b"])
+        self.assertEqual([c for c in self.granola.calls if c[0] == "sync"], [("sync", "demo-b")])
+
+
 if __name__ == "__main__":
     unittest.main()

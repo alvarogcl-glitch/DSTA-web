@@ -365,6 +365,7 @@ async function takeBridgeJob(request, env, box = LEGACY_BOX) {
   if (requestedKind === "health") return json({ request: await chatStub(env, box).pendingHealthCheck() });
   if (requestedKind === "label") return chatStub(env, box).fetch("https://chat.internal/labels/next");
   if (requestedKind === "action") return chatStub(env, box).fetch("https://chat.internal/actions/next");
+  if (requestedKind === "granola") return chatStub(env, box).fetch("https://chat.internal/granola/next");
   const kind = requestedKind === "summary" ? "summary" : "chat";
   if (kind === "chat") return chatStub(env, box).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
   return json({ job: await chatStub(env, box).takeSummaryJob() });
@@ -628,7 +629,7 @@ async function bridgeBox(request, env, bridgePath, pathActor = null) {
 // F1 dispatcher: a single box remembers which users have pending work, so the bridge makes
 // one poll for N users and only then polls the queues of those users.
 const DISPATCH_BOX = "dispatch";
-const DISPATCH_KINDS = new Set(["chat", "action", "label", "health"]);
+const DISPATCH_KINDS = new Set(["chat", "action", "label", "health", "granola"]);
 async function markPending(env, actorId, kind) {
   await chatStub(env, DISPATCH_BOX).fetch(new Request("https://chat.internal/dispatch/mark", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor: actorId, kind }),
@@ -650,6 +651,30 @@ async function dispatchRoute(request, env) {
   }));
 }
 
+// F4: per-user Granola. The Worker only coordinates OAuth (authorization URL, state, callback);
+// the VM exchanges the code and keeps the tokens in its vault. Nothing secret is stored here
+// beyond the short-lived authorization code until the bridge takes it.
+const GRANOLA_STATUSES = new Set(["authorize", "connected", "error", "disconnected", "synced"]);
+async function granolaBridgeUpdate(request, env, box) {
+  if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+  const parsed = await readJson(request, 8_000);
+  if (parsed.error) return parsed.error;
+  const body = parsed.body || {};
+  if (!GRANOLA_STATUSES.has(body.status)) return json({ error: "Estado inválido." }, 400);
+  if (body.status === "authorize" && (typeof body.authorizationUrl !== "string" || !body.authorizationUrl.startsWith("https://") ||
+      body.authorizationUrl.length > 2000 || typeof body.state !== "string" || !body.state || body.state.length > 200)) {
+    if (!(typeof body.authorizationUrl === "string" && /^http:\/\/127\.0\.0\.1:\d+\//.test(body.authorizationUrl) && env.GRANOLA_TEST_ORIGIN)) {
+      return json({ error: "URL de autorización inválida." }, 400);
+    }
+  }
+  return forwardToChatObject(env, "/granola/update", {
+    id: typeof body.id === "string" ? body.id.slice(0, 36) : "", status: body.status,
+    authorizationUrl: body.authorizationUrl, state: body.state,
+    error: typeof body.error === "string" ? body.error.slice(0, 200) : "",
+    count: Number.isSafeInteger(body.count) ? body.count : undefined,
+  }, box);
+}
+
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
 // Snapshot and Cata summaries remain in Workers KV, where eventual consistency is acceptable.
 export class DashboardChatQueue extends DurableObject {
@@ -658,6 +683,8 @@ export class DashboardChatQueue extends DurableObject {
     const storage = this.ctx.storage.kv;
 
     if (url.pathname.startsWith("/dispatch/")) return this.dispatchRequest(request, url);
+
+    if (url.pathname.startsWith("/granola/")) return this.granolaRequest(request, url);
 
     if (url.pathname.startsWith("/labels/")) return this.labelRequest(request, url);
 
@@ -800,6 +827,64 @@ export class DashboardChatQueue extends DurableObject {
       return json({ ok: true });
     }
 
+    return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
+  async granolaRequest(request, url) {
+    const storage = this.ctx.storage.kv;
+    const now = Date.now();
+    const record = storage.get("granola") || { status: "disconnected" };
+    const publicView = r => ({ status: r.status, ...(r.status === "authorize" ? { authorizationUrl: r.authorizationUrl } : {}),
+      ...(r.error ? { error: r.error } : {}), ...(r.connectedAt ? { connectedAt: r.connectedAt } : {}),
+      ...(r.lastSync ? { lastSync: r.lastSync } : {}), ...(Number.isSafeInteger(r.count) ? { count: r.count } : {}) });
+    const body = request.method === "POST" ? await request.json() : null;
+    if (url.pathname === "/granola/status") return json(publicView(record));
+    if (url.pathname === "/granola/connect") {
+      if (["requested", "authorize", "exchanging"].includes(record.status) && now - (record.updatedAt || 0) < 600_000) {
+        return json(publicView(record), 202);
+      }
+      const next = { status: "requested", id: crypto.randomUUID(), updatedAt: now };
+      storage.put("granola", next);
+      return json(publicView(next), 202);
+    }
+    if (url.pathname === "/granola/disconnect") {
+      const next = { status: "disconnecting", id: crypto.randomUUID(), updatedAt: now };
+      storage.put("granola", next);
+      return json(publicView(next), 202);
+    }
+    if (url.pathname === "/granola/next") {
+      if (record.status === "requested") return json({ granola: { op: "authorize", id: record.id } });
+      if (record.status === "exchanging" && record.code) {
+        return json({ granola: { op: "exchange", id: record.id, code: record.code, state: record.state } });
+      }
+      if (record.status === "disconnecting") return json({ granola: { op: "disconnect", id: record.id } });
+      return json({ granola: null });
+    }
+    if (url.pathname === "/granola/callback") {
+      const valid = record.status === "authorize" && now < (record.expiresAt || 0) && typeof body?.state === "string" &&
+        typeof body?.code === "string" && body.code.length > 0 && body.code.length <= 2000 && safeEqual(body.state, record.state || "");
+      if (!valid) return json({ error: "Conexión con Granola inválida o vencida." }, 400);
+      storage.put("granola", { ...record, status: "exchanging", code: body.code, authorizationUrl: undefined, updatedAt: now });
+      return json({ ok: true });
+    }
+    if (url.pathname === "/granola/update") {
+      const matches = body.id && body.id === record.id;
+      let next = null;
+      if (body.status === "authorize" && matches && record.status === "requested") {
+        next = { ...record, status: "authorize", authorizationUrl: body.authorizationUrl, state: body.state, expiresAt: now + 600_000 };
+      } else if (body.status === "connected" && matches && record.status === "exchanging") {
+        next = { status: "connected", id: record.id, connectedAt: new Date(now).toISOString() };
+      } else if (body.status === "error" && matches) {
+        next = { status: "error", id: record.id, error: body.error || "No se pudo conectar Granola." };
+      } else if (body.status === "disconnected" && matches && record.status === "disconnecting") {
+        next = { status: "disconnected" };
+      } else if (body.status === "synced" && record.status === "connected") {
+        next = { ...record, lastSync: new Date(now).toISOString(), ...(body.count !== undefined ? { count: body.count } : {}) };
+      }
+      if (!next) return json({ error: "Actualización de Granola fuera de secuencia." }, 409);
+      storage.put("granola", { ...next, updatedAt: now });
+      return json({ ok: true });
+    }
     return json({ error: "Ruta interna no encontrada." }, 404);
   }
 
@@ -1236,6 +1321,7 @@ export default {
       "/api/bridge/health": ["POST", (req, box) => receiveHealth(req, env, box)],
       "/api/bridge/minute": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/upsert", box)],
       "/api/bridge/decision-done": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/decision-done", box)],
+      "/api/bridge/granola": ["POST", (req, box) => granolaBridgeUpdate(req, env, box)],
     };
     // Accounts mode: the bridge may name the actor in the path (/u/<actor>/api/bridge/...).
     const prefixed = accounts ? /^\/u\/([a-z0-9][a-z0-9-]{0,62})(\/api\/(?:bridge\/[a-z-]+|ingest))$/.exec(url.pathname) : null;
@@ -1321,6 +1407,23 @@ export default {
       }
       return response;
     };
+
+    if (accounts && url.pathname === "/api/granola/status") {
+      return request.method === "GET" ? chatStub(env, box).fetch("https://chat.internal/granola/status") : json({ error: "Método no permitido" }, 405);
+    }
+    if (accounts && (url.pathname === "/api/granola/connect" || url.pathname === "/api/granola/disconnect")) {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return announce(forwardToChatObject(env, url.pathname.replace("/api", ""), {}, box), "granola");
+    }
+    if (accounts && url.pathname === "/oauth/granola/callback") {
+      if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
+      const result = await forwardToChatObject(env, "/granola/callback",
+        { code: url.searchParams.get("code") || "", state: url.searchParams.get("state") || "" }, box);
+      if (result.status !== 200) return new Response("Conexión con Granola inválida o vencida. Vuelve al dashboard e inténtalo de nuevo.",
+        { status: 400, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      await markPending(env, session.actor.id, "granola");
+      return new Response(null, { status: 302, headers: { location: "/?granola=conectando", "cache-control": "no-store" } });
+    }
 
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);

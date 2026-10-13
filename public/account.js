@@ -23,4 +23,50 @@
   });
   bar.append(who, logout);
   header.append(bar);
+
+  // F4: per-user Granola connection. Tokens live on the VM; the browser only follows the
+  // provider's authorization URL and sees the connection status.
+  const granola = document.createElement('button');
+  granola.type = 'button';
+  granola.className = 'granola-connect';
+  const granolaStatus = document.createElement('span');
+  granolaStatus.className = 'granola-status';
+  granolaStatus.setAttribute('role', 'status');
+  bar.prepend(granolaStatus, granola);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function status() {
+    const res = await fetch('/api/granola/status', { credentials: 'same-origin', cache: 'no-store' });
+    return res.ok ? res.json() : { status: 'error', error: 'No se pudo consultar Granola.' };
+  }
+  function render(state) {
+    const labels = { connected: 'Granola conectado', disconnected: 'Granola sin conectar', error: state.error || 'Error con Granola',
+      requested: 'Preparando conexión…', authorize: 'Esperando autorización…', exchanging: 'Conectando…', disconnecting: 'Desconectando…' };
+    granolaStatus.textContent = labels[state.status] || state.status;
+    granola.textContent = state.status === 'connected' ? 'Desconectar Granola' : 'Conectar Granola';
+    granola.disabled = ['requested', 'exchanging', 'disconnecting'].includes(state.status);
+    if (state.status === 'connected' && Number.isInteger(state.count)) granolaStatus.textContent += ` · ${state.count} minutas`;
+  }
+  async function follow(until, onAuthorize) {
+    for (let i = 0; i < 60; i += 1) {
+      const state = await status();
+      render(state);
+      if (state.status === 'authorize' && onAuthorize && state.authorizationUrl) { window.location.assign(state.authorizationUrl); return; }
+      if (until.includes(state.status)) return state;
+      await wait(1500);
+    }
+  }
+  granola.addEventListener('click', async () => {
+    const connecting = granola.textContent === 'Conectar Granola';
+    granola.disabled = true;
+    await fetch(`/api/granola/${connecting ? 'connect' : 'disconnect'}`, { method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' }, body: '{}' });
+    await follow(connecting ? ['error', 'connected'] : ['disconnected', 'error'], connecting);
+  });
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('granola')) {
+    history.replaceState(null, '', window.location.pathname);
+    void follow(['connected', 'error']);
+  } else {
+    render(await status());
+  }
 })();
