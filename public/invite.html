@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#0b121a">
+<title>Activar cuenta · Dashboard DSTA</title><link rel="stylesheet" href="/auth.css"><script src="/invite.js" defer></script></head>
+<body><main class="card">
+<div class="kicker">INVITACIÓN · UN SOLO USO</div><h1>Activa tu cuenta</h1><p>Elige tu contraseña. Nadie más la ve: se guarda solo como hash.</p>
+<form id="invite-form">
+<label for="password">Contraseña (mínimo 14 caracteres)</label><input id="password" type="password" autocomplete="new-password" required minlength="14" maxlength="256">
+<label for="confirm">Repite la contraseña</label><input id="confirm" type="password" autocomplete="new-password" required minlength="14" maxlength="256">
+<button type="submit">Activar cuenta</button>
+</form>
+<p id="message" class="message" role="status" aria-live="polite"></p>
+</main></body></html>
