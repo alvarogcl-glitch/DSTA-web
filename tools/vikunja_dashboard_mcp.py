@@ -5,7 +5,8 @@ import os
 import re
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +112,7 @@ def project_update_payload(current: dict[str, Any], changes: dict[str, Any]) -> 
     return {**{field: current[field] for field in PROJECT_UPDATE_FIELDS}, **changes}
 
 
-def project_tasks(project_id: int) -> list[dict[str, Any]]:
+def project_tasks(project_id: int, *, until_empty: bool = False) -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = []
     for page in range(1, 101):
         batch = request("GET", f"/api/v1/projects/{project_id}/tasks",
@@ -119,7 +120,7 @@ def project_tasks(project_id: int) -> list[dict[str, Any]]:
         if not isinstance(batch, list):
             raise RuntimeError("Vikunja devolvió una página de tareas inválida; no se modificó la línea.")
         tasks.extend(batch)
-        if len(batch) < 50:
+        if not batch or (not until_empty and len(batch) < 50):
             return tasks
     raise RuntimeError("La paginación de tareas no terminó; no se modificó la línea.")
 
@@ -318,12 +319,63 @@ def pmo_merge_projects(source_project_id: int, destination_project_id: int) -> d
 
 @mcp.tool()
 def pmo_list_tasks(project_id: int | None = None, limit: int = 100) -> dict[str, Any]:
-    """List PMO tasks, optionally scoped to one project."""
+    """Return one limited page of tasks. For creation dates/counts use pmo_tasks_created."""
     if project_id is not None:
         result = request("GET", f"/api/v1/projects/{project_id}/tasks", params={"per_page": min(max(limit, 1), 100)})
     else:
         result = request("GET", "/api/v1/tasks", params={"per_page": min(max(limit, 1), 100)})
     return {"tasks": result}
+
+
+@mcp.tool()
+def pmo_tasks_created(start_date: str = "", end_date: str = "",
+                      project_id: int | None = None, offset: int = 0,
+                      limit: int = 50) -> dict[str, Any]:
+    """List/count tasks CREATED in an inclusive YYYY-MM-DD range in America/Santiago.
+
+    Defaults to today; a single start_date means that day. Scans every API page in
+    active PMO lines, including completed tasks. Uses native created, never updated
+    or due_date. Returns compact rows and an exact total; follow next_offset to
+    read remaining matches. Results omit descriptions and logs to avoid truncation.
+    """
+    zone = ZoneInfo("America/Santiago")
+    start = date.fromisoformat(start_date) if start_date else datetime.now(zone).date()
+    end = date.fromisoformat(end_date) if end_date else start
+    if end < start:
+        raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
+    if offset < 0 or not 1 <= limit <= 50:
+        raise ValueError("offset debe ser no negativo y limit debe estar entre 1 y 50.")
+    projects = pmo_projects()
+    lines = ([require_line(project_id, projects)] if project_id is not None
+             else [project for project in projects if is_pmo_line(project)])
+    matches = {}
+    for project in lines:
+        # An API may cap per_page below 50: only an empty page proves completion.
+        for task in project_tasks(int(project["id"]), until_empty=True):
+            raw_created = str(task.get("created") or "")
+            try:
+                created = datetime.fromisoformat(raw_created.replace("Z", "+00:00"))
+                if created.tzinfo is None or created.year == 1:
+                    raise ValueError("Fecha de creación sin zona o desconocida")
+                local_created = created.astimezone(zone)
+            except (ValueError, OverflowError) as error:
+                raise RuntimeError(
+                    f"No se pudo verificar la fecha de creación de la tarea #{task.get('id')}; "
+                    "no se puede confirmar el total."
+                ) from error
+            if start <= local_created.date() <= end:
+                matches[int(task["id"])] = {
+                    "id": task["id"], "title": str(task.get("title") or "")[:250],
+                    "project_id": project["id"], "line": str(project["title"])[:250],
+                    "created": local_created.isoformat(), "done": bool(task.get("done")),
+                }
+    tasks = sorted(matches.values(), key=lambda task: (task["created"], task["id"]))
+    page = tasks[offset:offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < len(tasks) else None
+    return {"start_date": start.isoformat(), "end_date": end.isoformat(),
+            "timezone": zone.key, "total": len(tasks), "total_is_exact": True,
+            "tasks": page, "offset": offset, "next_offset": next_offset,
+            "has_more": next_offset is not None}
 
 
 @mcp.tool()
@@ -573,7 +625,7 @@ def pmo_edit_task_labels(task_id: int, add_ids: list[int] | None = None,
         return {"ok": True, "verified": True, "task": verified}
 
 
-READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_open_tasks", "pmo_list_labels", "pmo_list_label_tasks"}
+READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_tasks_created", "pmo_open_tasks", "pmo_list_labels", "pmo_list_label_tasks"}
 
 
 def restrict_to_read_only() -> None:
