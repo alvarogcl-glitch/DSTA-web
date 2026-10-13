@@ -204,6 +204,11 @@ class MultiuserBridge:
                 imported += len(records)
             except Exception as error:
                 log(f"sync granola de {actor[:20]} falló ({type(error).__name__})")
+                if not self.granola.connected(actor):
+                    try:
+                        self._granola_post(actor, {"status": "error", "error": "La conexión con Granola venció; vuelve a conectar."})
+                    except Exception:
+                        pass
         return imported
 
     def report_health(self, actor: str, user: dict, request: dict) -> None:

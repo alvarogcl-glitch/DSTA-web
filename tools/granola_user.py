@@ -17,7 +17,8 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 import user_vault  # noqa: E402
-from granola_client import GranolaClient, GranolaConfig, GranolaError  # noqa: E402
+import time  # noqa: E402
+from granola_client import GranolaClient, GranolaConfig, GranolaError, refresh_access_token  # noqa: E402
 
 _lock = threading.Lock()
 
@@ -109,8 +110,19 @@ class GranolaService:
         except GranolaError:
             return False
 
+    def ensure_fresh(self, actor: str) -> None:
+        secret = self.store.get_authenticated_secret(actor, "granola") or {}
+        expiry = secret.get("expires_at")
+        if isinstance(expiry, (int, float)) and time.time() >= expiry - 60:
+            try:
+                refresh_access_token(self.client, actor)
+            except GranolaError:
+                self.store.disconnect(actor)
+                raise
+
     def sync(self, actor: str) -> list[dict]:
         job = str(uuid.uuid4())
+        self.ensure_fresh(actor)
         self.client.sync(actor, job)
         records = self.store.saved.pop(job, [])
         # F5 context: the user's recent summaries, kept encrypted in THEIR vault entry.

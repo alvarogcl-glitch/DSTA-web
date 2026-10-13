@@ -45,6 +45,6 @@ VM: multiuser_bridge ── GET /api/bridge/dispatch (1 sondeo para N usuarios)
 
 ## Límites conocidos
 - El Copilot multiusuario es de solo lectura: propone y la persona aplica los cambios con las acciones F3.
-- Granola: falta el refresh del token y la prueba con el servicio real.
+- Granola: falta la prueba con el servicio real; el refresh solo está probado contra el Granola sintético.
 - La bandeja multiusuario no genera acciones propuestas desde las minutas; eso sí ocurre en el modo del CEO.
 - Requests/día calculados, no medidos.

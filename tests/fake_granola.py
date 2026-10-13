@@ -21,6 +21,7 @@ MEETINGS = [
 class FakeGranola:
     def __init__(self):
         self.codes, self.tokens, self.clients = {}, set(), {}
+        self.refresh_tokens, self.refreshes, self.expires_in = {}, 0, 3600
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -68,13 +69,25 @@ class FakeGranola:
                                            "redirect_uris": body["redirect_uris"]})
                 if url.path == "/token":
                     form = {k: v[0] for k, v in parse_qs(raw).items()}
+                    if form.get("grant_type") == "refresh_token":
+                        client = fake.refresh_tokens.pop(form.get("refresh_token"), None)
+                        if client is None or client != form.get("client_id"):
+                            return self.send(400, {"error": "invalid_grant"})
+                        fake.refreshes += 1
+                        token, refresh = "at-" + secrets.token_urlsafe(16), "rt-" + secrets.token_urlsafe(16)
+                        fake.tokens.add(token)
+                        fake.refresh_tokens[refresh] = client
+                        return self.send(200, {"access_token": token, "token_type": "Bearer", "expires_in": fake.expires_in,
+                                               "refresh_token": refresh})
                     entry = fake.codes.pop(form.get("code"), None)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(form.get("code_verifier", "").encode()).digest()).rstrip(b"=").decode()
                     if not entry or entry[0] != challenge or entry[1] != form.get("client_id") or entry[2] != form.get("redirect_uri"):
                         return self.send(400, {"error": "invalid_grant"})
-                    token = "at-" + secrets.token_urlsafe(16)
+                    token, refresh = "at-" + secrets.token_urlsafe(16), "rt-" + secrets.token_urlsafe(16)
                     fake.tokens.add(token)
-                    return self.send(200, {"access_token": token, "token_type": "Bearer", "expires_in": 3600})
+                    fake.refresh_tokens[refresh] = form.get("client_id")
+                    return self.send(200, {"access_token": token, "token_type": "Bearer", "expires_in": fake.expires_in,
+                                           "refresh_token": refresh})
                 if url.path == "/mcp":
                     if self.headers.get("Authorization", "").removeprefix("Bearer ") not in fake.tokens:
                         return self.send(401, {"error": "unauthorized"})

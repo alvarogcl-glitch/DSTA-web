@@ -874,7 +874,8 @@ export class DashboardChatQueue extends DurableObject {
         next = { ...record, status: "authorize", authorizationUrl: body.authorizationUrl, state: body.state, expiresAt: now + 600_000 };
       } else if (body.status === "connected" && matches && record.status === "exchanging") {
         next = { status: "connected", id: record.id, connectedAt: new Date(now).toISOString() };
-      } else if (body.status === "error" && matches) {
+      } else if (body.status === "error" && (matches || (!body.id && record.status === "connected"))) {
+        // Also reported when an expired connection could not be renewed: the user must reconnect.
         next = { status: "error", id: record.id, error: body.error || "No se pudo conectar Granola." };
       } else if (body.status === "disconnected" && matches && record.status === "disconnecting") {
         next = { status: "disconnected" };

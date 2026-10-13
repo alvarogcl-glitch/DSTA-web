@@ -1,5 +1,5 @@
 # Vendored from DSTA-multiuser/implementation-20261011/multiuser/granola.py (Codex candidate),
-# unchanged except this header. Principal-scoped Granola OAuth (PKCE, public client) and an
+# with one local patch (marked DSTA-PATCH): keep refresh_token for renewal. Principal-scoped Granola OAuth (PKCE, public client) and an
 # allowlisted MCP import (list_meetings/get_meetings only). Storage is injected (see granola_user.py).
 """Principal-scoped Granola OAuth and narrowly allowlisted MCP import."""
 
@@ -249,6 +249,10 @@ class GranolaClient:
         if not isinstance(result.get("token_type"), str) or result["token_type"].lower() != "bearer":
             raise GranolaError("OAuth exchange returned unsupported token type")
         secret = {"access_token": token, "token_type": "Bearer", "client_id": client_id}
+        # DSTA-PATCH: keep the refresh token (encrypted by the vault-backed store) for renewal.
+        if isinstance(result.get("refresh_token"), str) and result["refresh_token"]:
+            secret["refresh_token"] = result["refresh_token"]
+            secret["token_endpoint"] = pending["token_endpoint"]
         expires = result.get("expires_in")
         if expires is not None:
             if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(expires) or expires <= 0:
@@ -548,3 +552,31 @@ class GranolaClient:
         self.store.finish_job(user, jobid, expected_epoch=epoch,
                               expected_attempt=attempt)
         return records
+
+
+def refresh_access_token(client, user):
+    """DSTA-PATCH: renew an expired access token with the stored refresh token (public PKCE client)."""
+    secret = client.store.get_authenticated_secret(user, "granola")
+    if not isinstance(secret, dict) or not secret.get("refresh_token"):
+        raise GranolaError("No refresh token; reconnect required")
+    endpoint = secret.get("token_endpoint")
+    if endpoint != client._endpoints["token_endpoint"]:
+        raise GranolaError("Stored token endpoint is not permitted")
+    epoch = client.store.status(user, "granola")["epoch"]
+    with client._session() as http:
+        raw, _ = client._request(http, "POST", endpoint, form={
+            "grant_type": "refresh_token", "refresh_token": secret["refresh_token"],
+            "client_id": secret["client_id"], "resource": client._mcp,
+        })
+    result = _json(raw)
+    if not isinstance(result, dict):
+        raise GranolaError("Invalid refresh result")
+    token = _text(result.get("access_token"), "Refresh returned no usable access token")
+    renewed = {**secret, "access_token": token}
+    renewed.pop("expires_at", None)
+    if isinstance(result.get("refresh_token"), str) and result["refresh_token"]:
+        renewed["refresh_token"] = result["refresh_token"]
+    expires = result.get("expires_in")
+    if isinstance(expires, (int, float)) and not isinstance(expires, bool) and math.isfinite(expires) and expires > 0:
+        renewed["expires_at"] = client._now() + expires
+    client.store.set_secret(user, "granola", renewed, expected_epoch=epoch)

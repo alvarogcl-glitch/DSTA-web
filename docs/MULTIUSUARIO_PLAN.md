@@ -51,7 +51,7 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F3.3 `tests/e2e_structure_lab.py` y `e2e_structure_ui.mjs`: navegador, puente multiusuario real en bucle, Vikunja de laboratorio y wrangler dev. 7/7: A crea, edita, mueve, renombra y archiva (unos 3 s por acción) y B no ve nada.
 
 ### F4 · Granola por usuario
-- [x] F4.1 OAuth Granola por usuario. El Worker coordina la URL de autorización y el `state`, y el callback `/oauth/granola/callback` exige la sesión del mismo usuario y un state de un solo uso. El canje PKCE se hace en la VM (`tools/granola_user.py` sobre el cliente vendorizado de Codex, `tools/granola_client.py`), con los tokens cifrados en el vault. **Pendiente:** refresh del token; hoy, al vencer, el usuario debe reconectar.
+- [x] F4.1 OAuth Granola por usuario. El Worker coordina la URL de autorización y el `state`, y el callback `/oauth/granola/callback` exige la sesión del mismo usuario y un state de un solo uso. El canje PKCE se hace en la VM (`tools/granola_user.py` sobre el cliente vendorizado de Codex, `tools/granola_client.py`), con los tokens cifrados en el vault. Renovación con `refresh_token` (también cifrado en el vault): si el token vence se renueva solo; si la renovación falla, el dashboard muestra «vuelve a conectar». Test con vencimiento real de 1 s contra el Granola sintético.
 - [x] F4.2 El puente importa las reuniones del usuario conectado (al conectar y cada hora) en SU bandeja: título, fecha y resumen. Las notas privadas no salen de la VM. Las acciones propuestas llegan con F5.
 - [~] F4.3 Probado contra un Granola sintético (`tests/fake_granola.py`): 2 tests de la VM, 3 del puente, el bloque 15 del Worker y el E2E en navegador 7/7 (`e2e_granola_lab.py`). **Pendiente:** la prueba con Granola real, que requiere una cuenta de prueba y que Granola acepte el redirect en workers.dev (decisión del CEO).
 
@@ -76,3 +76,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:58: **F5 completa.** Canarios en vivo 6/6 y respaldo Claude verificado en vivo. **Decisión operativa:** el puente de staging no queda corriendo toda la noche, porque sumaría ~10.000 requests/día a la cuenta donde producción ya usa casi todo el plan gratis de Workers y podría tumbarla.
 - 2026-10-12 23:59: F6 preparada: ensayo de cutover en test (bloque 16) y runbook. **No se tocó producción.**
 - Nota: las horas de la bitácora corresponden al reloj de la VM (hora de Chile).
+- 2026-10-13 00:01: Granola: refresh del token implementado y probado; una conexión vencida se ve en el dashboard. 138 tests de Python OK.

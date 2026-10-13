@@ -68,6 +68,27 @@ class GranolaUserTest(unittest.TestCase):
             with self.assertRaises(self.gu.GranolaError):
                 service.sync("ana")
 
+    def test_token_vencido_se_renueva_con_refresh_token(self):
+        with FakeGranola() as fake:
+            fake.expires_in = 1
+            service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)
+            started = service.authorize("ana", "req-1")
+            code, state = self.consent(started["authorizationUrl"])
+            service.exchange("ana", "req-1", state, code)
+            raw = (Path(self.tmp.name) / "ana.dpapi").read_bytes()
+            self.assertNotIn(b"rt-", raw, "el refresh token también queda cifrado")
+            import time
+            time.sleep(1.2)
+            records = service.sync("ana")
+            self.assertEqual(len(records), 2, "sincroniza tras renovar el token vencido")
+            self.assertEqual(fake.refreshes, 1)
+            fake.tokens.clear()
+            fake.refresh_tokens.clear()
+            time.sleep(1.2)
+            with self.assertRaises(self.gu.GranolaError):
+                service.sync("ana")
+            self.assertFalse(service.connected("ana"), "si el refresh falla, queda desconectado y pide reconectar")
+
     def test_state_de_otro_usuario_o_reusado_falla(self):
         with FakeGranola() as fake:
             service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)

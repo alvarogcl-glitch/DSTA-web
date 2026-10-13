@@ -247,6 +247,12 @@ assert.ok(!JSON.stringify(connected).includes('abc'), 'the code is gone after th
 assert.equal((await (await call('/api/granola/status', { cookie: b })).json()).status, 'disconnected', 'B is unaffected');
 assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { status: 'synced', count: 3 } })).status, 200);
 assert.equal((await (await call('/api/granola/status', { cookie: c })).json()).count, 3);
+assert.equal((await call('/u/demo-c/api/bridge/granola', { method: 'POST', headers: bh, body: { status: 'error', error: 'La conexión con Granola venció; vuelve a conectar.' } })).status, 200);
+const expired = await (await call('/api/granola/status', { cookie: c })).json();
+assert.equal(expired.status, 'error', 'an expired, non-renewable connection is shown as such');
+assert.match(expired.error, /vuelve a conectar/);
+assert.equal((await call('/u/demo-b/api/bridge/granola', { method: 'POST', headers: bh, body: { status: 'error', error: 'x' } })).status, 409,
+  'an error without id only applies to a connected user');
 assert.equal((await call('/api/granola/disconnect', { method: 'POST', cookie: c, body: {} })).status, 202);
 gjob = (await (await call('/u/demo-c/api/bridge/next?kind=granola', { headers: { authorization: 'Bearer bridge-test' } })).json()).granola;
 assert.equal(gjob.op, 'disconnect');
