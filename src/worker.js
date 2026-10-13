@@ -18,11 +18,18 @@ function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
 }
 
-function chatStub(env) {
-  return env.CHAT_STATE.getByName("pmo-dsta");
+// "pmo-dsta" is the single-user (legacy/production) box; in accounts mode each user has its own.
+const LEGACY_BOX = "pmo-dsta";
+function chatStub(env, box = LEGACY_BOX) {
+  return env.CHAT_STATE.getByName(box);
+}
+
+function accountsMode(env) {
+  return env.AUTH_MODE === "accounts";
 }
 
 function configured(env) {
+  if (accountsMode(env)) return Boolean(env.DB && env.DSTA_BRIDGE_TOKEN);
   return Boolean(env.DASHBOARD_USER && env.DASHBOARD_PASSWORD && env.INGEST_TOKEN);
 }
 
@@ -128,7 +135,7 @@ function validSnapshot(snapshot) {
       .every(key => task[key] === undefined || typeof task[key] === "string"));
 }
 
-async function receiveSnapshot(request, env, fromBridge = false) {
+async function receiveSnapshot(request, env, fromBridge = false, box = LEGACY_BOX) {
   if (!(fromBridge ? bridgeAuthorized(request, env) : ingestAuthorized(request, env))) {
     return json({ error: "No autorizado" }, 401);
   }
@@ -150,14 +157,14 @@ async function receiveSnapshot(request, env, fromBridge = false) {
   if ((snapshot.actionConfirmation !== undefined || snapshot.labelConfirmation !== undefined) && !fromBridge) {
     return json({ error: "La confirmación requiere el canal del puente." }, 400);
   }
-  if (!await chatStub(env).saveSnapshot(normalized, snapshot.actionConfirmation ?? null, snapshot.labelConfirmation ?? null)) {
+  if (!await chatStub(env, box).saveSnapshot(normalized, snapshot.actionConfirmation ?? null, snapshot.labelConfirmation ?? null)) {
     return json({ error: "Snapshot anterior a la observación vigente; no se reemplazaron los datos." }, 409);
   }
   return json({ ok: true, projects: normalized.projects.length, tasks: normalized.tasks.length }, 202);
 }
 
-async function serveSnapshot(env) {
-  const dashboard = await chatStub(env).dashboard();
+async function serveSnapshot(env, box = LEGACY_BOX) {
+  const dashboard = await chatStub(env, box).dashboard();
   if (!dashboard) {
     return json({
       error: "El dashboard aún no ha recibido su primer snapshot desde Vikunja.",
@@ -180,7 +187,7 @@ function publicTask(task) {
   };
 }
 
-async function createAssistantJob(request, env) {
+async function createAssistantJob(request, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "El puente de Hermes aún no está configurado." }, 503);
   const parsed = await readJson(request, 24_000);
   if (parsed.error) return parsed.error;
@@ -192,7 +199,7 @@ async function createAssistantJob(request, env) {
       typeof item.content !== "string" || item.content.length > 4_000)) {
     return json({ error: "Historial de conversación inválido." }, 400);
   }
-  const snapshot = taskId === null ? null : await chatStub(env).snapshot();
+  const snapshot = taskId === null ? null : await chatStub(env, box).snapshot();
   const task = taskId === null ? null : snapshot?.tasks?.find(item => String(item.id) === String(taskId));
   if (taskId !== null && !task) return json({ error: "La tarea seleccionada ya no está en el snapshot actual." }, 404);
   const job = {
@@ -204,7 +211,7 @@ async function createAssistantJob(request, env) {
     history: history.slice(-20),
     task: task ? publicTask(task) : null,
   };
-  return chatStub(env).fetch(new Request("https://chat.internal/create", {
+  return chatStub(env, box).fetch(new Request("https://chat.internal/create", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(job),
@@ -228,18 +235,18 @@ function validLabelAction(body) {
   return !fields.includes('title') || (typeof body.title === 'string' && body.title.trim().length > 0 &&
     body.title.trim().length <= 100 && LABEL_COLORS.has(body.color));
 }
-async function labelActionRoute(request, url, env) {
+async function labelActionRoute(request, url, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({error:'Puente no configurado'},503);
   if (request.method === 'GET') {
     const id = url.searchParams.get('id') || '';
     if (!ACTION_UUID.test(id)) return json({error:'Identificador inválido'},400);
-    return chatStub(env).fetch(`https://chat.internal/labels/status?id=${id}`);
+    return chatStub(env, box).fetch(`https://chat.internal/labels/status?id=${id}`);
   }
   if (request.method !== 'POST') return json({error:'Método no permitido'},405);
   const parsed = await readJson(request,4096);
   if (parsed.error) return parsed.error;
   if (!validLabelAction(parsed.body)) return json({error:'Acción de etiquetas inválida'},400);
-  return forwardToChatObject(env,'/labels/create',parsed.body);
+  return forwardToChatObject(env,'/labels/create',parsed.body,box);
 }
 function labelResultMatches(job, snapshot, result) {
   if (!Array.isArray(snapshot?.labels) || !result || typeof result !== 'object') return false;
@@ -259,12 +266,12 @@ function labelResultMatches(job, snapshot, result) {
   }
 }
 
-async function taskActionRoute(request, url, env) {
+async function taskActionRoute(request, url, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (request.method === "GET") {
     const id = url.searchParams.get("id") || "";
     if (!ACTION_UUID.test(id)) return json({ error: "Identificador inválido." }, 400);
-    return chatStub(env).fetch(`https://chat.internal/actions/status?id=${id}`);
+    return chatStub(env, box).fetch(`https://chat.internal/actions/status?id=${id}`);
   }
   if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
   const parsed = await readJson(request, 1024);
@@ -275,15 +282,15 @@ async function taskActionRoute(request, url, env) {
       typeof body.requestId !== "string" || !ACTION_UUID.test(body.requestId)) {
     return json({ error: "Acción estructurada inválida." }, 400);
   }
-  return forwardToChatObject(env, "/actions/create", body);
+  return forwardToChatObject(env, "/actions/create", body, box);
 }
 
-async function readAssistantJob(url, env) {
+async function readAssistantJob(url, env, box = LEGACY_BOX) {
   const id = url.searchParams.get("id") || "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
-  const response = await chatStub(env).fetch(`https://chat.internal/status?id=${encodeURIComponent(id)}`);
-  if (response.status !== 404) return response;
-  // Old KV replies remain readable during the one-day cutover window.
+  const response = await chatStub(env, box).fetch(`https://chat.internal/status?id=${encodeURIComponent(id)}`);
+  if (response.status !== 404 || accountsMode(env)) return response;
+  // Old KV replies remain readable during the one-day cutover window (single-user mode only).
   const oldJob = await env.DASHBOARD_DATA.get(JOB_PREFIX + id, "json");
   if (!oldJob || oldJob.kind !== "chat") return response;
   return json({ id: oldJob.id, status: oldJob.status, reply: oldJob.reply || "", error: oldJob.error || "" });
@@ -293,34 +300,34 @@ function bridgeAuthorized(request, env) {
   return bearerAuthorized(request, env.DSTA_BRIDGE_TOKEN);
 }
 
-async function takeBridgeJob(request, env) {
+async function takeBridgeJob(request, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const requestedKind = new URL(request.url).searchParams.get("kind");
-  if (requestedKind === "health") return json({ request: await chatStub(env).pendingHealthCheck() });
-  if (requestedKind === "label") return chatStub(env).fetch("https://chat.internal/labels/next");
-  if (requestedKind === "action") return chatStub(env).fetch("https://chat.internal/actions/next");
+  if (requestedKind === "health") return json({ request: await chatStub(env, box).pendingHealthCheck() });
+  if (requestedKind === "label") return chatStub(env, box).fetch("https://chat.internal/labels/next");
+  if (requestedKind === "action") return chatStub(env, box).fetch("https://chat.internal/actions/next");
   const kind = requestedKind === "summary" ? "summary" : "chat";
-  if (kind === "chat") return chatStub(env).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
-  return json({ job: await chatStub(env).takeSummaryJob() });
+  if (kind === "chat") return chatStub(env, box).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
+  return json({ job: await chatStub(env, box).takeSummaryJob() });
 }
 
-async function completeBridgeJob(request, env) {
+async function completeBridgeJob(request, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 400_000);
   if (parsed.error) return parsed.error;
-  if (parsed.body?.kind === "label") return forwardToChatObject(env, "/labels/complete", parsed.body);
-  if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body);
+  if (parsed.body?.kind === "label") return forwardToChatObject(env, "/labels/complete", parsed.body, box);
+  if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body, box);
   const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
-  const chatResponse = await chatStub(env).fetch(new Request("https://chat.internal/complete", {
+  const chatResponse = await chatStub(env, box).fetch(new Request("https://chat.internal/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes) }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
-  const done = await chatStub(env).completeSummaryJob(id, Boolean(error), summaries);
+  const done = await chatStub(env, box).completeSummaryJob(id, Boolean(error), summaries);
   if (!done) return json({ error: "Trabajo no encontrado o no está activo." }, 404);
   return json({ ok: true });
 }
@@ -341,7 +348,7 @@ function citedMinutes(minutes) {
 }
 
 // Status lights: availability of Vikunja and Granola as measured by the bridge on the VM.
-async function receiveHealth(request, env) {
+async function receiveHealth(request, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 10_000);
@@ -354,7 +361,7 @@ async function receiveHealth(request, env) {
       checkedAt: String(item.checkedAt || "").slice(0, 40),
       requestId: String(item.requestId || "").slice(0, 36) };
   }
-  await chatStub(env).saveHealth(health);
+  await chatStub(env, box).saveHealth(health);
   return json({ ok: true });
 }
 
@@ -391,33 +398,171 @@ function validDecision(body) {
   return { minuteId, decisions: clean };
 }
 
-function forwardToChatObject(env, path, body) {
-  return chatStub(env).fetch(new Request(`https://chat.internal${path}`, {
+function forwardToChatObject(env, path, body, box = LEGACY_BOX) {
+  return chatStub(env, box).fetch(new Request(`https://chat.internal${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   }));
 }
 
-async function bridgeMinuteRoute(request, env, path) {
+async function bridgeMinuteRoute(request, env, path, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
   const parsed = await readJson(request, 400_000);
   if (parsed.error) return parsed.error;
-  return forwardToChatObject(env, path, parsed.body);
+  return forwardToChatObject(env, path, parsed.body, box);
 }
 
-async function browserMinuteRoute(request, env, path) {
+async function browserMinuteRoute(request, env, path, box = LEGACY_BOX) {
   const parsed = await readJson(request, 60_000);
   if (parsed.error) return parsed.error;
   if (path === "/minutes/decide") {
     const decision = validDecision(parsed.body);
     if (!decision) return json({ error: "Decisión inválida." }, 400);
-    return forwardToChatObject(env, path, decision);
+    return forwardToChatObject(env, path, decision, box);
   }
   const id = String(parsed.body?.id || "");
   if (!MINUTE_ID.test(id)) return json({ error: "Identificador inválido." }, 400);
-  return forwardToChatObject(env, path, { id });
+  return forwardToChatObject(env, path, { id }, box);
+}
+
+// ── Accounts mode (AUTH_MODE=accounts) ─────────────────────────────────────────────────
+// Per-user accounts in D1 (pattern proven in the cloudflare-pilot): PBKDF2 at 100000
+// iterations (Workers maximum), revocable sessions stored as SHA-256, HttpOnly cookie,
+// per-IP login limit, single-use invitations. Browser writes require a same-origin Origin.
+const SESSION_COOKIE = "__Host-dsta_session";
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const PBKDF2_ITERATIONS = 100000;
+const MIN_PASSWORD_LENGTH = 14;
+const MAX_LOGIN_ATTEMPTS_PER_MINUTE = 10;
+const INVALID_SALT = "aW52YWxpZC1lbWFpbC1zYWx0LWRzdGE";
+const INVALID_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const ACTOR_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const PUBLIC_ACCOUNT_PATHS = new Set(["/login", "/login.html", "/login.js", "/invite", "/invite.html", "/invite.js", "/auth.css"]);
+
+const toBase64Url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+function fromBase64Url(value) {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  return Uint8Array.from(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)), c => c.charCodeAt(0));
+}
+async function sha256Url(value) {
+  return toBase64Url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+}
+async function derivePasswordHash(password, salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  return toBase64Url(await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: fromBase64Url(salt), iterations: PBKDF2_ITERATIONS }, key, 256));
+}
+function readCookie(request, name) {
+  for (const part of (request.headers.get("cookie") || "").split(";")) {
+    const at = part.indexOf("=");
+    if (at > 0 && part.slice(0, at).trim() === name) return part.slice(at + 1).trim();
+  }
+  return "";
+}
+function sessionCookie(token, maxAge = SESSION_TTL_SECONDS) {
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=Lax`;
+}
+const boxOf = user => user.do_name || `u:${user.id}`;
+
+async function currentSession(request, env) {
+  const token = readCookie(request, SESSION_COOKIE);
+  if (!token || token.length > 128) return null;
+  const tokenHash = await sha256Url(token);
+  const row = await env.DB.prepare(`
+    SELECT s.token_hash, u.id, u.email, u.display_name, u.do_name
+    FROM sessions s JOIN users u ON u.id = s.actor_id
+    WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL
+  `).bind(tokenHash, Math.floor(Date.now() / 1000)).first();
+  if (!row) return null;
+  return { tokenHash, box: boxOf(row), actor: { id: row.id, email: row.email, displayName: row.display_name } };
+}
+
+async function takeLoginAttempt(request, env) {
+  const ipHash = await sha256Url(`login:${request.headers.get("cf-connecting-ip") || "unknown"}`);
+  const minute = Math.floor(Date.now() / 60000);
+  await env.DB.prepare("DELETE FROM login_limits WHERE minute_bucket < ?").bind(minute - 60).run();
+  await env.DB.prepare(`
+    INSERT INTO login_limits(ip_hash, minute_bucket, attempts) VALUES(?,?,1)
+    ON CONFLICT(ip_hash) DO UPDATE SET minute_bucket = excluded.minute_bucket,
+      attempts = CASE WHEN login_limits.minute_bucket = excluded.minute_bucket THEN login_limits.attempts + 1 ELSE 1 END
+  `).bind(ipHash, minute).run();
+  const row = await env.DB.prepare("SELECT attempts FROM login_limits WHERE ip_hash = ? AND minute_bucket = ?").bind(ipHash, minute).first();
+  return Number(row?.attempts || 0) <= MAX_LOGIN_ATTEMPTS_PER_MINUTE;
+}
+
+async function accountsLogin(request, env) {
+  if (!(await takeLoginAttempt(request, env))) return json({ error: "Demasiados intentos; vuelve a probar en un minuto." }, 429);
+  const parsed = await readJson(request, 4096);
+  if (parsed.error) return parsed.error;
+  const email = typeof parsed.body?.email === "string" ? parsed.body.email.trim().toLowerCase() : "";
+  const password = typeof parsed.body?.password === "string" ? parsed.body.password : "";
+  if (!email || email.length > 254 || !password || password.length > 256) return json({ error: "Credenciales inválidas." }, 401);
+  const user = await env.DB.prepare(`SELECT id, email, display_name, password_salt, password_hash, disabled_at
+    FROM users WHERE lower(email) = ? LIMIT 1`).bind(email).first();
+  // Same PBKDF2 cost for unknown emails: response time does not reveal which accounts exist.
+  const calculated = await derivePasswordHash(password, user?.password_salt || INVALID_SALT);
+  if (!user || user.disabled_at || !safeEqual(calculated, user.password_hash || INVALID_HASH)) {
+    return json({ error: "Credenciales inválidas." }, 401);
+  }
+  const token = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  await env.DB.prepare("INSERT INTO sessions(token_hash, actor_id, expires_at) VALUES(?,?,?)")
+    .bind(await sha256Url(token), user.id, Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS).run();
+  const response = json({ actor: { id: user.id, email: user.email, displayName: user.display_name } });
+  response.headers.append("set-cookie", sessionCookie(token));
+  return response;
+}
+
+async function accountsAcceptInvite(request, env) {
+  if (!(await takeLoginAttempt(request, env))) return json({ error: "Demasiados intentos; vuelve a probar en un minuto." }, 429);
+  const parsed = await readJson(request, 4096);
+  if (parsed.error) return parsed.error;
+  const token = typeof parsed.body?.token === "string" ? parsed.body.token : "";
+  const password = typeof parsed.body?.password === "string" ? parsed.body.password : "";
+  if (password.length < MIN_PASSWORD_LENGTH || password.length > 256) {
+    return json({ error: `La contraseña debe tener entre ${MIN_PASSWORD_LENGTH} y 256 caracteres.` }, 400);
+  }
+  const invalid = json({ error: "Invitación inválida, vencida o ya usada." }, 400);
+  if (!token || token.length > 128) return invalid;
+  // Hash first: a failure here must not consume the invitation.
+  const salt = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const passwordHash = await derivePasswordHash(password, salt);
+  const tokenHash = await sha256Url(token);
+  const now = Math.floor(Date.now() / 1000);
+  const claimed = await env.DB.prepare(
+    "UPDATE invitations SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+  ).bind(now, tokenHash, now).run();
+  if (Number(claimed?.meta?.changes || 0) !== 1) return invalid;
+  const invite = await env.DB.prepare("SELECT actor_id, email, display_name FROM invitations WHERE token_hash = ?").bind(tokenHash).first();
+  if (!ACTOR_ID.test(invite.actor_id)) return invalid;
+  try {
+    await env.DB.prepare("INSERT INTO users(id,email,display_name,password_salt,password_hash) VALUES(?,?,?,?,?)")
+      .bind(invite.actor_id, invite.email, invite.display_name, salt, passwordHash).run();
+  } catch {
+    return json({ error: "La cuenta de esta invitación ya existe." }, 409);
+  }
+  return json({ created: true, email: invite.email }, 201);
+}
+
+async function accountsLogout(env, session) {
+  await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(session.tokenHash).run();
+  const response = new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+  response.headers.append("set-cookie", sessionCookie("", 0));
+  return response;
+}
+
+// The bridge is trusted for every user, but must say which one it acts for; the box comes
+// from D1, never from a name the caller builds.
+async function bridgeBox(request, env, url) {
+  const authorized = url.pathname === "/api/ingest" ? ingestAuthorized(request, env) : bridgeAuthorized(request, env);
+  if (!authorized) return { error: json({ error: "No autorizado" }, 401) };
+  const actorId = request.headers.get("x-dsta-actor") || "";
+  if (!ACTOR_ID.test(actorId)) return { error: json({ error: "Falta el usuario (X-DSTA-Actor)." }, 400) };
+  const user = await env.DB.prepare("SELECT id, do_name FROM users WHERE id = ? AND disabled_at IS NULL").bind(actorId).first();
+  if (!user) return { error: json({ error: "Usuario no encontrado." }, 404) };
+  return { box: boxOf(user) };
 }
 
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
@@ -715,17 +860,25 @@ export class DashboardChatQueue extends DurableObject {
     return json({ error: "Ruta interna no encontrada." }, 404);
   }
 
+  // Legacy KV data belongs to the single-user production box. A user box in accounts mode
+  // must never read it, or a new user would see the CEO's last snapshot and summaries.
+  legacyAllowed() {
+    return this.env.AUTH_MODE !== "accounts" || this.ctx.id?.name === LEGACY_BOX;
+  }
+
   // Dashboard data (RPC from the Worker). Storage calls run synchronously after the awaits,
   // so each read-modify-write completes without another request interleaving.
   async snapshot() {
-    return this.ctx.storage.kv.get("data:snapshot") ?? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
+    const stored = this.ctx.storage.kv.get("data:snapshot");
+    if (stored !== undefined || !this.legacyAllowed()) return stored ?? null;
+    return await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json");
   }
 
   async storedSummaries() {
     const storage = this.ctx.storage.kv;
     if (storage.get("data:summaries") === undefined) {
       // One-time move of the summaries written while they lived in Workers KV.
-      const legacy = await this.env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {};
+      const legacy = this.legacyAllowed() ? await this.env.DASHBOARD_DATA.get(SUMMARY_KEY, "json") || {} : {};
       if (storage.get("data:summaries") === undefined) storage.put("data:summaries", legacy);
     }
     return storage.get("data:summaries");
@@ -773,7 +926,7 @@ export class DashboardChatQueue extends DurableObject {
 
   async saveSnapshot(snapshot, actionConfirmation = null, labelConfirmation = null) {
     const storage = this.ctx.storage.kv;
-    const legacy = storage.get("data:snapshot") === undefined
+    const legacy = storage.get("data:snapshot") === undefined && this.legacyAllowed()
       ? await this.env.DASHBOARD_DATA.get(SNAPSHOT_KEY, "json") : null;
     // Re-read after the legacy await: another request may have published meanwhile.
     const current = storage.get("data:snapshot") ?? legacy;
@@ -929,35 +1082,22 @@ export default {
       return json({ error: "Faltan secretos de configuración del Worker." }, 503);
     }
 
-    if (url.pathname === "/api/ingest") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return receiveSnapshot(request, env);
-    }
-
-    if (url.pathname === "/api/bridge/snapshot") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return receiveSnapshot(request, env, true);
-    }
-    if (url.pathname === "/api/bridge/next") {
-      if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
-      return takeBridgeJob(request, env);
-    }
-    if (url.pathname === "/api/bridge/complete") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return completeBridgeJob(request, env);
-    }
-
-    if (url.pathname === "/api/bridge/health") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return receiveHealth(request, env);
-    }
-    if (url.pathname === "/api/bridge/minute") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return bridgeMinuteRoute(request, env, "/minutes/upsert");
-    }
-    if (url.pathname === "/api/bridge/decision-done") {
-      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return bridgeMinuteRoute(request, env, "/minutes/decision-done");
+    const accounts = accountsMode(env);
+    const bridgeRoutes = {
+      "/api/ingest": ["POST", (req, box) => receiveSnapshot(req, env, false, box)],
+      "/api/bridge/snapshot": ["POST", (req, box) => receiveSnapshot(req, env, true, box)],
+      "/api/bridge/next": ["GET", (req, box) => takeBridgeJob(req, env, box)],
+      "/api/bridge/complete": ["POST", (req, box) => completeBridgeJob(req, env, box)],
+      "/api/bridge/health": ["POST", (req, box) => receiveHealth(req, env, box)],
+      "/api/bridge/minute": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/upsert", box)],
+      "/api/bridge/decision-done": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/decision-done", box)],
+    };
+    const bridgeRoute = bridgeRoutes[url.pathname];
+    if (bridgeRoute) {
+      if (request.method !== bridgeRoute[0]) return json({ error: "Método no permitido" }, 405);
+      if (!accounts) return bridgeRoute[1](request, LEGACY_BOX);
+      const resolved = await bridgeBox(request, env, url);
+      return resolved.error || bridgeRoute[1](request, resolved.box);
     }
 
     // Android fetches installation metadata without the user's Basic credentials.
@@ -966,44 +1106,75 @@ export default {
       "/manifest.webmanifest", "/sw.js", "/offline", "/offline.html",
       "/icons/dsta-192.png", "/icons/dsta-512.png", "/icons/dsta-maskable-512.png",
     ]).has(url.pathname) && ["GET", "HEAD"].includes(request.method);
-    if (!publicPwaAsset && !basicAuthorized(request, env)) return requestAuthentication();
 
-    // Basic auth is ambient browser authority: reject foreign-site writes before
-    // reading a body or scheduling a job. CLI clients without Origin remain valid.
-    if (request.method === "POST" && ["/api/assistant", "/api/label-actions", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
-      const origin = request.headers.get("origin");
-      const site = request.headers.get("sec-fetch-site");
-      if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
-        return json({ error: "Origen de solicitud no permitido." }, 403);
+    let box = LEGACY_BOX;
+    let session = null;
+    if (accounts) {
+      // Every browser write carries a same-origin Origin; the session cookie is the
+      // ambient authority, so a missing Origin is rejected too (CSRF).
+      if (!["GET", "HEAD"].includes(request.method)) {
+        if (request.headers.get("origin") !== url.origin) return json({ error: "Origen de solicitud no permitido." }, 403);
+        const mediaType = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+        if (url.pathname !== "/api/auth/logout" && mediaType !== "application/json") return json({ error: "Se requiere application/json." }, 415);
       }
-      const mediaType = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
-      if (mediaType !== "application/json") return json({ error: "Se requiere application/json." }, 415);
+      if (url.pathname === "/api/auth/login") {
+        return request.method === "POST" ? accountsLogin(request, env) : json({ error: "Método no permitido" }, 405);
+      }
+      if (url.pathname === "/api/auth/accept-invite") {
+        return request.method === "POST" ? accountsAcceptInvite(request, env) : json({ error: "Método no permitido" }, 405);
+      }
+      session = publicPwaAsset || PUBLIC_ACCOUNT_PATHS.has(url.pathname) ? null : await currentSession(request, env);
+      if (!session && !publicPwaAsset && !PUBLIC_ACCOUNT_PATHS.has(url.pathname)) {
+        if (url.pathname.startsWith("/api/")) return json({ error: "No autenticado." }, 401);
+        return new Response(null, { status: 302, headers: { location: "/login", "cache-control": "no-store" } });
+      }
+      if (session) box = session.box;
+      if (url.pathname === "/api/session") {
+        return request.method === "GET" ? json({ actor: session.actor }) : json({ error: "Método no permitido" }, 405);
+      }
+      if (url.pathname === "/api/auth/logout") {
+        return request.method === "POST" ? accountsLogout(env, session) : json({ error: "Método no permitido" }, 405);
+      }
+    } else {
+      if (!publicPwaAsset && !basicAuthorized(request, env)) return requestAuthentication();
+
+      // Basic auth is ambient browser authority: reject foreign-site writes before
+      // reading a body or scheduling a job. CLI clients without Origin remain valid.
+      if (request.method === "POST" && ["/api/assistant", "/api/label-actions", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
+        const origin = request.headers.get("origin");
+        const site = request.headers.get("sec-fetch-site");
+        if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
+          return json({ error: "Origen de solicitud no permitido." }, 403);
+        }
+        const mediaType = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+        if (mediaType !== "application/json") return json({ error: "Se requiere application/json." }, 415);
+      }
     }
 
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
-      return chatStub(env).fetch("https://chat.internal/minutes/list");
+      return chatStub(env, box).fetch("https://chat.internal/minutes/list");
     }
     if (url.pathname === "/api/minutes/seen" || url.pathname === "/api/minutes/decide") {
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return browserMinuteRoute(request, env, url.pathname.replace("/api", ""));
+      return browserMinuteRoute(request, env, url.pathname.replace("/api", ""), box);
     }
 
     if (url.pathname === "/api/health/refresh") {
-      if (request.method === "GET") return json({ health: await chatStub(env).healthStatus() });
+      if (request.method === "GET") return json({ health: await chatStub(env, box).healthStatus() });
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
       if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
-      return json(await chatStub(env).requestHealthCheck(), 202);
+      return json(await chatStub(env, box).requestHealthCheck(), 202);
     }
     if (url.pathname === "/api/dashboard") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
-      return serveSnapshot(env);
+      return serveSnapshot(env, box);
     }
-    if (url.pathname === "/api/label-actions") return labelActionRoute(request, url, env);
-    if (url.pathname === "/api/task-actions") return taskActionRoute(request, url, env);
+    if (url.pathname === "/api/label-actions") return labelActionRoute(request, url, env, box);
+    if (url.pathname === "/api/task-actions") return taskActionRoute(request, url, env, box);
     if (url.pathname === "/api/assistant") {
-      if (request.method === "POST") return createAssistantJob(request, env);
-      if (request.method === "GET") return readAssistantJob(url, env);
+      if (request.method === "POST") return createAssistantJob(request, env, box);
+      if (request.method === "GET") return readAssistantJob(url, env, box);
       return json({ error: "Método no permitido" }, 405);
     }
 
