@@ -8,7 +8,13 @@ Chat de origen en Codex local: 01a136bc-8875-7c52-9e2b-59ec85b923dc. Título obs
 
 El usuario quiere preservar la comodidad de producción, revisar las mejoras multiusuario y decidir paso a paso cómo quedan ambos ambientes. Leer primero [PLAN.md](PLAN.md), luego [MATRIZ_DECISIONES.md](MATRIZ_DECISIONES.md), [REGISTRO_DECISIONES.md](REGISTRO_DECISIONES.md) y [ACEPTACION.md](ACEPTACION.md).
 
-Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) lleve el plan. Decisiones del día registradas en REGISTRO_DECISIONES; Entrega E01 corrigió D18/D19 (commit 303708e, staging f7ceee69). Estado: B01 en revisión. Todas las decisiones por decidir. El usuario respondió a D01 que necesita más antecedentes antes de elegir. Leer [REVISION_CREACION.md](REVISION_CREACION.md), que compara los tres recorridos actuales con el mismo ejemplo. No se eligió opción ni se autorizó implementación. Continuar la explicación o demostración requerida antes de volver a solicitar elección.
+Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) lleve el plan. Decisiones del día registradas en REGISTRO_DECISIONES; Entrega E01 corrigió D18/D19 (commit 303708e, staging f7ceee69). Estado (13-10 noche):
+- D01 decidida (mix A + B).
+- D03 y D04/D07 decididas e implementadas en el piloto: Entrega E02, commit 3d37438, staging 99149651. Falta la prueba del CEO.
+- Siguientes decisiones a presentar: D02 (ubicación de la creación) y D05/D06.
+- Las demás decisiones siguen por decidir.
+
+Producción no cambia sin una autorización concreta.
 
 D01 no autoriza por sí sola escrituras automáticas de IA; D03 define ejecución/propuestas. D04/D07 definen información y trazabilidad compartida. Primer incremento después de elegir esas decisiones: recorrido de creación completo con contexto aislado y su UI elegida.
 

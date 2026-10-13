@@ -46,6 +46,35 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 - Rollback: revertir 303708e y redeploy de staging; reiniciar el puente.
 - Pendiente: que el CEO pruebe un registro en el piloto. D24/D25 (líneas duplicadas o archivar con tareas) siguen por decidir.
 
+### Entrega E02 · D03 y D04/D07: el copiloto ejecuta lo pedido; mismos campos en ambas vías
+
+- Decisiones incluidas: D03, D04, D07. Autorización: Telegram 13-10 21:46, «Ok».
+- Alcance aprobado; estado que pasa a: D03, D04 y D07 → verificado local + publicado en piloto (pendiente prueba del CEO).
+- Directorio y rama: C:/Users/admin/Documents/DSTA-multiuser/dsta-web-mu · feat/multiusuario.
+- Commit base y resultado: c388b17 → 3d37438.
+- Comportamiento:
+  - Formulario «+ Nueva tarea» y «Editar tarea» con Responsable, Fecha objetivo, Dependencia y Criterio de cierre (≤300 caracteres). Al crear se escribe la descripción con el formato de pmo_create_task: campos vacíos = «Por confirmar», más `SOURCE: DSTA Dashboard Formulario|Copilot` y `ACTION_KEY: DSTA-FORM|COPILOT-<id>`. Al editar se cambian solo las líneas de metadatos enviadas y la bitácora se conserva.
+  - El copiloto puede proponer los mismos campos. Cuando la persona pide algo explícitamente, la propuesta llega marcada `"ejecutar": true`. El Worker la encola en la misma cola verificada de los botones, con un requestId derivado del chat para que no se duplique, y el puente la aplica al instante. El chat muestra «Ejecutando… → ✓ Aplicado», o el error con «Reintentar». Lo que la IA sugiere por su cuenta sigue con «Aplicar». El origen de la creación lo fija el Worker, nunca el modelo.
+- Archivos: src/worker.js, public/structure-actions.js, public/assistant.js, tools/structure_actions.py, tools/user_copilot.py, tools/multiuser_bridge.py y sus pruebas.
+- Datos QA: fixtures en memoria (FakeVikunja, harness del Worker, puente simulado); no se tocaron datos de alvaro.
+- Pruebas: `PYTHONUTF8=1 npm test` → 159 Python OK más todas las suites JS. Casos nuevos:
+  - descripción idéntica al formato de producción;
+  - la edición conserva la bitácora;
+  - el esquema rechaza un responsable de más de 300 caracteres o un origen inválido;
+  - lo explícito se encola y lo sugerido no;
+  - una propuesta inválida informa el error sin encolarse;
+  - el puente aplica la acción sin esperar al siguiente despacho.
+  
+  Modo de un solo usuario sin cambios: las propuestas siguen deshabilitadas.
+- Prueba visual: sin revisión en navegador; queda la prueba del CEO.
+- Versiones: Worker staging 99149651-5972-4db8-93de-125705045d55; puente multiusuario reiniciado con 3d37438.
+- Rollback: revertir 3d37438, redeploy de staging y reiniciar el puente.
+- Pendiente: prueba del CEO, en dos pasos:
+  1. Crear desde el formulario con los campos nuevos.
+  2. Pedir al copiloto «crea la tarea X en la LT Y» y confirmar que se crea sin clic.
+  
+  Siguientes decisiones del plan: D02 (ubicación) y D05/D06.
+
 ## Plantilla de una decisión
 
 ### Decisión DNN
