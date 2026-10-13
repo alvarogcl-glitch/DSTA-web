@@ -36,6 +36,11 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D14 | decidido | Mismo «Si». | «Reabrir tarea» en el menú «⋯» de las tareas completadas, sin confirmación porque es reversible; el copiloto reabre cuando el pedido es explícito. Solo cambia done; los demás campos se conservan. | Igual al converger (hoy, solo copiloto vía pmo_update_task). | Ninguno. | Entrega E04. |
 | D15 | decidido (fuera de alcance) | Mismo «Si». Evidencia: 0 de 164 tareas de producción usan prioridad (lectura 13-10). | Prioridad no se expone. | Igual. | Ninguno. | Reabrir si el CEO la empieza a usar. |
 | D16 | decidido | Mismo «Si». Evidencia: 4 de 164 tareas tienen comentarios; el dashboard no los muestra. | Solo bitácora (task.log). El copiloto del piloto no tiene comentarios. | Al converger, el copiloto de producción deja de usar pmo_add_comment y registra en la bitácora. Requiere autorización de despliegue a producción. Los comentarios existentes se conservan en Vikunja. | Ninguno. | Pendiente para el corte a producción. |
+| D20 | decidido (fuera de alcance) | Telegram 13-10 22:56: «Si ok con todo». | No se expone borrar tareas; basta con archivar y completar. Se conserva la reversión limitada de las minutas. | Igual. | Ninguno. | — |
+| D21 · D22 | decidido (cubiertos) | Mismo «Si ok con todo». | Crear y renombrar líneas por copiloto y por botón, con la regla D24. | Igual al converger. | Ninguno. | E02 a E05. |
+| D23 | decidido | Mismo. | «Editar descripción» en el menú «⋯» de la LT; el copiloto también puede (`lt.describe`). La descripción se ve en el inspector y la recibe el copiloto como contexto. | Igual al converger. | Ninguno. | Entrega E05. |
+| D24 | decidido | Mismo. | No puede haber dos líneas activas con el mismo nombre (sin distinguir mayúsculas, tildes ni espacios). Lo validan el Worker (409), el puente (contra Vikunja, antes de escribir) y el copiloto. Renombrar una línea a su propio nombre con otras mayúsculas está permitido. | Producción además valida códigos LT/TR; se revisará al converger. | Ninguno. | Entrega E05. |
+| D25 | decidido | Mismo. | Solo se archiva una línea sin tareas abiertas. Las completadas se archivan con ella y no se borran. El mensaje indica cuántas quedan abiertas. | Producción exige línea vacía; al converger rige la regla del piloto. | Ninguno. | Entrega E05. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -128,6 +133,22 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Navegador en laboratorio local con usuarios sintéticos: 10 de 10. Incluye completar con ✓ y luego reabrir, conservando el responsable.
 - Versiones: Worker staging 57ec91a8-272a-431d-9bf8-ec07d381edbf; puente reiniciado con e892a3c.
 - Rollback: revertir e892a3c, redeploy de staging y reiniciar el puente.
+
+### Entrega E05 · D23, D24 y D25: reglas de líneas de trabajo
+
+- Decisiones: D23, D24, D25 (más D20 a D22 registradas). Autorización: Telegram 13-10 22:56, «Si ok con todo».
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: a967ca8 → aba5565 (rama feat/multiusuario).
+- Cambios:
+  - Nueva acción `lt.describe`. Su verificación compara la descripción de la LT en el snapshot; para eso `publish_dashboard` ahora incluye `description` por proyecto.
+  - `line_key` normaliza los nombres, con la misma lógica en Python y JS.
+  - El chequeo de duplicados en `lt.create` está dentro del paso idempotente, así que reintentar la misma solicitud no se ve como duplicado.
+  - `lt.archive` cuenta las tareas abiertas en Vikunja antes de escribir.
+- Pruebas:
+  - `npm test`: 167 Python OK, más todas las suites JS.
+  - Navegador con usuarios sintéticos: 12 de 12. Incluye archivar con tarea abierta (rechazado con mensaje), renombrar a un nombre ocupado (rechazado) y editar la descripción, que luego se ve en el inspector.
+- Versiones: Worker staging deec1978-3ab2-452f-8992-bf0d4b34e9ac; puente reiniciado con aba5565.
+- Rollback: revertir aba5565, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 
