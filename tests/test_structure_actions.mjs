@@ -12,7 +12,7 @@ const auth = `Basic ${Buffer.from('admin:password').toString('base64')}`;
 
 function environment() {
   const values = new Map();
-  const env = { DASHBOARD_USER: 'admin', DASHBOARD_PASSWORD: 'password', INGEST_TOKEN: 'ingest', DSTA_BRIDGE_TOKEN: 'bridge',
+  const env = { DASHBOARD_USER: 'admin', DASHBOARD_PASSWORD: 'password', INGEST_TOKEN: 'ingest', DSTA_BRIDGE_TOKEN: 'bridge', STRUCTURE_ACTIONS: 'on',
     DASHBOARD_DATA: { async get() { return null; } } };
   const chat = new DashboardChatQueue({ storage: { kv: {
     get: k => structuredClone(values.get(k)), put: (k, v) => values.set(k, structuredClone(v)), delete: k => values.delete(k),
@@ -101,7 +101,14 @@ for (const body of valid) {
   assert.deepEqual(status.body.result, result);
 }
 
-// 4. "complete" keeps its exact legacy schema and behaviour.
+// 4. Without accounts mode or the explicit flag, production keeps only "complete".
+const legacy = environment();
+delete legacy.STRUCTURE_ACTIONS;
+await call(legacy, 'POST', '/api/bridge/snapshot', { ...base, timestamp: later(0) }, 'Bearer bridge');
+assert.equal((await call(legacy, 'POST', '/api/task-actions', { action: 'lt.create', requestId: uuid(), title: 'x' })).status, 400);
+assert.equal((await call(legacy, 'POST', '/api/task-actions', { action: 'complete', taskId: 15, requestId: uuid() })).status, 202);
+
+// 5. "complete" keeps its exact legacy schema and behaviour.
 assert.equal((await call(env, 'POST', '/api/task-actions', { action: 'complete', taskId: 15, requestId: uuid() })).status, 202);
 assert.equal((await call(env, 'POST', '/api/task-actions', { action: 'complete', taskId: 15, requestId: uuid(), title: 'x' })).status, 400);
 

@@ -337,6 +337,7 @@ function cleanProposals(proposals) {
   }
   return clean;
 }
+const structureEnabled = env => accountsMode(env) || env.STRUCTURE_ACTIONS === "on";
 const actionTarget = job => job.taskId ? `t:${job.taskId}` :
   (String(job.action || "").startsWith("lt.") && job.projectId ? `p:${job.projectId}` : null);
 
@@ -357,6 +358,8 @@ async function taskActionRoute(request, url, env, box = LEGACY_BOX) {
     return json({ error: "Solicitud demasiado grande" }, 413);
   }
   if (!validAction(body)) return json({ error: "Acción estructurada inválida." }, 400);
+  // Single-user production keeps exactly its legacy surface ("complete" only) unless enabled.
+  if (body.action !== "complete" && !structureEnabled(env)) return json({ error: "Acción estructurada inválida." }, 400);
   return forwardToChatObject(env, "/actions/create", body, box);
 }
 
@@ -401,7 +404,7 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes),
-      proposals: cleanProposals(proposals) }),
+      proposals: structureEnabled(env) ? cleanProposals(proposals) : [] }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const done = await chatStub(env, box).completeSummaryJob(id, Boolean(error), summaries);
@@ -608,6 +611,14 @@ async function accountsAcceptInvite(request, env) {
   const passwordHash = await derivePasswordHash(password, salt);
   const tokenHash = await sha256Url(token);
   const now = Math.floor(Date.now() / 1000);
+  const pending = await env.DB.prepare(
+    "SELECT actor_id, email FROM invitations WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+  ).bind(tokenHash, now).first();
+  if (!pending) return invalid;
+  const existing = await env.DB.prepare("SELECT 1 AS found FROM users WHERE id = ? OR lower(email) = lower(?) LIMIT 1")
+    .bind(pending.actor_id, pending.email).first();
+  // Checked before claiming, so an invitation is never consumed without creating its account.
+  if (existing) return json({ error: "La cuenta de esta invitación ya existe." }, 409);
   const claimed = await env.DB.prepare(
     "UPDATE invitations SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
   ).bind(now, tokenHash, now).run();
@@ -616,7 +627,7 @@ async function accountsAcceptInvite(request, env) {
   if (!ACTOR_ID.test(invite.actor_id)) return invalid;
   try {
     await env.DB.prepare("INSERT INTO users(id,email,display_name,password_salt,password_hash) VALUES(?,?,?,?,?)")
-      .bind(invite.actor_id, invite.email, invite.display_name, salt, passwordHash).run();
+      .bind(invite.actor_id, String(invite.email).toLowerCase(), invite.display_name, salt, passwordHash).run();
   } catch {
     return json({ error: "La cuenta de esta invitación ya existe." }, 409);
   }

@@ -171,7 +171,13 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     minute.before(button);
   }
 
-  window.DstaStructure = { mount };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addNewLineButton);
-  else addNewLineButton();
+  // Only in accounts mode (the single-user dashboard keeps its legacy surface).
+  let enabled = false;
+  window.DstaStructure = { mount: view => { if (enabled) mount(view); } };
+  fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then(response => {
+    if (!response.ok) return;
+    enabled = true;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addNewLineButton);
+    else addNewLineButton();
+  }).catch(() => {});
 })();

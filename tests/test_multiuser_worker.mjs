@@ -155,6 +155,12 @@ sqlite.prepare('INSERT INTO invitations(token_hash,actor_id,email,display_name,e
 assert.equal((await call('/api/auth/accept-invite', { method: 'POST', body: { token, password: 'corta' } })).status, 400);
 assert.equal((await call('/api/auth/accept-invite', { method: 'POST', body: { token, password: 'synthetic-C-password-2026' } })).status, 201);
 assert.equal((await call('/api/auth/accept-invite', { method: 'POST', body: { token, password: 'synthetic-C-password-2027' } })).status, 400, 'single use');
+// An invitation for an existing account is refused WITHOUT being consumed (QA finding).
+const dupToken = 'invite-token-dup-0123456789abcdef';
+sqlite.prepare('INSERT INTO invitations(token_hash,actor_id,email,display_name,expires_at,created_at) VALUES(?,?,?,?,?,?)')
+  .run(b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(dupToken))), 'demo-x', 'A@DSTA.TEST', 'Dup', now + 3600, now);
+assert.equal((await call('/api/auth/accept-invite', { method: 'POST', body: { token: dupToken, password: 'synthetic-X-password-2026' } })).status, 409);
+assert.equal(sqlite.prepare("SELECT used_at FROM invitations WHERE actor_id='demo-x'").get().used_at, null, 'not consumed');
 const rowC = sqlite.prepare("SELECT * FROM users WHERE id='demo-c'").get();
 assert.ok(!Object.values(rowC).some(v => String(v).includes('synthetic-C-password')), 'no plaintext password stored');
 await login({ email: 'c@dsta.test', password: 'synthetic-C-password-2026', id: 'demo-c' });
