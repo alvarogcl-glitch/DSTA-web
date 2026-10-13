@@ -51,7 +51,7 @@ class MultiuserBridge:
                  request_json: Callable, process_job: Callable, finish_job: Callable, users_dir: Path,
                  publish_snapshot: Callable | None = None, check_vikunja: Callable | None = None,
                  granola=None, copilot=None, fetch_snapshot: Callable | None = None, chat_pool=None,
-                 minute_inbox=None, analysis_pool=None):
+                 minute_inbox=None, analysis_pool=None, decision_pool=None):
         self.base = base_url.rstrip("/")
         self.token = token
         self.load_user = load_user
@@ -68,6 +68,8 @@ class MultiuserBridge:
         self._ignored: set[str] = set()
         self.minute_inbox = minute_inbox      # per-user analysis like the CEO's inbox (None: import only)
         self.analysis_pool = analysis_pool    # None: run inline (tests)
+        # The user's decisions never wait behind a backlog of minute analyses.
+        self.decision_pool = decision_pool
 
     def user_base(self, actor: str) -> str:
         return f"{self.base}/u/{actor}"
@@ -126,7 +128,7 @@ class MultiuserBridge:
                 return handled
             if result.get("decision"):
                 if self.minute_inbox and self.copilot:
-                    self._run(self.analysis_pool, self.handle_decision, actor, user, result["decision"])
+                    self._run(self.decision_pool, self.handle_decision, actor, user, result["decision"])
                 else:
                     self.request_json(f"{base}/api/bridge/decision-done", token=self.token, method="POST",
                                       payload={"id": result["decision"]["id"], "error": INBOX_PENDING}, timeout=20)
@@ -334,7 +336,7 @@ def build(env_file: Path) -> MultiuserBridge:
                            publish_snapshot=hb.publish_snapshot, check_vikunja=vikunja_checker(hb.request_json),
                            granola=granola, copilot=copilot, chat_pool=ThreadPoolExecutor(max_workers=2),
                            minute_inbox=user_minute_inbox.UserMinuteInbox(user_vault.vault_dir().parent / "users"),
-                           analysis_pool=ThreadPoolExecutor(max_workers=1),
+                           analysis_pool=ThreadPoolExecutor(max_workers=1), decision_pool=ThreadPoolExecutor(max_workers=1),
                            fetch_snapshot=lambda user: hb.fetch_dashboard(user.get("vikunjaUrl", "http://127.0.0.1:3456"),
                                                                           user["vikunjaToken"]))
 
