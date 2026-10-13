@@ -50,7 +50,8 @@ class MultiuserBridge:
     def __init__(self, base_url: str, token: str, *, load_user: Callable[[str], dict | None],
                  request_json: Callable, process_job: Callable, finish_job: Callable, users_dir: Path,
                  publish_snapshot: Callable | None = None, check_vikunja: Callable | None = None,
-                 granola=None, copilot=None, fetch_snapshot: Callable | None = None, chat_pool=None):
+                 granola=None, copilot=None, fetch_snapshot: Callable | None = None, chat_pool=None,
+                 minute_inbox=None, analysis_pool=None):
         self.base = base_url.rstrip("/")
         self.token = token
         self.load_user = load_user
@@ -65,6 +66,8 @@ class MultiuserBridge:
         self.fetch_snapshot = fetch_snapshot
         self.chat_pool = chat_pool  # None: answer inline (tests, --once)
         self._ignored: set[str] = set()
+        self.minute_inbox = minute_inbox      # per-user analysis like the CEO's inbox (None: import only)
+        self.analysis_pool = analysis_pool    # None: run inline (tests)
 
     def user_base(self, actor: str) -> str:
         return f"{self.base}/u/{actor}"
@@ -122,8 +125,11 @@ class MultiuserBridge:
                     handled += 1
                 return handled
             if result.get("decision"):
-                self.request_json(f"{base}/api/bridge/decision-done", token=self.token, method="POST",
-                                  payload={"id": result["decision"]["id"], "error": INBOX_PENDING}, timeout=20)
+                if self.minute_inbox and self.copilot:
+                    self._run(self.analysis_pool, self.handle_decision, actor, user, result["decision"])
+                else:
+                    self.request_json(f"{base}/api/bridge/decision-done", token=self.token, method="POST",
+                                      payload={"id": result["decision"]["id"], "error": INBOX_PENDING}, timeout=20)
                 handled += 1
             job = result.get("job")
             if not job:
@@ -190,6 +196,43 @@ class MultiuserBridge:
             log(f"granola de {actor[:20]} falló ({type(error).__name__})")
             self._granola_post(actor, {"id": op.get("id"), "status": "error", "error": GRANOLA_FAILED})
 
+    @staticmethod
+    def _run(pool, fn, *args):
+        return pool.submit(fn, *args) if pool else fn(*args)
+
+    def _snapshot(self, user: dict):
+        with using_root(user["rootProjectId"]):
+            return self.fetch_snapshot(user) if self.fetch_snapshot else None
+
+    def _push_minute(self, actor: str, record: dict) -> None:
+        import user_minute_inbox
+        self.request_json(f"{self.user_base(actor)}/api/bridge/minute", token=self.token, method="POST",
+                          payload=user_minute_inbox.public_record(record), timeout=20)
+
+    def analyze_minute(self, actor: str, user: dict, minute: dict) -> None:
+        """Like the CEO's inbox: evident actions applied, the rest proposed for review."""
+        try:
+            record = self.minute_inbox.process(actor, user, minute, self._snapshot(user),
+                                               lambda prompt: self.copilot.ask(actor, user, prompt))
+            if record:
+                self._push_minute(actor, record)
+                log(f"minuta analizada para {actor[:20]}: {sum(1 for a in record['acciones'] if a.get('auto'))} automáticas, "
+                    f"{sum(1 for a in record['acciones'] if not a.get('auto'))} por revisar")
+        except Exception as error:
+            log(f"análisis de minuta de {actor[:20]} falló ({type(error).__name__})")
+
+    def handle_decision(self, actor: str, user: dict, decision: dict) -> None:
+        error = ""
+        try:
+            record = self.minute_inbox.decide(actor, user, decision, self._snapshot(user),
+                                              lambda prompt: self.copilot.ask(actor, user, prompt))
+            self._push_minute(actor, record)
+        except Exception as failure:
+            error = str(failure)[:200] if isinstance(failure, (KeyError, ValueError)) else "No se pudieron aplicar las decisiones."
+            log(f"decisión de minuta de {actor[:20]} falló ({type(failure).__name__})")
+        self.request_json(f"{self.user_base(actor)}/api/bridge/decision-done", token=self.token, method="POST",
+                          payload={"id": decision["id"], **({"error": error} if error else {})}, timeout=20)
+
     def sync_granola(self, actors: list[str]) -> int:
         """Import each connected user's meetings into THEIR inbox (title, date, summary)."""
         if not self.granola:
@@ -201,9 +244,15 @@ class MultiuserBridge:
                 continue
             try:
                 records = self.granola.sync(actor)
-                for record in records:
+                user = self._user(actor)
+                analyze = bool(self.minute_inbox and self.copilot and user)
+                for record in sorted(records, key=lambda r: str(r.get("date") or ""), reverse=True):
+                    if analyze and self.minute_inbox.is_current(actor, record):
+                        continue  # already analysed (or discarded): never overwrite it with the raw import
                     self.request_json(f"{self.user_base(actor)}/api/bridge/minute", token=self.token, method="POST",
                                       payload=granola_user.inbox_record(record), timeout=20)
+                    if analyze:
+                        self._run(self.analysis_pool, self.analyze_minute, actor, user, record)
                 self._granola_post(actor, {"status": "synced", "count": len(records)})
                 imported += len(records)
             except Exception as error:
@@ -271,6 +320,7 @@ def build(env_file: Path) -> MultiuserBridge:
     test_origin = hb.setting("DSTA_GRANOLA_TEST_ORIGIN", values) or None
     granola = granola_user.GranolaService(f"{base}/oauth/granola/callback", test_origin=test_origin)
     import user_copilot
+    import user_minute_inbox
     hermes_cli = hb.setting("HERMES_CLI", values, str(hb.DEFAULT_HERMES_CLI))
     claude_cli = hb.setting("DSTA_CLAUDE_CLI", values, str(hb.DEFAULT_CLAUDE_CLI) if hb.DEFAULT_CLAUDE_CLI.exists() else "")
     copilot = user_copilot.UserCopilot(
@@ -283,6 +333,8 @@ def build(env_file: Path) -> MultiuserBridge:
                            process_job=hb.process_job, finish_job=hb.finish_job, users_dir=users_dir,
                            publish_snapshot=hb.publish_snapshot, check_vikunja=vikunja_checker(hb.request_json),
                            granola=granola, copilot=copilot, chat_pool=ThreadPoolExecutor(max_workers=2),
+                           minute_inbox=user_minute_inbox.UserMinuteInbox(user_vault.vault_dir().parent / "users"),
+                           analysis_pool=ThreadPoolExecutor(max_workers=1),
                            fetch_snapshot=lambda user: hb.fetch_dashboard(user.get("vikunjaUrl", "http://127.0.0.1:3456"),
                                                                           user["vikunjaToken"]))
 

@@ -151,6 +151,10 @@ class UserCopilot:
         self.work_dir, self.provider, self.model, self.claude_model, self.run = work_dir, provider, model, claude_model, run
 
     def answer(self, actor: str, user: dict, job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
+        return self.ask(actor, user, build_prompt(job, snapshot, minutes))
+
+    def ask(self, actor: str, user: dict, prompt: str) -> str:
+        """Any prompt (chat or minute analysis) on the same isolated Hermes → Claude chain."""
         if not ACTOR_ID.match(actor or ""):
             raise ValueError("Identificador de usuario inválido")
         provider = (user.get("llm") or {}).get("provider", "ceo-hermes")
@@ -158,7 +162,6 @@ class UserCopilot:
             raise CopilotUnavailable("El proveedor de IA configurado para este usuario aún no está disponible.")
         cwd = self.work_dir / actor
         cwd.mkdir(parents=True, exist_ok=True)
-        prompt = build_prompt(job, snapshot, minutes)
         reply = self._hermes(actor, prompt, cwd)
         if reply:
             return reply

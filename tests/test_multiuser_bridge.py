@@ -127,6 +127,54 @@ class CopilotBridgeTest(unittest.TestCase):
         self.assertEqual(finished, [(f"{BASE}/u/demo-b", "chat-b", {"reply": "respuesta para demo-b"})])
 
 
+class MinuteInboxBridgeTest(unittest.TestCase):
+    def test_minutas_nuevas_se_analizan_y_decisiones_se_aplican(self):
+        posts, analysed, decided = [], [], []
+
+        class FakeInbox:
+            def is_current(self, actor, minute):
+                return minute["source_id"] == "ya-analizada"
+            def process(self, actor, user, minute, snapshot, ask):
+                analysed.append((actor, minute["source_id"], ask("p")))
+                return {"id": "g-1", "acciones": [{"auto": True}, {"auto": False}], "texto": "privado"}
+            def decide(self, actor, user, decision, snapshot, ask):
+                decided.append((actor, decision["minuteId"]))
+                return {"id": "g-1", "acciones": [], "texto": "privado"}
+
+        class FakeCopilot:
+            def ask(self, actor, user, prompt):
+                return f"respuesta-{actor}"
+
+        class Granola(FakeGranolaService):
+            def sync(self, actor):
+                return [{"source_id": "nueva", "version": "v", "title": "N", "date": "2026-10-12", "summary": "s"},
+                        {"source_id": "ya-analizada", "version": "v", "title": "V", "date": "2026-10-01", "summary": "s"}]
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if method == "POST":
+                posts.append((url, payload))
+                return {"ok": True}
+            if url.endswith("/api/bridge/dispatch"):
+                return {"now": 1, "pending": {"demo-a": {"chat": 1}}}
+            return {"job": None, "decision": {"id": "d1", "minuteId": "g-1", "decisions": []}}
+
+        granola = Granola()
+        granola.ready = {"demo-a"}
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json, process_job=None,
+                                    finish_job=None, users_dir=Path("C:/tmp/x"), granola=granola, copilot=FakeCopilot(),
+                                    minute_inbox=FakeInbox())
+        bridge.sync_granola(["demo-a"])
+        self.assertEqual(analysed, [("demo-a", "nueva", "respuesta-demo-a")], "solo la nueva, con el copiloto del usuario")
+        minute_posts = [p for u, p in posts if u.endswith("/api/bridge/minute")]
+        self.assertEqual(len(minute_posts), 2, "importación inicial + resultado del análisis (la ya analizada no se pisa)")
+        self.assertNotIn("texto", minute_posts[-1], "el texto de la minuta no sale de la VM")
+        posts.clear()
+        bridge.dispatch_once()
+        self.assertEqual(decided, [("demo-a", "g-1")])
+        done = [p for u, p in posts if u.endswith("/api/bridge/decision-done")]
+        self.assertEqual(done, [{"id": "d1"}])
+
+
 class FakeGranolaService:
     def __init__(self):
         self.calls = []
