@@ -5,10 +5,14 @@
   'use strict';
   const css = document.createElement('style');
   css.textContent = `
-.structure-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
-.structure-actions button,.structure-new-lt{width:auto;padding:8px 12px;border-radius:8px;border:1px solid #3a4859;background:#1c2530;color:#eef3f8;font:inherit;cursor:pointer}
-.structure-actions button:hover,.structure-new-lt:hover{border-color:#68d391}
-.structure-actions button.danger{border-color:#7a3b3b}
+.structure-actions{display:flex;align-items:center;gap:6px;margin:10px 0;position:relative}
+.structure-actions button,.structure-new-lt,.structure-more summary{width:auto;padding:5px 10px;border-radius:8px;border:1px solid #3a4859;background:transparent;color:#c5d1dd;font:inherit;font-size:13px;cursor:pointer}
+.structure-actions button:hover,.structure-new-lt:hover,.structure-more summary:hover{border-color:#68d391;color:#eef3f8}
+.structure-more summary{list-style:none;padding:5px 12px}.structure-more summary::-webkit-details-marker{display:none}
+.structure-more>div{position:absolute;z-index:5;margin-top:6px;display:grid;gap:4px;min-width:190px;padding:6px;background:#151b23;border:1px solid #3a4859;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.structure-more>div button{text-align:left;border-color:transparent}
+.structure-actions button.danger{color:#ff9a9a}
+.structure-dialog .hint{display:block;margin-top:4px;color:#9bacbd;font-size:12px}
 dialog.structure-dialog{width:min(480px,calc(100vw - 32px));background:#151b23;color:#eef3f8;border:1px solid #3a4859;border-radius:12px;padding:20px}
 dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
 .structure-dialog label{display:block;margin:12px 0 4px;font-size:13px;color:#c5d1dd}
@@ -24,7 +28,20 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     'task.create': 'Nueva tarea', 'task.update': 'Editar tarea', 'task.move': 'Mover tarea a otra línea',
   };
 
-  function field(form, { name, label, type = 'text', value = '', options = null, required = false, max = 250 }) {
+  // Same split as tools/structure_actions.split_description: metadata block, detail, trailing log.
+  const METADATA_LABELS = new Set(['responsable', 'fecha objetivo', 'dependencia', 'criterio de cierre', 'source', 'action_key']);
+  const LOG_ENTRY = /^(?:Actualización|Avance|Cierre|Nota|Seguimiento) \d{4}-\d{2}-\d{2}: /;
+  function descriptionParts(description) {
+    const paragraphs = String(description || '').replace(/\r/g, '').split('\n\n');
+    const first = paragraphs[0].split('\n').filter(line => line.trim());
+    if (first.length && first.every(line => line.includes(':')) &&
+        first.some(line => METADATA_LABELS.has(line.split(':')[0].trim().toLowerCase()))) paragraphs.shift();
+    let logStart = paragraphs.length;
+    while (logStart > 0 && LOG_ENTRY.test(paragraphs[logStart - 1].trimStart())) logStart -= 1;
+    return { detail: paragraphs.slice(0, logStart).join('\n\n').trim(), log: paragraphs.slice(logStart).join('\n\n') };
+  }
+
+  function field(form, { name, label, type = 'text', value = '', options = null, required = false, max = 250, hint = '' }) {
     const wrap = document.createElement('div');
     const id = `structure-${name}`;
     const caption = Object.assign(document.createElement('label'), { htmlFor: id, textContent: label });
@@ -39,6 +56,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     }
     Object.assign(input, { id, name, required });
     wrap.append(caption, input);
+    if (hint) wrap.append(Object.assign(document.createElement('small'), { className: 'hint', textContent: hint }));
     form.append(wrap);
   }
 
@@ -124,28 +142,39 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
   function mount(view) {
     const body = document.querySelector('#detail-body');
     if (!body || view.minuteText !== undefined || view.labelId) return;
+    // D02-A: one discreet main action; the rest live in a "⋯" menu (same on desktop and mobile).
     const bar = Object.assign(document.createElement('div'), { className: 'structure-actions' });
-    const button = (text, handler, danger = false) => {
+    const more = Object.assign(document.createElement('details'), { className: 'structure-more' });
+    const menu = document.createElement('div');
+    more.append(Object.assign(document.createElement('summary'), { textContent: '⋯', title: 'Más acciones' }), menu);
+    more.querySelector('summary').setAttribute('aria-label', 'Más acciones');
+    const button = (text, handler, danger = false, primary = false) => {
       const b = Object.assign(document.createElement('button'), { type: 'button', textContent: text });
       if (danger) b.className = 'danger';
-      b.addEventListener('click', handler);
-      bar.append(b);
+      b.addEventListener('click', () => { more.open = false; handler(); });
+      (primary ? bar : menu).append(b);
     };
     if (view.taskId) {
       const task = taskById(view.taskId);
       if (!task) return;
-      // D04: the same structured fields as creation; only changed ones are sent.
+      // D04 + D06-A: separate fields; only changed ones are sent. The log is append-only (Registrar),
+      // so the form never rewrites the whole description. D05: the date sent is the native one.
       const known = value => (value && !/^por confirmar$/i.test(String(value).trim()) ? String(value) : '');
-      const original = { owner: known(task.owner), dependency: known(task.dependency), criterion: known(task.criterion) };
-      button('Editar tarea', () => open('task.update', [
+      const parts = descriptionParts(task.description);
+      const original = { owner: known(task.owner), dependency: known(task.dependency), criterion: known(task.criterion),
+        dueDate: /^\d{4}-\d{2}-\d{2}$/.test(task.date || '') ? task.date : '', detail: parts.detail };
+      const logCount = parts.log ? parts.log.split('\n\n').length : 0;
+      button('Editar', () => open('task.update', [
         { name: 'title', label: 'Título', value: task.title, required: true },
         { name: 'owner', label: 'Responsable', value: original.owner, max: 300 },
-        { name: 'dueDate', label: 'Fecha objetivo', type: 'date', value: /^\d{4}-\d{2}-\d{2}$/.test(task.date || '') ? task.date : '' },
+        { name: 'dueDate', label: 'Fecha objetivo', type: 'date', value: original.dueDate },
         { name: 'dependency', label: 'Dependencia', value: original.dependency, max: 300 },
         { name: 'criterion', label: 'Criterio de cierre', value: original.criterion, max: 300 },
-        { name: 'description', label: 'Descripción', type: 'textarea', value: task.description || '' },
-      ], v => clean({ taskId: task.id, title: v.title.trim(), description: v.description, dueDate: v.dueDate,
-        ...Object.fromEntries(['owner', 'dependency', 'criterion'].filter(key => v[key].trim() !== original[key]).map(key => [key, v[key].trim()])) })));
+        { name: 'detail', label: 'Detalle', type: 'textarea', value: original.detail,
+          hint: logCount ? `La bitácora (${logCount} ${logCount === 1 ? 'registro' : 'registros'}) se conserva; para sumar uno usa «+ Agregar registro».` : '' },
+      ], v => clean({ taskId: task.id, title: v.title.trim(),
+        ...Object.fromEntries(['owner', 'dependency', 'criterion', 'dueDate', 'detail']
+          .filter(key => v[key].trim() !== original[key].trim()).map(key => [key, v[key].trim()])) })), false, true);
       if (projects.length > 1) {
         button('Mover a otra línea', () => open('task.move', [
           { name: 'projectId', label: 'Línea de destino', options: ltOptions(task.project_id) },
@@ -164,7 +193,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         { name: 'description', label: 'Descripción', type: 'textarea' },
       ], v => clean({ projectId: project.id, title: v.title.trim(), description: v.description || undefined, dueDate: v.dueDate || undefined,
         owner: v.owner.trim() || undefined, dependency: v.dependency.trim() || undefined, criterion: v.criterion.trim() || undefined,
-        origin: 'form' })));
+        origin: 'form' })), false, true);
       button('Renombrar línea', () => open('lt.rename', [
         { name: 'title', label: 'Nuevo nombre', value: project.title, required: true },
       ], v => ({ projectId: project.id, title: v.title.trim() })));
@@ -172,6 +201,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     } else {
       return;
     }
+    if (menu.childElementCount) bar.append(more);
     body.prepend(bar);
   }
 

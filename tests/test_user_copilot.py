@@ -131,6 +131,11 @@ class ProposalsTest(unittest.TestCase):
         self.assertEqual(proposals[0], {"action": "task.create", "projectId": 8, "title": "Informe", "owner": "Paula",
                                         "dependency": "Finanzas", "criterion": "Enviado", "execute": True})
         self.assertNotIn("execute", proposals[1], "sin marca explícita queda como propuesta con Aplicar")
+        edit = ('x\n```acciones\n[{"action":"task.update","taskId":81,"title":"T","description":"todo el texto",'
+                '"detail":"solo el detalle"}]\n```')
+        self.assertEqual(uc.split_proposals(edit, self.SNAP)[1], [{"action": "task.update", "taskId": 81, "title": "T",
+                                                                   "detail": "solo el detalle"}],
+                         "D06-A: nunca reemplaza la descripción completa")
         self.assertIn('"ejecutar": true', uc.INSTRUCTIONS.replace("'", '"'), "el prompt explica cuándo marcar ejecutar")
 
     def test_sin_bloque_o_json_invalido(self):

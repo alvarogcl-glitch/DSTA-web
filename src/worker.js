@@ -273,7 +273,8 @@ const ACTION_SCHEMAS = {
   // D04/D07: same structured fields as pmo_create_task (owner, target date, dependency, closure
   // criterion) and the origin of the request (form or copilot) for SOURCE/ACTION_KEY.
   "task.create": { required: ["projectId", "title"], optional: ["description", "dueDate", "owner", "dependency", "criterion", "origin"] },
-  "task.update": { required: ["taskId", "title"], optional: ["description", "dueDate", "owner", "dependency", "criterion"] },
+  // D06-A: an edit changes only the detail; metadata has its own fields and the log is append-only.
+  "task.update": { required: ["taskId", "title"], optional: ["detail", "dueDate", "owner", "dependency", "criterion"] },
   "task.move": { required: ["taskId", "projectId"], optional: [] },
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
@@ -282,6 +283,18 @@ const ACTION_SCHEMAS = {
   "task.log": { required: ["taskId", "entry", "entryDate"], optional: ["logKind"] },
 };
 const LOG_KINDS = new Set(["Actualización", "Avance", "Seguimiento", "Nota", "Cierre"]);
+// Same split as tools/structure_actions.split_description: metadata block, detail, trailing log.
+const METADATA_LABELS = new Set(["responsable", "fecha objetivo", "dependencia", "criterio de cierre", "source", "action_key"]);
+const LOG_ENTRY = /^(?:Actualización|Avance|Cierre|Nota|Seguimiento) \d{4}-\d{2}-\d{2}: /;
+function descriptionParts(description) {
+  const paragraphs = String(description || "").replace(/\r/g, "").split("\n\n");
+  const first = paragraphs[0].split("\n").filter(line => line.trim());
+  const meta = first.length && first.every(line => line.includes(":")) &&
+    first.some(line => METADATA_LABELS.has(line.split(":")[0].trim().toLowerCase())) ? paragraphs.shift() : "";
+  let logStart = paragraphs.length;
+  while (logStart > 0 && LOG_ENTRY.test(paragraphs[logStart - 1].trimStart())) logStart -= 1;
+  return { meta, detail: paragraphs.slice(0, logStart).join("\n\n").trim(), log: paragraphs.slice(logStart).join("\n\n") };
+}
 const logLine = job => `${job.logKind || "Actualización"} ${job.entryDate}: ${String(job.entry).trim()}`;
 function validAction(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
@@ -294,6 +307,7 @@ function validAction(body) {
   }
   if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 250)) return false;
   if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 20_000)) return false;
+  if (body.detail !== undefined && (typeof body.detail !== "string" || body.detail.length > 20_000)) return false;
   if (body.dueDate !== undefined && (typeof body.dueDate !== "string" || !/^(\d{4}-\d{2}-\d{2})?$/.test(body.dueDate))) return false;
   for (const key of ["owner", "dependency", "criterion"]) {
     if (body[key] !== undefined && (typeof body[key] !== "string" || body[key].length > 300)) return false;
@@ -320,9 +334,9 @@ function actionResultMatches(job, snapshot, result) {
     case "task.update": {
       const updated = result.taskId === job.taskId ? task(job.taskId) : null;
       return Boolean(updated && updated.title === job.title.trim() &&
-        // With structured fields the bridge edits metadata lines on top of the given description.
-        (job.description === undefined || (job.owner !== undefined || job.dependency !== undefined || job.criterion !== undefined
-          ? String(updated.description || "").includes(job.description.trim().split("\n").pop()) : updated.description === job.description)) &&
+        (job.detail === undefined || descriptionParts(updated.description).detail === job.detail.trim()) &&
+        // D05: the native date rules and the "Fecha objetivo" line follows it.
+        (job.dueDate === undefined || descriptionParts(updated.description).meta.includes(`Fecha objetivo: ${job.dueDate || "Por confirmar"}`)) &&
         ["owner", "dependency", "criterion"].every(key => job[key] === undefined || updated[key] === (job[key].trim() || "Por confirmar")) &&
         (!job.dueDate || updated.date === job.dueDate));
     }

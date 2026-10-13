@@ -44,22 +44,51 @@ const created = await a.evaluate(() => tasks.find(t => t.title === 'Tarea creada
 assert.equal(created.date, '2026-12-15'); step('A crea una tarea con fecha en esa línea');
 
 await openTask(a, 'Tarea creada desde UI');
-await a.click('.structure-actions button:has-text("Editar tarea")');
+await a.click('.structure-actions > button:has-text("Editar")');
+assert.equal(await a.locator('dialog.structure-dialog [name="detail"]').inputValue(), 'Detalle sintético', 'D06: the form shows only the detail');
 await submitDialog(a, { title: 'Tarea editada desde UI' });
-const edited = await a.evaluate(() => tasks.find(t => t.title === 'Tarea editada desde UI'));
-assert.equal(edited.description, 'Detalle sintético', 'editing the title keeps the description'); step('A edita la tarea y se conserva la descripción');
+let edited = await a.evaluate(() => tasks.find(t => t.title === 'Tarea editada desde UI'));
+assert.match(edited.description, /^Responsable: Por confirmar\nFecha objetivo: 2026-12-15\n[\s\S]*\n\nDetalle sintético$/, 'editing the title keeps the description');
+step('A edita el título y la descripción estructurada queda igual');
 
 await openTask(a, 'Tarea editada desde UI');
-await a.click('.structure-actions button:has-text("Mover a otra línea")');
+await a.click('.structure-actions > button:has-text("Editar")');
+await submitDialog(a, { detail: 'Detalle nuevo', dueDate: '2026-12-20', owner: 'Paula' });
+edited = await a.evaluate(() => tasks.find(t => t.title === 'Tarea editada desde UI'));
+assert.equal(edited.date, '2026-12-20');
+assert.match(edited.description, /Fecha objetivo: 2026-12-20/, 'D05: the line follows the native date');
+assert.match(edited.description, /Responsable: Paula/);
+assert.match(edited.description, /SOURCE: DSTA Dashboard Formulario/, 'D06: metadata kept');
+assert.match(edited.description, /\n\nDetalle nuevo$/);
+step('A cambia detalle, fecha y responsable: la línea de fecha coincide y se conservan los metadatos');
+
+const mobile = await a.context().newPage();
+await mobile.setViewportSize({ width: 390, height: 844 });
+await mobile.goto(cfg.base + '/');
+await mobile.waitForFunction(() => typeof projects !== 'undefined' && projects.length > 0, null, { timeout: 30000 });
+await mobile.evaluate(t => showInspection(taskView(tasks.find(x => x.title === t))), 'Tarea editada desde UI');
+await mobile.click('.structure-more summary');
+const box = await mobile.locator('.structure-more > div').boundingBox();
+assert.ok(box && box.x >= 0 && box.x + box.width <= 390, 'D02: the ⋯ menu fits on a phone');
+if (process.env.SHOT_DIR) await mobile.screenshot({ path: `${process.env.SHOT_DIR}/e03-mobile.png` });
+await mobile.close();
+step('D02: acciones secundarias en el menú ⋯, visible completo en móvil');
+
+await openTask(a, 'Tarea editada desde UI');
+if (process.env.SHOT_DIR) { await a.click('.structure-more summary'); await a.screenshot({ path: `${process.env.SHOT_DIR}/e03-desktop.png` }); await a.click('.structure-more summary'); }
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Mover a otra línea")');
 await submitDialog(a, { projectId: cfg.A.lt });
 assert.equal(await a.evaluate(n => tasks.find(t => t.title === 'Tarea editada desde UI').project, cfg.A.lt), cfg.A.lt); step('A mueve la tarea a otra línea');
 
 await openProject(a, 'LT creada desde UI');
-await a.click('.structure-actions button:has-text("Renombrar línea")');
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Renombrar línea")');
 await submitDialog(a, { title: 'LT renombrada desde UI' });
 await openProject(a, 'LT renombrada desde UI');
 a.on('dialog', d => d.accept());
-await a.click('.structure-actions button:has-text("Archivar línea")');
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Archivar línea")');
 await submitDialog(a, {});
 assert.ok(!(await a.evaluate(() => projects.some(p => p.title.startsWith('LT renombrada'))))); step('A renombra y archiva la línea');
 

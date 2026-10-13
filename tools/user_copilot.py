@@ -41,7 +41,8 @@ INSTRUCTIONS = (
     '{"action":"task.create","projectId":<LT>,"title":"...","owner":"responsable","dueDate":"AAAA-MM-DD",'
     '"dependency":"...","criterion":"criterio de cierre","description":"..."}, '
     '{"action":"task.update","taskId":<id>,"title":"...","owner":"...","dueDate":"AAAA-MM-DD",'
-    '"dependency":"...","criterion":"...","description":"..."}, '
+    '"dependency":"...","criterion":"...","detail":"nuevo texto del detalle, sin metadatos ni bitácora"} '
+    '(la bitácora no se edita ni se borra), '
     '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, '
     '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
     '{"action":"lt.archive","projectId":<LT>}. Omite los campos que no sepas. Pedido explícito, por ejemplo: '
@@ -89,7 +90,8 @@ PROPOSALS_BLOCK = re.compile(r"```acciones\s*(.*?)```", re.DOTALL)
 SCHEMAS = {
     "complete": (("taskId",), ()),
     "task.create": (("projectId", "title"), ("description", "dueDate", "owner", "dependency", "criterion")),
-    "task.update": (("taskId", "title"), ("description", "dueDate", "owner", "dependency", "criterion")),
+    # D06-A: an edit replaces only the detail; metadata goes in its fields and the log is append-only.
+    "task.update": (("taskId", "title"), ("detail", "dueDate", "owner", "dependency", "criterion")),
     "task.move": (("taskId", "projectId"), ()),
     "lt.create": (("title",), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
 }
@@ -113,7 +115,7 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
         return None
     if "title" in clean and (not isinstance(clean["title"], str) or not clean["title"].strip() or len(clean["title"].strip()) > 250):
         return None
-    if "description" in clean and (not isinstance(clean["description"], str) or len(clean["description"]) > 20_000):
+    if any(k in clean and (not isinstance(clean[k], str) or len(clean[k]) > 20_000) for k in ("description", "detail")):
         return None
     if "dueDate" in clean and (not isinstance(clean["dueDate"], str) or not DATE.match(clean["dueDate"])):
         return None

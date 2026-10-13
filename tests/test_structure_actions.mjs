@@ -41,7 +41,7 @@ const env = environment();
 await call(env, 'POST', '/api/bridge/snapshot', { ...base, timestamp: later(0) }, 'Bearer bridge');
 const valid = [
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'Nueva tarea', description: 'detalle', dueDate: '2026-11-01' },
-  { action: 'task.update', requestId: uuid(), taskId: 15, title: 'Renombrada', description: 'nuevo', dueDate: '' },
+  { action: 'task.update', requestId: uuid(), taskId: 15, title: 'Renombrada', detail: 'nuevo', dueDate: '' },
   { action: 'task.move', requestId: uuid(), taskId: 15, projectId: 4 },
   { action: 'lt.create', requestId: uuid(), title: 'LT nueva' },
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
@@ -55,6 +55,7 @@ const invalid = [
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'x'.repeat(251) },
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'ok', dueDate: '01-11-2026' },
   { action: 'task.update', requestId: uuid(), taskId: 15 },
+  { action: 'task.update', requestId: uuid(), taskId: 15, title: 'x', description: 'D06: la descripción completa ya no se reemplaza' },
   { action: 'task.update', requestId: uuid(), taskId: 15, title: 'ok', done: true },
   { action: 'task.move', requestId: uuid(), taskId: 15, projectId: '4' },
   { action: 'lt.create', requestId: uuid(), title: 'ok', parentProjectId: 99 },
@@ -82,7 +83,7 @@ for (const body of [
 // 3. Each valid action is queued, delivered with its fields, and completed only with proof.
 const proofs = {
   'task.create': [{ taskId: 16 }, (s, body) => ({ ...s, tasks: [...s.tasks, { id: 16, title: body.title, project_id: 3, done: false, description: 'detalle', date: '2026-11-01' }] })],
-  'task.update': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], title: 'Renombrada', description: 'nuevo', date: '' }] })],
+  'task.update': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], title: 'Renombrada', description: 'Fecha objetivo: Por confirmar\n\nnuevo', date: '' }] })],
   'task.move': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], project_id: 4 }] })],
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
   'lt.rename': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2 renombrada' }] })],

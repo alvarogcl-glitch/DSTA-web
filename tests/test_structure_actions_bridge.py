@@ -100,6 +100,32 @@ class StructureActionsTest(unittest.TestCase):
         self.assertIn("Fecha objetivo: 2026-10-01", description, "campos no enviados no cambian")
         self.assertTrue(description.endswith("Detalle\n\nAvance 2026-10-02: hito"), "bitácora intacta")
 
+    def test_editar_detalle_no_toca_metadatos_ni_bitacora(self):
+        """D06-A: only the detail is editable; the log is append-only."""
+        self.vk.tasks[100]["description"] = ("Responsable: Ana\nFecha objetivo: 2026-10-01\nSOURCE: DSTA Dashboard Formulario\n\n"
+                                             "Detalle viejo\n\nsegundo párrafo\n\nAvance 2026-10-02: hito\n\nNota 2026-10-03: ojo")
+        self.run_action({"action": "task.update", "taskId": 100, "sourceProjectId": 8, "title": "Tarea",
+                         "detail": "Detalle nuevo", "owner": "Paula"})
+        self.assertEqual(self.vk.tasks[100]["description"],
+                         "Responsable: Paula\nFecha objetivo: 2026-10-01\nSOURCE: DSTA Dashboard Formulario\n\n"
+                         "Detalle nuevo\n\nAvance 2026-10-02: hito\n\nNota 2026-10-03: ojo")
+        # Emptying the detail keeps metadata and log; plain old descriptions are all detail.
+        self.run_action({"action": "task.update", "taskId": 100, "sourceProjectId": 8, "title": "Tarea", "detail": "", "id": "req-2"})
+        self.assertEqual(self.vk.tasks[100]["description"],
+                         "Responsable: Paula\nFecha objetivo: 2026-10-01\nSOURCE: DSTA Dashboard Formulario\n\n"
+                         "Avance 2026-10-02: hito\n\nNota 2026-10-03: ojo")
+        self.assertEqual(sa.split_description("Texto libre: con dos puntos\n\nmás"), ("", "Texto libre: con dos puntos\n\nmás", ""))
+
+    def test_fecha_nativa_manda_y_la_linea_la_sigue(self):
+        """D05: changing or removing the date keeps due_date and "Fecha objetivo" consistent."""
+        self.vk.tasks[100]["description"] = "Responsable: Ana\nFecha objetivo: 2026-10-20\n\nDetalle"
+        self.run_action({"action": "task.update", "taskId": 100, "sourceProjectId": 8, "title": "Tarea", "dueDate": "2026-10-30"})
+        self.assertTrue(self.vk.tasks[100]["due_date"].startswith("2026-10-30T12:00"), "mediodía UTC: mismo día en Santiago")
+        self.assertEqual(self.vk.tasks[100]["description"], "Responsable: Ana\nFecha objetivo: 2026-10-30\n\nDetalle")
+        self.run_action({"action": "task.update", "taskId": 100, "sourceProjectId": 8, "title": "Tarea", "dueDate": "", "id": "req-2"})
+        self.assertTrue(self.vk.tasks[100]["due_date"].startswith("0001-01-01"))
+        self.assertIn("Fecha objetivo: Por confirmar", self.vk.tasks[100]["description"])
+
     def test_crear_es_idempotente_ante_reintentos(self):
         first = self.run_action({"action": "task.create", "projectId": 8, "title": "Una vez"})
         second = self.run_action({"action": "task.create", "projectId": 8, "title": "Una vez"})

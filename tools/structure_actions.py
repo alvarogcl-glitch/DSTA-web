@@ -86,6 +86,30 @@ def structured_description(job: dict) -> str:
     return f"{metadata}\n\n{detail}" if detail else metadata
 
 
+METADATA_LABELS = {label.lower() for _, label in STRUCTURED_FIELDS} | {"source", "action_key"}
+LOG_ENTRY = re.compile(r"^(?:%s) \d{4}-\d{2}-\d{2}: " % "|".join(sorted(LOG_KINDS)))
+
+
+def split_description(description: str) -> tuple[str, str, str]:
+    """D06: (metadata block, editable detail, append-only log) of a structured description."""
+    paragraphs = [p for p in str(description or "").replace("\r", "").split("\n\n")]
+    meta = ""
+    first = [line for line in paragraphs[0].split("\n") if line.strip()] if paragraphs else []
+    if first and all(":" in line for line in first) and any(line.split(":", 1)[0].strip().lower() in METADATA_LABELS for line in first):
+        meta = paragraphs.pop(0)
+    log_start = len(paragraphs)
+    while log_start > 0 and LOG_ENTRY.match(paragraphs[log_start - 1].lstrip()):
+        log_start -= 1
+    detail = "\n\n".join(paragraphs[:log_start]).strip()
+    return meta, detail, "\n\n".join(paragraphs[log_start:])
+
+
+def replace_detail(description: str, detail: str) -> str:
+    """Change only the detail; metadata and log stay exactly as they were."""
+    meta, _, log = split_description(description)
+    return "\n\n".join(part for part in (meta, str(detail or "").strip(), log) if part)
+
+
 def set_metadata(description: str, label: str, value: str) -> str:
     """Replace 'label: …' in the metadata block (or add it there), keeping everything else."""
     lines = description.replace("\r", "").split("\n")
@@ -181,12 +205,12 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
             payload = {field: current[field] for field in TASK_FIELDS}
             if action == "task.update":
                 payload["title"] = title
-                if job.get("description") is not None:
-                    payload["description"] = job["description"]
+                if job.get("detail") is not None:
+                    payload["description"] = replace_detail(str(payload.get("description") or ""), job["detail"])
                 if job.get("dueDate") is not None:
                     payload["due_date"] = _due(job["dueDate"])
                 for name, label in STRUCTURED_FIELDS:
-                    if name != "dueDate" and job.get(name) is not None:
+                    if job.get(name) is not None:  # D05: "Fecha objetivo" follows the native date
                         payload["description"] = set_metadata(str(payload.get("description") or ""), label, job[name])
             else:
                 _work_line(request, job["projectId"])
