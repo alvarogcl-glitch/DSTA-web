@@ -32,6 +32,10 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D02 | decidido | Telegram 13-10 22:05: «D02: A». | Controles discretos en el inspector: una acción principal visible («Editar» o «+ Nueva tarea») y el resto en un menú «⋯», igual en escritorio y móvil. No se pusieron botones en las tarjetas de LT porque la pulsación larga ya las selecciona para la minuta. | Por decidir (producción no tiene estos controles). | Ninguno. | Entrega E03. |
 | D05 | decidido | Telegram 13-10 22:06: «Ok», tras pedir más información (ejemplo del 20-10 → 30-10). | La fecha nativa de Vikunja (due_date) manda. La línea «Fecha objetivo» se reescribe con ella en cada cambio, y al quitar la fecha queda «Por confirmar». Las tareas antiguas que solo tienen la línea se siguen leyendo. Se guarda a las 12:00 UTC, así que es el mismo día en Santiago. | Igual al converger. | Ninguno. | Entrega E03. |
 | D08 · D09 · D10 · D11 · D12 | decidido (cubiertos) | Telegram 13-10 22:27: «Ok» a marcarlos resueltos por E02/E03. | Título, responsable, dependencia y criterio de cierre tienen campo propio en el formulario y en el copiloto (que ejecuta si el pedido es explícito). Mover está en el menú «⋯» y en el copiloto. Cada cambio conserva ID, etiquetas, fechas y bitácora (pruebas de E02/E03). | Igual al converger. | Ninguno. | Entregas E02 y E03. |
+| D13 | decidido (sin cambios) | Telegram 13-10 22:35: «Si» a la propuesta D13–D16. | Botón ✓ sin IA, y el copiloto completa cuando el pedido es explícito (D03). | Igual. | Ninguno. | Ya cubierto por E02. |
+| D14 | decidido | Mismo «Si». | «Reabrir tarea» en el menú «⋯» de las tareas completadas, sin confirmación porque es reversible; el copiloto reabre cuando el pedido es explícito. Solo cambia done; los demás campos se conservan. | Igual al converger (hoy, solo copiloto vía pmo_update_task). | Ninguno. | Entrega E04. |
+| D15 | decidido (fuera de alcance) | Mismo «Si». Evidencia: 0 de 164 tareas de producción usan prioridad (lectura 13-10). | Prioridad no se expone. | Igual. | Ninguno. | Reabrir si el CEO la empieza a usar. |
+| D16 | decidido | Mismo «Si». Evidencia: 4 de 164 tareas tienen comentarios; el dashboard no los muestra. | Solo bitácora (task.log). El copiloto del piloto no tiene comentarios. | Al converger, el copiloto de producción deja de usar pmo_add_comment y registra en la bitácora. Requiere autorización de despliegue a producción. Los comentarios existentes se conservan en Vikunja. | Ninguno. | Pendiente para el corte a producción. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -108,6 +112,22 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 - Versiones: Worker staging 4903d603-d00c-4f19-bead-d43248421be4; puente multiusuario reiniciado con e188492.
 - Rollback: revertir e188492, redeploy de staging y reiniciar el puente.
 - Pendiente: prueba del CEO, que consiste en editar una tarea con bitácora y cambiarle la fecha.
+
+### Entrega E04 · D14: reabrir tareas completadas
+
+- Decisión: D14. Autorización: Telegram 13-10 22:35, «Si».
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: b71dcf3 → e892a3c (rama feat/multiusuario).
+- Cambios:
+  - Nueva acción `task.reopen` con esquema propio en el Worker. La verificación exige done=false en el snapshot.
+  - El puente hace un POST completo con done=false y conserva todos los campos.
+  - El copiloto solo propone reabrir tareas que estén completadas.
+  - La interfaz muestra «Reabrir tarea» en el menú «⋯» con el estado en línea, sin diálogo.
+- Pruebas:
+  - `npm test`: 163 Python OK, más todas las suites JS.
+  - Navegador en laboratorio local con usuarios sintéticos: 10 de 10. Incluye completar con ✓ y luego reabrir, conservando el responsable.
+- Versiones: Worker staging 57ec91a8-272a-431d-9bf8-ec07d381edbf; puente reiniciado con e892a3c.
+- Rollback: revertir e892a3c, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 

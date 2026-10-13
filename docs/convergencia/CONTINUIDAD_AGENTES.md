@@ -12,7 +12,8 @@ Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) llev
 - D01 decidida (mix A + B).
 - D03 y D04/D07 decididas e implementadas en el piloto: Entrega E02, commit 3d37438, staging 99149651. Falta la prueba del CEO.
 - D02, D05 y D06 decididas e implementadas en el piloto: Entrega E03, commit e188492, staging 4903d603. Falta la prueba del CEO.
-- Siguiente: presentar las decisiones siguientes de la matriz (D08 en adelante).
+- D08–D16 decididas (D14 implementada en E04, staging 57ec91a8). D16 requiere un cambio en producción al converger.
+- Siguiente: presentar D17 en adelante de la matriz.
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.
