@@ -56,11 +56,11 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [~] F4.3 Probado contra un Granola sintético (`tests/fake_granola.py`): 2 tests de la VM, 3 del puente, el bloque 15 del Worker y el E2E en navegador 7/7 (`e2e_granola_lab.py`). **Pendiente:** la prueba con Granola real, que requiere una cuenta de prueba y que Granola acepte el redirect en workers.dev (decisión del CEO).
 
 ### F5 · Copilot por usuario
-- [ ] F5.1 Hermes con home dedicado, `--ignore-rules`, sin memoria del CEO y sin fallback Ollama.
-- [ ] F5.2 Claude CLI respaldo con config dedicada.
-- [ ] F5.3 MCP por job que falla cerrado (nunca el token del CEO para otro usuario).
-- [ ] F5.4 `llm_profile` por usuario (preparado para su LLM futuro).
-- [ ] F5.5 Pruebas canario: token del CEO y memoria del CEO ausentes; pregunta cruzada → "no encontrado".
+- [x] F5.1 Hermes con `--ignore-rules --ignore-user-config` y solo el toolset `todo`: sin SOUL ni memoria del CEO, sin MCP (por lo tanto sin su token de Vikunja), sin `fallback_providers` (nunca Ollama) y sin terminal, archivos ni cronjob. La sesión del usuario se purga del historial del CEO después de cada respuesta. Se descartó el home dedicado porque compartir el `auth.json` OAuth entre homes arriesga romper el refresh del token del CEO.
+- [x] F5.2 Respaldo Claude con `--tools "" --strict-mcp-config --no-session-persistence` en un directorio vacío por usuario. Verificado en vivo: responde con el contexto del usuario y declara que no tiene herramientas.
+- [x] F5.3 Se resolvió más fuerte que lo planeado: el Copilot multiusuario **no usa MCP**. El puente arma un contexto con el snapshot del usuario (leído con SU token y SU raíz) y sus minutas; nada más llega al modelo. Es de solo lectura: propone y la persona aplica los cambios con las acciones F3. **Siguiente incremento (no hecho):** que proponga acciones estructuradas confirmables con un clic.
+- [x] F5.4 Perfil `llm` en el vault de cada usuario. Hoy solo existe `ceo-hermes` (por defecto); cualquier otro proveedor responde "aún no disponible" sin usar las cuentas del CEO. Ese es el punto de enchufe para la API key propia del usuario.
+- [x] F5.5 Canarios en vivo con Hermes real (`tests/e2e_copilot_lab.py`), 6/6: A recibe su tarea y nada de B, B no obtiene nada de A, el Copilot no conoce al CEO ("NO_SE") y no quedan sesiones de usuarios en el Hermes del CEO. La primera corrida detectó que el `session_id` sale por stderr; se corrigió con una purga por usuario, y las 3 sesiones de prueba que habían quedado se borraron. Además hay 7 tests unitarios y 1 de integración en el puente.
 
 ### F6 · Paso a producción (REQUIERE APROBACIÓN DEL CEO)
 - [ ] F6.1 Mapeo del CEO al DO `pmo-dsta`, su token y la raíz 2, sin migrar datos.
@@ -73,3 +73,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:38: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.
 - 2026-10-12 23:42: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
 - 2026-10-12 23:50: **F4 completa con Granola sintético.** La prueba real queda pendiente de una cuenta de prueba.
+- 2026-10-12 23:59: **F5 completa.** Canarios en vivo 6/6 y respaldo Claude verificado en vivo. **Decisión operativa:** el puente de staging no queda corriendo toda la noche, porque sumaría ~10.000 requests/día a la cuenta donde producción ya usa casi todo el plan gratis de Workers y podría tumbarla.

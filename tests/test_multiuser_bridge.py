@@ -92,6 +92,30 @@ class MultiuserBridgeTest(unittest.TestCase):
         self.assertEqual(processed[0]["vikunja_token"], "token-de-B")
 
 
+class CopilotBridgeTest(unittest.TestCase):
+    def test_chat_responde_con_contexto_del_usuario(self):
+        finished, fetched, asked = [], [], []
+
+        class FakeCopilot:
+            def answer(self, actor, user, job, snapshot, minutes):
+                asked.append((actor, user["vikunjaToken"], snapshot, minutes))
+                return f"respuesta para {actor}"
+
+        def fetch_snapshot(user):
+            fetched.append((user["vikunjaToken"], user_context.root_project_id()))
+            return {"projects": [], "tasks": [{"id": 1, "title": f"tarea de {user['vikunjaToken']}"}]}
+
+        worker = FakeWorker({"demo-b": {"chat": 1}}, {("demo-b", "chat"): [{"id": "chat-b", "kind": "chat"}]})
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=worker.request_json,
+                                    process_job=None, finish_job=lambda base, token, job, **kw: finished.append((base, job["id"], kw)),
+                                    users_dir=Path("C:/tmp/x"), copilot=FakeCopilot(), fetch_snapshot=fetch_snapshot)
+        bridge.dispatch_once()
+        self.assertEqual(fetched, [("token-de-B", 22)], "snapshot leído con el token y la raíz de B")
+        self.assertEqual(asked[0][0], "demo-b")
+        self.assertEqual(asked[0][2]["tasks"][0]["title"], "tarea de token-de-B")
+        self.assertEqual(finished, [(f"{BASE}/u/demo-b", "chat-b", {"reply": "respuesta para demo-b"})])
+
+
 class FakeGranolaService:
     def __init__(self):
         self.calls = []

@@ -16,6 +16,7 @@ The env file holds DSTA_DASHBOARD_URL (staging) and DSTA_BRIDGE_TOKEN; nothing i
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
 from pathlib import Path
@@ -36,7 +37,8 @@ GRANOLA_SYNC_SECONDS = 3600
 GRANOLA_FAILED = "No se pudo completar la conexión con Granola. Inténtalo de nuevo."
 COPILOT_PENDING = ("El Copilot multiusuario aún no está habilitado en este entorno (fase F5). "
                    "Tu consulta no fue procesada.")
-INBOX_PENDING = "La bandeja de minutas multiusuario aún no está habilitada (fase F4)."
+INBOX_PENDING = "Las acciones propuestas desde minutas aún no están habilitadas en modo multiusuario."
+SUMMARY_NOT_APPLICABLE = "Los resúmenes automáticos de Cata 1-1 no aplican en modo multiusuario."
 DEFAULT_ENV = Path.home() / "AppData" / "Local" / "dsta-multiuser" / "bridge.env"
 
 
@@ -48,7 +50,7 @@ class MultiuserBridge:
     def __init__(self, base_url: str, token: str, *, load_user: Callable[[str], dict | None],
                  request_json: Callable, process_job: Callable, finish_job: Callable, users_dir: Path,
                  publish_snapshot: Callable | None = None, check_vikunja: Callable | None = None,
-                 granola=None):
+                 granola=None, copilot=None, fetch_snapshot: Callable | None = None, chat_pool=None):
         self.base = base_url.rstrip("/")
         self.token = token
         self.load_user = load_user
@@ -59,6 +61,9 @@ class MultiuserBridge:
         self.publish_snapshot = publish_snapshot
         self.check_vikunja = check_vikunja or (lambda user: (True, "sin verificar"))
         self.granola = granola
+        self.copilot = copilot
+        self.fetch_snapshot = fetch_snapshot
+        self.chat_pool = chat_pool  # None: answer inline (tests, --once)
 
     def user_base(self, actor: str) -> str:
         return f"{self.base}/u/{actor}"
@@ -132,7 +137,31 @@ class MultiuserBridge:
                 self.process_job(job, base, self.token, "", home, "", "", user["vikunjaToken"],
                                  user.get("vikunjaUrl", "http://127.0.0.1:3456"), "", "sonnet")
             return
-        self.finish_job(base, self.token, job, error=COPILOT_PENDING)
+        if job.get("kind") == "chat" and self.copilot:
+            if self.chat_pool:
+                self.chat_pool.submit(self.answer_chat, actor, user, job)
+            else:
+                self.answer_chat(actor, user, job)
+            return
+        self.finish_job(base, self.token, job, error=COPILOT_PENDING if job.get("kind") == "chat" else SUMMARY_NOT_APPLICABLE)
+
+    def answer_chat(self, actor: str, user: dict, job: dict) -> None:
+        """F5: answer with the user's own snapshot and minutes, on the isolated Copilot."""
+        import user_copilot
+        base = self.user_base(actor)
+        try:
+            with using_root(user["rootProjectId"]):
+                snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
+            reply = self.copilot.answer(actor, user, job, snapshot, user_copilot.minutes_for(user))
+            self.finish_job(base, self.token, job, reply=reply)
+        except user_copilot.CopilotUnavailable as error:
+            self.finish_job(base, self.token, job, error=str(error))
+        except Exception as error:
+            log(f"copiloto de {actor[:20]} falló ({type(error).__name__})")
+            try:
+                self.finish_job(base, self.token, job, error="El copiloto no pudo responder. Intenta de nuevo.")
+            except Exception:
+                pass
 
     def _granola_post(self, actor: str, payload: dict) -> None:
         self.request_json(f"{self.user_base(actor)}/api/bridge/granola", token=self.token, method="POST",
@@ -228,10 +257,21 @@ def build(env_file: Path) -> MultiuserBridge:
     import granola_user
     test_origin = hb.setting("DSTA_GRANOLA_TEST_ORIGIN", values) or None
     granola = granola_user.GranolaService(f"{base}/oauth/granola/callback", test_origin=test_origin)
+    import user_copilot
+    hermes_cli = hb.setting("HERMES_CLI", values, str(hb.DEFAULT_HERMES_CLI))
+    claude_cli = hb.setting("DSTA_CLAUDE_CLI", values, str(hb.DEFAULT_CLAUDE_CLI) if hb.DEFAULT_CLAUDE_CLI.exists() else "")
+    copilot = user_copilot.UserCopilot(
+        hermes_cli=hermes_cli, hermes_home=Path(hb.setting("DSTA_COPILOT_HERMES_HOME", values, str(hb.DEFAULT_HERMES_HOME))),
+        claude_cli=claude_cli, work_dir=user_vault.vault_dir().parent / "copilot",
+        provider=hb.setting("DSTA_HERMES_PROVIDER", values, "openai-codex"),
+        model=hb.setting("DSTA_HERMES_MODEL", values, "gpt-6-luna"),
+        claude_model=hb.setting("DSTA_CLAUDE_MODEL", values, "sonnet"))
     return MultiuserBridge(base, token, load_user=user_vault.load, request_json=hb.request_json,
                            process_job=hb.process_job, finish_job=hb.finish_job, users_dir=users_dir,
                            publish_snapshot=hb.publish_snapshot, check_vikunja=vikunja_checker(hb.request_json),
-                           granola=granola)
+                           granola=granola, copilot=copilot, chat_pool=ThreadPoolExecutor(max_workers=2),
+                           fetch_snapshot=lambda user: hb.fetch_dashboard(user.get("vikunjaUrl", "http://127.0.0.1:3456"),
+                                                                          user["vikunjaToken"]))
 
 
 def run(bridge: MultiuserBridge, actors: Callable[[], list[str]], *, once: bool) -> int:

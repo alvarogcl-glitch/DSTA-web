@@ -112,7 +112,15 @@ class GranolaService:
     def sync(self, actor: str) -> list[dict]:
         job = str(uuid.uuid4())
         self.client.sync(actor, job)
-        return self.store.saved.pop(job, [])
+        records = self.store.saved.pop(job, [])
+        # F5 context: the user's recent summaries, kept encrypted in THEIR vault entry.
+        with _lock:
+            data = self.store._get(actor)
+            recent = sorted(records, key=lambda r: str(r.get("date") or ""), reverse=True)[:30]
+            data["minutes"] = [{"title": str(r.get("title") or "")[:200], "date": str(r.get("date") or "")[:10],
+                                "summary": str(r.get("summary") or "")[:1500]} for r in recent]
+            self.store._save(actor, data)
+        return records
 
     def disconnect(self, actor: str) -> None:
         self.store.disconnect(actor)
