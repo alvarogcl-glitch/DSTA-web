@@ -270,8 +270,10 @@ function labelResultMatches(job, snapshot, result) {
 // Each action has a strict schema; "complete" keeps its exact legacy shape.
 const ACTION_SCHEMAS = {
   complete: { required: ["taskId"], optional: [] },
-  "task.create": { required: ["projectId", "title"], optional: ["description", "dueDate"] },
-  "task.update": { required: ["taskId", "title"], optional: ["description", "dueDate"] },
+  // D04/D07: same structured fields as pmo_create_task (owner, target date, dependency, closure
+  // criterion) and the origin of the request (form or copilot) for SOURCE/ACTION_KEY.
+  "task.create": { required: ["projectId", "title"], optional: ["description", "dueDate", "owner", "dependency", "criterion", "origin"] },
+  "task.update": { required: ["taskId", "title"], optional: ["description", "dueDate", "owner", "dependency", "criterion"] },
   "task.move": { required: ["taskId", "projectId"], optional: [] },
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
@@ -293,6 +295,10 @@ function validAction(body) {
   if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 250)) return false;
   if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 20_000)) return false;
   if (body.dueDate !== undefined && (typeof body.dueDate !== "string" || !/^(\d{4}-\d{2}-\d{2})?$/.test(body.dueDate))) return false;
+  for (const key of ["owner", "dependency", "criterion"]) {
+    if (body[key] !== undefined && (typeof body[key] !== "string" || body[key].length > 300)) return false;
+  }
+  if (body.origin !== undefined && !["form", "copilot"].includes(body.origin)) return false;
   if (body.action === "task.log") {
     if (typeof body.entry !== "string" || !body.entry.trim() || body.entry.trim().length > 2500) return false;
     if (typeof body.entryDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.entryDate) ||
@@ -314,7 +320,10 @@ function actionResultMatches(job, snapshot, result) {
     case "task.update": {
       const updated = result.taskId === job.taskId ? task(job.taskId) : null;
       return Boolean(updated && updated.title === job.title.trim() &&
-        (job.description === undefined || updated.description === job.description) &&
+        // With structured fields the bridge edits metadata lines on top of the given description.
+        (job.description === undefined || (job.owner !== undefined || job.dependency !== undefined || job.criterion !== undefined
+          ? String(updated.description || "").includes(job.description.trim().split("\n").pop()) : updated.description === job.description)) &&
+        ["owner", "dependency", "criterion"].every(key => job[key] === undefined || updated[key] === (job[key].trim() || "Por confirmar")) &&
         (!job.dueDate || updated.date === job.dueDate));
     }
     case "task.move": {
@@ -342,8 +351,10 @@ function cleanProposals(proposals) {
     if (!schema) continue;
     const fields = Object.fromEntries([...schema.required, ...schema.optional]
       .filter(key => item[key] !== undefined).map(key => [key, item[key]]));
-    const candidate = { action: item.action, ...fields };
-    if (validAction({ ...candidate, requestId: "00000000-0000-4000-8000-000000000000" })) clean.push(candidate);
+    const candidate = { action: item.action, ...fields, ...(item.action === "task.create" ? { origin: "copilot" } : {}) };
+    if (validAction({ ...candidate, requestId: "00000000-0000-4000-8000-000000000000" })) {
+      clean.push(item.execute === true ? { ...candidate, execute: true } : candidate);
+    }
     if (clean.length === 5) break;
   }
   return clean;
@@ -411,11 +422,24 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
   if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body, box);
   const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes, proposals } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
+  const cleaned = structureEnabled(env) && !error ? cleanProposals(proposals) : [];
+  // D03: what the user asked for explicitly runs by itself through the same verified queue as the
+  // buttons. The request id derives from the chat job, so a repeated completion cannot duplicate it.
+  if (ACTION_UUID.test(id)) {
+    for (const [index, proposal] of cleaned.entries()) {
+      if (!proposal.execute) continue;
+      const { execute, ...action } = proposal;
+      const requestId = id.slice(0, 34) + index.toString(16).padStart(2, "0");
+      const response = await forwardToChatObject(env, "/actions/create", { ...action, requestId }, box);
+      if (response.status === 202) proposal.requestId = requestId;
+      else proposal.executeError = String((await response.json().catch(() => ({}))).error || "No se pudo aplicar.").slice(0, 200);
+    }
+  }
   const chatResponse = await chatStub(env, box).fetch(new Request("https://chat.internal/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes),
-      proposals: structureEnabled(env) ? cleanProposals(proposals) : [] }),
+      proposals: cleaned }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const done = await chatStub(env, box).completeSummaryJob(id, Boolean(error), summaries);

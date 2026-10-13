@@ -144,7 +144,8 @@
   viewer.querySelector('#dsta-minute-close').addEventListener('click', () => { viewer.hidden = true; });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !viewer.hidden) viewer.hidden = true; });
 
-  // Copilot proposals (multiuser): each one is applied only when the user clicks, through the
+  // Copilot proposals (multiuser): suggestions are applied when the user clicks; explicit requests
+  // (D03) were queued by the Worker. Both go through the
   // same verified action queue as the dashboard buttons (/api/task-actions).
   const lineName = id => (typeof projects !== 'undefined' && projects.find(p => p.id === id)?.title) || `LT ${id}`;
   const taskName = id => (typeof tasks !== 'undefined' && tasks.find(t => t.id === id)?.title) || `#${id}`;
@@ -169,27 +170,32 @@
     }
     return false;
   }
+  // Follows a queued action until the snapshot confirms it (same proof as the dashboard buttons).
+  async function watchAction(requestId, note) {
+    for (let i = 0; i < 80; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const job = await (await fetch(`/api/task-actions?id=${requestId}`, { cache: 'no-store' })).json();
+      if (job.status === 'completed') {
+        note.textContent = 'Actualizando el dashboard…';
+        const shown = await refreshUntil(job.snapshotTimestamp || '');
+        note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
+        return;
+      }
+      if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
+    }
+    note.textContent = 'Sigue en proceso; revisa en unos minutos.';
+  }
   async function applyProposal(proposal, button, note) {
     button.disabled = true;
     note.textContent = 'Aplicando…';
     const requestId = crypto.randomUUID();
+    const { execute, requestId: _executed, executeError, ...action } = proposal;
     try {
       const response = await fetch('/api/task-actions', { method: 'POST', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...proposal, requestId }) });
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...action, requestId }) });
       const queued = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
-      for (let i = 0; i < 80; i += 1) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const job = await (await fetch(`/api/task-actions?id=${requestId}`, { cache: 'no-store' })).json();
-        if (job.status === 'completed') {
-          note.textContent = 'Actualizando el dashboard…';
-          const shown = await refreshUntil(job.snapshotTimestamp || '');
-          note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
-          return;
-        }
-        if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
-      }
-      note.textContent = 'Sigue en proceso; revisa en unos minutos.';
+      await watchAction(requestId, note);
     } catch (error) {
       note.textContent = error.message;
       button.disabled = false;
@@ -208,6 +214,19 @@
       const label = Object.assign(document.createElement('span'), { textContent: describeProposal(proposal) });
       const note = Object.assign(document.createElement('small'), { className: 'muted' });
       button.addEventListener('click', () => void applyProposal(proposal, button, note));
+      // D03: what was asked explicitly already runs by itself; "Aplicar" only reappears to retry.
+      if (proposal.requestId) {
+        button.hidden = true;
+        note.textContent = 'Ejecutando…';
+        watchAction(proposal.requestId, note).catch(error => {
+          note.textContent = `${error.message} Puedes reintentar.`;
+          button.textContent = 'Reintentar';
+          button.hidden = false;
+        });
+      } else if (proposal.executeError) {
+        note.textContent = `No se ejecutó: ${proposal.executeError}`;
+        button.textContent = 'Reintentar';
+      }
       row.append(button, label, note);
       box.append(row);
     }

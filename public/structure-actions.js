@@ -134,11 +134,18 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     if (view.taskId) {
       const task = taskById(view.taskId);
       if (!task) return;
+      // D04: the same structured fields as creation; only changed ones are sent.
+      const known = value => (value && !/^por confirmar$/i.test(String(value).trim()) ? String(value) : '');
+      const original = { owner: known(task.owner), dependency: known(task.dependency), criterion: known(task.criterion) };
       button('Editar tarea', () => open('task.update', [
         { name: 'title', label: 'Título', value: task.title, required: true },
-        { name: 'description', label: 'Descripción', type: 'textarea', value: task.description || '' },
+        { name: 'owner', label: 'Responsable', value: original.owner, max: 300 },
         { name: 'dueDate', label: 'Fecha objetivo', type: 'date', value: /^\d{4}-\d{2}-\d{2}$/.test(task.date || '') ? task.date : '' },
-      ], v => clean({ taskId: task.id, title: v.title.trim(), description: v.description, dueDate: v.dueDate })));
+        { name: 'dependency', label: 'Dependencia', value: original.dependency, max: 300 },
+        { name: 'criterion', label: 'Criterio de cierre', value: original.criterion, max: 300 },
+        { name: 'description', label: 'Descripción', type: 'textarea', value: task.description || '' },
+      ], v => clean({ taskId: task.id, title: v.title.trim(), description: v.description, dueDate: v.dueDate,
+        ...Object.fromEntries(['owner', 'dependency', 'criterion'].filter(key => v[key].trim() !== original[key]).map(key => [key, v[key].trim()])) })));
       if (projects.length > 1) {
         button('Mover a otra línea', () => open('task.move', [
           { name: 'projectId', label: 'Línea de destino', options: ltOptions(task.project_id) },
@@ -147,11 +154,17 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     } else if (view.projectId) {
       const project = byId(view.projectId);
       if (!project) return;
+      // D04/D07: same fields as the copilot's creation tool; the origin goes to SOURCE/ACTION_KEY.
       button('+ Nueva tarea', () => open('task.create', [
         { name: 'title', label: 'Título', required: true },
-        { name: 'description', label: 'Descripción', type: 'textarea' },
+        { name: 'owner', label: 'Responsable', max: 300 },
         { name: 'dueDate', label: 'Fecha objetivo', type: 'date' },
-      ], v => clean({ projectId: project.id, title: v.title.trim(), description: v.description || undefined, dueDate: v.dueDate || undefined })));
+        { name: 'dependency', label: 'Dependencia', max: 300 },
+        { name: 'criterion', label: 'Criterio de cierre', max: 300 },
+        { name: 'description', label: 'Descripción', type: 'textarea' },
+      ], v => clean({ projectId: project.id, title: v.title.trim(), description: v.description || undefined, dueDate: v.dueDate || undefined,
+        owner: v.owner.trim() || undefined, dependency: v.dependency.trim() || undefined, criterion: v.criterion.trim() || undefined,
+        origin: 'form' })));
       button('Renombrar línea', () => open('lt.rename', [
         { name: 'title', label: 'Nuevo nombre', value: project.title, required: true },
       ], v => ({ projectId: project.id, title: v.title.trim() })));

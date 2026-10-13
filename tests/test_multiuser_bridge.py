@@ -196,6 +196,32 @@ class SummaryBridgeTest(unittest.TestCase):
             {"id": 7, "summary": "Resumen", "nextAction": "Firmar", "attention": "normal"}]})], "solo ids pedidos")
 
 
+class ExecuteProposalsBridgeTest(unittest.TestCase):
+    def test_propuestas_ejecutadas_se_aplican_de_inmediato(self):
+        processed, finished = [], []
+
+        class FakeCopilot:
+            def answer(self, actor, user, job, snapshot, minutes):
+                return 'Hecho.\n```acciones\n[{"action":"task.create","projectId":1,"title":"Nueva","ejecutar":true}]\n```'
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if url.endswith("/api/bridge/dispatch") and method == "GET":
+                return {"now": 1, "pending": {"demo-a": {"chat": 1}}}
+            if "kind=action" in url:
+                return {"job": {"id": "act-1", "kind": "action", "action": "task.create"}} if not processed else {"job": None}
+            if "kind=chat" in url:
+                return {"job": {"id": "chat-1", "kind": "chat", "message": "crea Nueva"}} if not finished else {"job": None}
+            return {"ok": True}
+
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json,
+                                    process_job=lambda job, *a: processed.append(job["id"]),
+                                    finish_job=lambda base, token, job, **kw: finished.append(kw), users_dir=Path("C:/tmp/x"),
+                                    copilot=FakeCopilot(), fetch_snapshot=lambda user: {"projects": [{"id": 1}], "tasks": []})
+        bridge.dispatch_once()
+        self.assertEqual(finished[0]["proposals"][0]["execute"], True)
+        self.assertEqual(processed, ["act-1"], "the queued action is executed without waiting for the next dispatch")
+
+
 class FakeGranolaService:
     def __init__(self):
         self.calls = []

@@ -47,6 +47,7 @@ const valid = [
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
   { action: 'lt.archive', requestId: uuid(), projectId: 4 },
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'Avance con el proveedor', entryDate: '2026-10-13', logKind: 'Avance' },
+  { action: 'task.create', requestId: uuid(), projectId: 3, title: 'Con estructura', owner: 'Paula', dependency: 'Finanzas', criterion: 'Enviado', origin: 'form' },
 ];
 const invalid = [
   { action: 'task.create', requestId: uuid(), projectId: 3 },
@@ -64,6 +65,8 @@ const invalid = [
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'ok', entryDate: '13-10-2026' },
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'ok', entryDate: '2026-10-13', logKind: 'Chisme' },
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'x'.repeat(2501), entryDate: '2026-10-13' },
+  { action: 'task.create', requestId: uuid(), projectId: 3, title: 'ok', owner: 'x'.repeat(301) },
+  { action: 'task.create', requestId: uuid(), projectId: 3, title: 'ok', origin: 'hacker' },
 ];
 for (const body of invalid) assert.equal((await call(env, 'POST', '/api/task-actions', body)).status, 400, JSON.stringify(body).slice(0, 80));
 
@@ -78,7 +81,7 @@ for (const body of [
 
 // 3. Each valid action is queued, delivered with its fields, and completed only with proof.
 const proofs = {
-  'task.create': [{ taskId: 16 }, s => ({ ...s, tasks: [...s.tasks, { id: 16, title: 'Nueva tarea', project_id: 3, done: false, description: 'detalle', date: '2026-11-01' }] })],
+  'task.create': [{ taskId: 16 }, (s, body) => ({ ...s, tasks: [...s.tasks, { id: 16, title: body.title, project_id: 3, done: false, description: 'detalle', date: '2026-11-01' }] })],
   'task.update': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], title: 'Renombrada', description: 'nuevo', date: '' }] })],
   'task.move': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], project_id: 4 }] })],
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
@@ -98,7 +101,7 @@ for (const body of valid) {
   const [result, transform] = proofs[body.action];
   const unchanged = { ...base, timestamp: later(50), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
   assert.equal((await call(e, 'POST', '/api/bridge/snapshot', unchanged, 'Bearer bridge')).status, 409, `${body.action}: unchanged snapshot is no proof`);
-  const proof = { ...transform(base), timestamp: later(100), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
+  const proof = { ...transform(base, body), timestamp: later(100), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
   assert.equal((await call(e, 'POST', '/api/bridge/snapshot', proof, 'Bearer bridge')).status, 202, `${body.action}: proof accepted`);
   const done = await call(e, 'POST', '/api/bridge/complete', { kind: 'action', id: job.id, attempt: job.attempt, snapshotTimestamp: proof.timestamp }, 'Bearer bridge');
   assert.equal(done.body.status, 'completed', body.action);

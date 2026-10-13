@@ -71,6 +71,40 @@ def _task(request: Callable, task_id: int, project_id: int) -> dict:
     return task
 
 
+STRUCTURED_FIELDS = (("owner", "Responsable"), ("dueDate", "Fecha objetivo"), ("dependency", "Dependencia"),
+                     ("criterion", "Criterio de cierre"))
+SOURCES = {"form": ("DSTA Dashboard Formulario", "FORM"), "copilot": ("DSTA Dashboard Copilot", "COPILOT")}
+
+
+def structured_description(job: dict) -> str:
+    """Same layout as vikunja_dashboard_mcp.structured_task_description (production creation)."""
+    source, key = SOURCES.get(job.get("origin"), ("DSTA Dashboard", "DASHBOARD"))
+    fields = [(label, str(job.get(name) or "").strip()) for name, label in STRUCTURED_FIELDS]
+    fields += [("SOURCE", source), ("ACTION_KEY", f"DSTA-{key}-{job['id']}")]
+    metadata = "\n".join(f"{label}: {value or 'Por confirmar'}" for label, value in fields)
+    detail = str(job.get("description") or "").strip()
+    return f"{metadata}\n\n{detail}" if detail else metadata
+
+
+def set_metadata(description: str, label: str, value: str) -> str:
+    """Replace 'label: …' in the metadata block (or add it there), keeping everything else."""
+    lines = description.replace("\r", "").split("\n")
+    value = value.strip() or "Por confirmar"
+    for index, line in enumerate(lines):
+        if not line.strip():
+            break
+        if line.lower().startswith(label.lower() + ":"):
+            lines[index] = f"{label}: {value}"
+            return "\n".join(lines)
+    head = 0
+    while head < len(lines) and lines[head].strip() and ":" in lines[head]:
+        head += 1
+    if head == 0:
+        return f"{label}: {value}\n\n{description}" if description else f"{label}: {value}"
+    lines.insert(head, f"{label}: {value}")
+    return "\n".join(lines)
+
+
 def _due(value: str) -> str:
     return f"{value}T12:00:00Z" if value else NO_DUE_DATE
 
@@ -97,9 +131,7 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
     if action == "task.create":
         def create() -> dict:
             _work_line(request, job["projectId"])
-            payload = {"title": title}
-            if job.get("description") is not None:
-                payload["description"] = job["description"]
+            payload = {"title": title, "description": structured_description(job)}
             if job.get("dueDate"):
                 payload["due_date"] = _due(job["dueDate"])
             created = request("PUT", f"/api/v1/projects/{job['projectId']}/tasks", payload=payload)
@@ -153,6 +185,9 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
                     payload["description"] = job["description"]
                 if job.get("dueDate") is not None:
                     payload["due_date"] = _due(job["dueDate"])
+                for name, label in STRUCTURED_FIELDS:
+                    if name != "dueDate" and job.get(name) is not None:
+                        payload["description"] = set_metadata(str(payload.get("description") or ""), label, job[name])
             else:
                 _work_line(request, job["projectId"])
                 payload["project_id"] = job["projectId"]

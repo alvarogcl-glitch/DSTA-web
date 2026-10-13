@@ -284,8 +284,27 @@ await call('/u/demo-c/api/bridge/complete', { method: 'POST', headers: bh, body:
 ] } });
 const pstatus = await (await call(`/api/assistant?id=${pjob.id}`, { cookie: c })).json();
 assert.equal(pstatus.status, 'completed');
-assert.deepEqual(pstatus.proposals.slice(0, 2), [{ action: 'task.create', projectId: 3, title: 'Nueva desde copiloto' }, { action: 'complete', taskId: 30 }]);
+assert.deepEqual(pstatus.proposals.slice(0, 2), [{ action: 'task.create', projectId: 3, title: 'Nueva desde copiloto', origin: 'copilot' }, { action: 'complete', taskId: 30 }]);
 assert.equal(pstatus.proposals.length, 5, 'invalid ones dropped, at most 5 kept, requestId never trusted from the model');
+
+// 15c. D03: proposals for an explicit request run by themselves through the verified queue.
+await call('/u/demo-c/api/bridge/snapshot', { method: 'POST', headers: bh,
+  body: { timestamp: new Date().toISOString(), projects: [{ id: 3, title: 'LT C' }], tasks: [{ id: 31, title: 'Existente', project_id: 3, done: false }] } });
+const xjob = await (await call('/api/assistant', { method: 'POST', cookie: c, body: { message: 'crea la tarea Informe en LT C' } })).json();
+await call('/u/demo-c/api/bridge/next', { headers: { authorization: 'Bearer bridge-test' } });
+await call('/u/demo-c/api/bridge/complete', { method: 'POST', headers: bh, body: { id: xjob.id, reply: 'Creando.', proposals: [
+  { action: 'task.create', projectId: 3, title: 'Informe', owner: 'Paula', execute: true },
+  { action: 'complete', taskId: 31 },
+  { action: 'task.create', projectId: 999, title: 'Fuera', execute: true },
+] } });
+const xstatus = await (await call(`/api/assistant?id=${xjob.id}`, { cookie: c })).json();
+assert.equal(xstatus.proposals.length, 3);
+assert.match(xstatus.proposals[0].requestId, /^[0-9a-f-]{36}$/, 'executed proposal carries its action request id');
+assert.equal(xstatus.proposals[1].requestId, undefined, 'not explicit: stays with Aplicar');
+assert.ok(xstatus.proposals[2].executeError, 'an invalid executed proposal reports why and is not queued');
+const queuedAction = (await (await call('/u/demo-c/api/bridge/next?kind=action', { headers: { authorization: 'Bearer bridge-test' } })).json()).job;
+assert.deepEqual([queuedAction.action, queuedAction.title, queuedAction.owner, queuedAction.origin], ['task.create', 'Informe', 'Paula', 'copilot']);
+assert.equal((await (await call(`/api/task-actions?id=${xstatus.proposals[0].requestId}`, { cookie: c })).json()).status, 'running');
 
 // 16. F6 rehearsal: the CEO account maps to the existing production box ("pmo-dsta") with no data
 // migration, sees the legacy data, and today's single-user bridge keeps working unchanged just by

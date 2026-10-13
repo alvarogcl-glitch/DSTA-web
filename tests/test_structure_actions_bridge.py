@@ -66,13 +66,39 @@ class StructureActionsTest(unittest.TestCase):
 
     def run_action(self, job):
         with user_context.using_root(7):
-            return sa.execute({"id": "req-1", "kind": "action", **job}, self.vk, cache_dir=self.cache, server_url="http://lab")
+            return sa.execute({"id": "req-1", "kind": "action", **job} if "id" not in job else {"kind": "action", **job}, self.vk, cache_dir=self.cache, server_url="http://lab")
 
     def test_crear_tarea_en_lt_propia(self):
         result = self.run_action({"action": "task.create", "projectId": 8, "title": " Nueva ", "description": "d", "dueDate": "2026-11-01"})
         task = self.vk.tasks[result["taskId"]]
-        self.assertEqual((task["title"], task["project_id"], task["description"]), ("Nueva", 8, "d"))
+        self.assertEqual((task["title"], task["project_id"]), ("Nueva", 8))
+        self.assertTrue(task["description"].startswith("Responsable: Por confirmar\nFecha objetivo: 2026-11-01"), "D04: formato estructurado")
+        self.assertTrue(task["description"].endswith("\n\nd"))
         self.assertTrue(task["due_date"].startswith("2026-11-01"))
+
+    def test_crear_con_campos_estructurados_como_produccion(self):
+        result = self.run_action({"action": "task.create", "projectId": 8, "title": "Preparar informe de riesgos",
+                                  "description": "Informe para el comité.", "owner": "Paula", "dueDate": "2026-10-20",
+                                  "dependency": "Informe de Finanzas", "criterion": "Informe revisado y enviado", "origin": "form"})
+        description = self.vk.tasks[result["taskId"]]["description"]
+        self.assertEqual(description,
+                         "Responsable: Paula\nFecha objetivo: 2026-10-20\nDependencia: Informe de Finanzas\n"
+                         "Criterio de cierre: Informe revisado y enviado\nSOURCE: DSTA Dashboard Formulario\n"
+                         "ACTION_KEY: DSTA-FORM-req-1\n\nInforme para el comité.")
+        empty = self.run_action({"action": "task.create", "projectId": 8, "title": "Sin datos", "origin": "copilot"} | {"id": "req-9"})
+        self.assertIn("Responsable: Por confirmar\nFecha objetivo: Por confirmar", self.vk.tasks[empty["taskId"]]["description"])
+        self.assertIn("SOURCE: DSTA Dashboard Copilot", self.vk.tasks[empty["taskId"]]["description"])
+
+    def test_editar_campos_estructurados_conserva_bitacora(self):
+        self.vk.tasks[100]["description"] = ("Responsable: Por confirmar\nFecha objetivo: 2026-10-01\nDependencia: Por confirmar\n"
+                                             "Criterio de cierre: Por confirmar\n\nDetalle\n\nAvance 2026-10-02: hito")
+        self.run_action({"action": "task.update", "taskId": 100, "sourceProjectId": 8, "title": "Tarea",
+                         "owner": "José", "dependency": "Legal"})
+        description = self.vk.tasks[100]["description"]
+        self.assertIn("Responsable: José", description)
+        self.assertIn("Dependencia: Legal", description)
+        self.assertIn("Fecha objetivo: 2026-10-01", description, "campos no enviados no cambian")
+        self.assertTrue(description.endswith("Detalle\n\nAvance 2026-10-02: hito"), "bitácora intacta")
 
     def test_crear_es_idempotente_ante_reintentos(self):
         first = self.run_action({"action": "task.create", "projectId": 8, "title": "Una vez"})

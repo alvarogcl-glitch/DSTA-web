@@ -32,15 +32,20 @@ BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
     "Usa SOLO el contexto de abajo: son sus líneas de trabajo, tareas y minutas. No inventes datos; "
-    "si algo no está en el contexto, dilo. No tienes herramientas para modificar nada: si conviene un "
-    "cambio, propónlo para que la persona lo aplique desde el dashboard (crear, editar, mover o "
-    "completar tareas y líneas). Si propones cambios concretos, al final agrega un bloque\n"
+    "si algo no está en el contexto, dilo. No tienes herramientas para modificar nada: los cambios se "
+    "aplican desde el dashboard (crear, editar, mover o completar tareas y líneas). Si la persona PIDE "
+    "explícitamente un cambio (\"crea…\", \"mueve…\", \"completa…\"), marca ese objeto con \"ejecutar\": true "
+    "y el dashboard lo aplicará por sí solo; lo que sugieras por iniciativa propia va SIN esa marca para "
+    "que la persona decida. Si propones o ejecutas cambios concretos, al final agrega un bloque\n"
     "```acciones\n[{...}]\n```\ncon como máximo 5 objetos JSON, usando SOLO ids del contexto. Formatos: "
-    '{"action":"task.create","projectId":<LT>,"title":"...","description":"...","dueDate":"AAAA-MM-DD"}, '
-    '{"action":"task.update","taskId":<id>,"title":"...","description":"...","dueDate":"AAAA-MM-DD"}, '
+    '{"action":"task.create","projectId":<LT>,"title":"...","owner":"responsable","dueDate":"AAAA-MM-DD",'
+    '"dependency":"...","criterion":"criterio de cierre","description":"..."}, '
+    '{"action":"task.update","taskId":<id>,"title":"...","owner":"...","dueDate":"AAAA-MM-DD",'
+    '"dependency":"...","criterion":"...","description":"..."}, '
     '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, '
     '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
-    '{"action":"lt.archive","projectId":<LT>}. La persona decide si aplicarlos.')
+    '{"action":"lt.archive","projectId":<LT>}. Omite los campos que no sepas. Pedido explícito, por ejemplo: '
+    '{"action":"complete","taskId":<id>,"ejecutar": true}.')
 
 
 class CopilotUnavailable(RuntimeError):
@@ -82,8 +87,10 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
 
 PROPOSALS_BLOCK = re.compile(r"```acciones\s*(.*?)```", re.DOTALL)
 SCHEMAS = {
-    "complete": (("taskId",), ()), "task.create": (("projectId", "title"), ("description", "dueDate")),
-    "task.update": (("taskId", "title"), ("description", "dueDate")), "task.move": (("taskId", "projectId"), ()),
+    "complete": (("taskId",), ()),
+    "task.create": (("projectId", "title"), ("description", "dueDate", "owner", "dependency", "criterion")),
+    "task.update": (("taskId", "title"), ("description", "dueDate", "owner", "dependency", "criterion")),
+    "task.move": (("taskId", "projectId"), ()),
     "lt.create": (("title",), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
 }
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -110,6 +117,11 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
         return None
     if "dueDate" in clean and (not isinstance(clean["dueDate"], str) or not DATE.match(clean["dueDate"])):
         return None
+    if any(k in clean and (not isinstance(clean[k], str) or len(clean[k].strip()) > 300) for k in ("owner", "dependency", "criterion")):
+        return None
+    # D03: an explicit request runs by itself through the verified action queue.
+    if item.get("ejecutar") is True or item.get("execute") is True:
+        clean["execute"] = True
     if clean["action"] == "complete" and tasks[clean["taskId"]].get("done"):
         return None
     if clean["action"] == "task.move" and tasks[clean["taskId"]].get("project_id") == clean["projectId"]:

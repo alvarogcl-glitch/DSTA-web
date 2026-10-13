@@ -124,6 +124,15 @@ class ProposalsTest(unittest.TestCase):
         reply = 'Ok\n```acciones\n[{"action":"task.create","projectId":8,"title":"T","description":"","dueDate":""}]\n```'
         self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.create", "projectId": 8, "title": "T"}])
 
+    def test_pedido_explicito_se_marca_para_ejecutar(self):
+        reply = ('Listo.\n```acciones\n[{"action":"task.create","projectId":8,"title":"Informe","owner":"Paula",'
+                 '"dependency":"Finanzas","criterion":"Enviado","ejecutar":true},{"action":"complete","taskId":81}]\n```')
+        text, proposals = uc.split_proposals(reply, self.SNAP)
+        self.assertEqual(proposals[0], {"action": "task.create", "projectId": 8, "title": "Informe", "owner": "Paula",
+                                        "dependency": "Finanzas", "criterion": "Enviado", "execute": True})
+        self.assertNotIn("execute", proposals[1], "sin marca explícita queda como propuesta con Aplicar")
+        self.assertIn('"ejecutar": true', uc.INSTRUCTIONS.replace("'", '"'), "el prompt explica cuándo marcar ejecutar")
+
     def test_sin_bloque_o_json_invalido(self):
         self.assertEqual(uc.split_proposals("Solo texto.", self.SNAP), ("Solo texto.", []))
         self.assertEqual(uc.split_proposals("Hola\n```acciones\nno es json\n```", self.SNAP), ("Hola", []))

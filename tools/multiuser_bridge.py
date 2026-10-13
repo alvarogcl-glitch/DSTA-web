@@ -186,6 +186,9 @@ class MultiuserBridge:
             reply = self.copilot.answer(actor, user, job, snapshot, user_copilot.minutes_for(user))
             reply, proposals = user_copilot.split_proposals(reply, snapshot)
             self.finish_job(base, self.token, job, reply=reply, **({"proposals": proposals} if proposals else {}))
+            if any(proposal.get("execute") for proposal in proposals):
+                # D03: the Worker queued them as verified actions; apply now, not on the next dispatch.
+                self.drain(actor, user, "action")
         except user_copilot.CopilotUnavailable as error:
             self.finish_job(base, self.token, job, error=str(error))
         except Exception as error:
