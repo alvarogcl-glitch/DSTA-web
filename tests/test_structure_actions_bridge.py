@@ -146,6 +146,16 @@ class StructureActionsTest(unittest.TestCase):
         self.assertEqual(self.vk.tasks[100]["project_id"], 9)
         self.assertEqual(self.vk.tasks[100]["assignees"], [{"id": 9}])
 
+    def test_reabrir_tarea_completada(self):
+        """D14: reopening only flips done; every other field is preserved."""
+        self.vk.tasks[100]["done"] = True
+        self.assertEqual(self.run_action({"action": "task.reopen", "taskId": 100, "sourceProjectId": 8}), {"taskId": 100})
+        task = self.vk.tasks[100]
+        self.assertFalse(task["done"])
+        self.assertEqual((task["title"], task["description"]), ("Tarea", "desc"))
+        for key, value in TASK_EXTRA.items():
+            self.assertEqual(task[key], value, f"{key} preservado")
+
     def test_no_sale_de_la_raiz_del_usuario(self):
         for job in ({"action": "task.move", "taskId": 100, "sourceProjectId": 8, "projectId": 51},
                     {"action": "task.create", "projectId": 51, "title": "x"},

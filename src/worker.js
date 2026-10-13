@@ -276,6 +276,7 @@ const ACTION_SCHEMAS = {
   // D06-A: an edit changes only the detail; metadata has its own fields and the log is append-only.
   "task.update": { required: ["taskId", "title"], optional: ["detail", "dueDate", "owner", "dependency", "criterion"] },
   "task.move": { required: ["taskId", "projectId"], optional: [] },
+  "task.reopen": { required: ["taskId"], optional: [] },
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
   "lt.archive": { required: ["projectId"], optional: [] },
@@ -340,6 +341,7 @@ function actionResultMatches(job, snapshot, result) {
         ["owner", "dependency", "criterion"].every(key => job[key] === undefined || updated[key] === (job[key].trim() || "Por confirmar")) &&
         (!job.dueDate || updated.date === job.dueDate));
     }
+    case "task.reopen": return result.taskId === job.taskId && task(job.taskId)?.done === false;
     case "task.move": {
       const moved = result.taskId === job.taskId ? task(job.taskId) : null;
       return Boolean(moved && moved.project_id === job.projectId);

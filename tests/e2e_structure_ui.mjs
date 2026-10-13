@@ -81,6 +81,17 @@ await a.click('.structure-more button:has-text("Mover a otra línea")');
 await submitDialog(a, { projectId: cfg.A.lt });
 assert.equal(await a.evaluate(n => tasks.find(t => t.title === 'Tarea editada desde UI').project, cfg.A.lt), cfg.A.lt); step('A mueve la tarea a otra línea');
 
+await openTask(a, 'Tarea editada desde UI');
+await a.click('[aria-label="Marcar como completada"]');
+await a.waitForFunction(() => tasks.find(t => t.title === 'Tarea editada desde UI')?.done === true, null, { timeout: 90000 });
+await openTask(a, 'Tarea editada desde UI');
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Reabrir tarea")');
+await a.waitForFunction(() => tasks.find(t => t.title === 'Tarea editada desde UI')?.done === false, null, { timeout: 90000 });
+const reopened = await a.evaluate(() => tasks.find(t => t.title === 'Tarea editada desde UI'));
+assert.equal(reopened.owner, 'Paula', 'D14: reopening keeps the fields');
+step('D14: A completa la tarea y la reabre sin confirmación; conserva sus campos');
+
 await openProject(a, 'LT creada desde UI');
 await a.click('.structure-more summary');
 await a.click('.structure-more button:has-text("Renombrar línea")');

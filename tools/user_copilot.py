@@ -43,7 +43,7 @@ INSTRUCTIONS = (
     '{"action":"task.update","taskId":<id>,"title":"...","owner":"...","dueDate":"AAAA-MM-DD",'
     '"dependency":"...","criterion":"...","detail":"nuevo texto del detalle, sin metadatos ni bitácora"} '
     '(la bitácora no se edita ni se borra), '
-    '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, '
+    '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, {"action":"task.reopen","taskId":<id completada>}, '
     '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
     '{"action":"lt.archive","projectId":<LT>}. Omite los campos que no sepas. Pedido explícito, por ejemplo: '
     '{"action":"complete","taskId":<id>,"ejecutar": true}.')
@@ -92,7 +92,7 @@ SCHEMAS = {
     "task.create": (("projectId", "title"), ("description", "dueDate", "owner", "dependency", "criterion")),
     # D06-A: an edit replaces only the detail; metadata goes in its fields and the log is append-only.
     "task.update": (("taskId", "title"), ("detail", "dueDate", "owner", "dependency", "criterion")),
-    "task.move": (("taskId", "projectId"), ()),
+    "task.move": (("taskId", "projectId"), ()), "task.reopen": (("taskId",), ()),
     "lt.create": (("title",), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
 }
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -125,6 +125,8 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
     if item.get("ejecutar") is True or item.get("execute") is True:
         clean["execute"] = True
     if clean["action"] == "complete" and tasks[clean["taskId"]].get("done"):
+        return None
+    if clean["action"] == "task.reopen" and not tasks[clean["taskId"]].get("done"):
         return None
     if clean["action"] == "task.move" and tasks[clean["taskId"]].get("project_id") == clean["projectId"]:
         return None

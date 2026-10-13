@@ -12,6 +12,7 @@
 .structure-more>div{position:absolute;z-index:5;margin-top:6px;display:grid;gap:4px;min-width:190px;padding:6px;background:#151b23;border:1px solid #3a4859;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .structure-more>div button{text-align:left;border-color:transparent}
 .structure-actions button.danger{color:#ff9a9a}
+.structure-actions .status{color:#9bacbd;font-size:12px}.structure-actions .status.error{color:#ff8a80}
 .structure-dialog .hint{display:block;margin-top:4px;color:#9bacbd;font-size:12px}
 dialog.structure-dialog{width:min(480px,calc(100vw - 32px));background:#151b23;color:#eef3f8;border:1px solid #3a4859;border-radius:12px;padding:20px}
 dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -136,6 +137,24 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     dialog.showModal();
   }
 
+  // An action without a form: same verified queue, status shown inline instead of in a dialog.
+  async function runDirect(action, fields, bar) {
+    const status = bar.querySelector('.status') || bar.appendChild(Object.assign(document.createElement('small'), { className: 'status' }));
+    status.setAttribute('role', 'status');
+    status.textContent = 'Enviando…';
+    const requestId = crypto.randomUUID();
+    try {
+      const response = await fetch('/api/task-actions', { method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, requestId, ...fields }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
+      await track(requestId, status, { close() {} });
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = 'status error';
+    }
+  }
+
   const clean = values => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
   const ltOptions = exceptId => projects.filter(p => String(p.id) !== String(exceptId)).map(p => [p.id, p.title]);
 
@@ -180,6 +199,8 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
           { name: 'projectId', label: 'Línea de destino', options: ltOptions(task.project_id) },
         ], v => ({ taskId: task.id, projectId: Number(v.projectId) })));
       }
+      // D14: reversible, so no confirmation; progress shows next to the buttons.
+      if (task.done) button('Reabrir tarea', () => void runDirect('task.reopen', { taskId: task.id }, bar));
     } else if (view.projectId) {
       const project = byId(view.projectId);
       if (!project) return;

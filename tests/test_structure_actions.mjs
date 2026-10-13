@@ -43,6 +43,7 @@ const valid = [
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'Nueva tarea', description: 'detalle', dueDate: '2026-11-01' },
   { action: 'task.update', requestId: uuid(), taskId: 15, title: 'Renombrada', detail: 'nuevo', dueDate: '' },
   { action: 'task.move', requestId: uuid(), taskId: 15, projectId: 4 },
+  { action: 'task.reopen', requestId: uuid(), taskId: 15 },
   { action: 'lt.create', requestId: uuid(), title: 'LT nueva' },
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
   { action: 'lt.archive', requestId: uuid(), projectId: 4 },
@@ -58,6 +59,7 @@ const invalid = [
   { action: 'task.update', requestId: uuid(), taskId: 15, title: 'x', description: 'D06: la descripción completa ya no se reemplaza' },
   { action: 'task.update', requestId: uuid(), taskId: 15, title: 'ok', done: true },
   { action: 'task.move', requestId: uuid(), taskId: 15, projectId: '4' },
+  { action: 'task.reopen', requestId: uuid(), taskId: 15, done: false },
   { action: 'lt.create', requestId: uuid(), title: 'ok', parentProjectId: 99 },
   { action: 'lt.delete', requestId: uuid(), projectId: 4 },
   { action: 'task.create', requestId: 'bad', projectId: 3, title: 'ok' },
@@ -85,6 +87,7 @@ const proofs = {
   'task.create': [{ taskId: 16 }, (s, body) => ({ ...s, tasks: [...s.tasks, { id: 16, title: body.title, project_id: 3, done: false, description: 'detalle', date: '2026-11-01' }] })],
   'task.update': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], title: 'Renombrada', description: 'Fecha objetivo: Por confirmar\n\nnuevo', date: '' }] })],
   'task.move': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], project_id: 4 }] })],
+  'task.reopen': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], done: false }] })],
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
   'lt.rename': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2 renombrada' }] })],
   'lt.archive': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0]], tasks: s.tasks.filter(t => t.project_id !== 4) })],
@@ -92,7 +95,9 @@ const proofs = {
 };
 for (const body of valid) {
   const e = environment();
-  await call(e, 'POST', '/api/bridge/snapshot', { ...base, timestamp: later(0) }, 'Bearer bridge');
+  // Reopening starts from a completed task.
+  const start = body.action === 'task.reopen' ? { ...base, tasks: [{ ...base.tasks[0], done: true }] } : base;
+  await call(e, 'POST', '/api/bridge/snapshot', { ...start, timestamp: later(0) }, 'Bearer bridge');
   const queued = await call(e, 'POST', '/api/task-actions', body);
   assert.equal(queued.status, 202, body.action);
   assert.equal((await call(e, 'POST', '/api/task-actions', body)).status, 202, 'same request id is idempotent');
@@ -100,9 +105,9 @@ for (const body of valid) {
   assert.equal(job.action, body.action);
   for (const key of Object.keys(body).filter(k => !['requestId'].includes(k))) assert.deepEqual(job[key], body[key], `${body.action}.${key}`);
   const [result, transform] = proofs[body.action];
-  const unchanged = { ...base, timestamp: later(50), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
+  const unchanged = { ...start, timestamp: later(50), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
   assert.equal((await call(e, 'POST', '/api/bridge/snapshot', unchanged, 'Bearer bridge')).status, 409, `${body.action}: unchanged snapshot is no proof`);
-  const proof = { ...transform(base, body), timestamp: later(100), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
+  const proof = { ...transform(start, body), timestamp: later(100), actionConfirmation: { id: job.id, attempt: job.attempt, result } };
   assert.equal((await call(e, 'POST', '/api/bridge/snapshot', proof, 'Bearer bridge')).status, 202, `${body.action}: proof accepted`);
   const done = await call(e, 'POST', '/api/bridge/complete', { kind: 'action', id: job.id, attempt: job.attempt, snapshotTimestamp: proof.timestamp }, 'Bearer bridge');
   assert.equal(done.body.status, 'completed', body.action);

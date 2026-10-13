@@ -138,6 +138,10 @@ class ProposalsTest(unittest.TestCase):
                          "D06-A: nunca reemplaza la descripción completa")
         self.assertIn('"ejecutar": true', uc.INSTRUCTIONS.replace("'", '"'), "el prompt explica cuándo marcar ejecutar")
 
+    def test_reabrir_solo_tareas_completadas(self):
+        reply = 'x\n```acciones\n[{"action":"task.reopen","taskId":82},{"action":"task.reopen","taskId":81}]\n```'
+        self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.reopen", "taskId": 82}])
+
     def test_sin_bloque_o_json_invalido(self):
         self.assertEqual(uc.split_proposals("Solo texto.", self.SNAP), ("Solo texto.", []))
         self.assertEqual(uc.split_proposals("Hola\n```acciones\nno es json\n```", self.SNAP), ("Hola", []))

@@ -155,6 +155,7 @@
       case 'task.update': return `Editar «${taskName(p.taskId)}» → «${p.title}»`;
       case 'task.move': return `Mover «${taskName(p.taskId)}» a ${lineName(p.projectId)}`;
       case 'complete': return `Completar «${taskName(p.taskId)}»`;
+      case 'task.reopen': return `Reabrir «${taskName(p.taskId)}»`;
       case 'lt.create': return `Crear línea «${p.title}»`;
       case 'lt.rename': return `Renombrar ${lineName(p.projectId)} → «${p.title}»`;
       case 'lt.archive': return `Archivar ${lineName(p.projectId)}`;

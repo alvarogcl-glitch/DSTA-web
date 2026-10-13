@@ -29,7 +29,7 @@ TASK_FIELDS = (
 PROJECT_FIELDS = ("id", "title", "description", "parent_project_id", "is_archived", "hex_color", "identifier",
                   "position", "is_favorite", "background_blur_hash", "background_information")
 NO_DUE_DATE = "0001-01-01T00:00:00Z"
-ACTIONS = {"task.create", "task.update", "task.move", "task.log", "lt.create", "lt.rename", "lt.archive"}
+ACTIONS = {"task.create", "task.update", "task.move", "task.reopen", "task.log", "lt.create", "lt.rename", "lt.archive"}
 LOG_KINDS = {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}
 
 
@@ -198,7 +198,7 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
             pending.unlink(missing_ok=True)
         return result
 
-    if action in ("task.update", "task.move"):
+    if action in ("task.update", "task.move", "task.reopen"):
         task_id = job["taskId"]
         with lock(server_url, task_id):
             current = _task(request, task_id, job["sourceProjectId"])
@@ -212,6 +212,8 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
                 for name, label in STRUCTURED_FIELDS:
                     if job.get(name) is not None:  # D05: "Fecha objetivo" follows the native date
                         payload["description"] = set_metadata(str(payload.get("description") or ""), label, job[name])
+            elif action == "task.reopen":  # D14: back to pending, everything else preserved
+                payload["done"] = False
             else:
                 _work_line(request, job["projectId"])
                 payload["project_id"] = job["projectId"]
