@@ -11,7 +11,8 @@ El usuario quiere preservar la comodidad de producción, revisar las mejoras mul
 Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) lleve el plan. Decisiones del día registradas en REGISTRO_DECISIONES; Entrega E01 corrigió D18/D19 (commit 303708e, staging f7ceee69). Estado (13-10 noche):
 - D01 decidida (mix A + B).
 - D03 y D04/D07 decididas e implementadas en el piloto: Entrega E02, commit 3d37438, staging 99149651. Falta la prueba del CEO.
-- Siguientes decisiones a presentar: D02 (ubicación de la creación) y D05/D06.
+- D02, D05 y D06 decididas e implementadas en el piloto: Entrega E03, commit e188492, staging 4903d603. Falta la prueba del CEO.
+- Siguiente: presentar las decisiones siguientes de la matriz (D08 en adelante).
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.

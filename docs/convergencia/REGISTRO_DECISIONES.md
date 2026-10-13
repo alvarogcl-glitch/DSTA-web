@@ -29,6 +29,9 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D03 | decidido | Telegram 13-10 21:46: «Ok» a la propuesta: crear directo cuando el pedido es explícito («crea…»); «Aplicar» solo para lo que la IA deduce sola. | Copiloto sin herramientas: sus propuestas explícitas se aplican automáticamente por la cola verificada; las deducidas quedan con Aplicar. | Producción ejecuta por MCP (sin cambio). | Ninguno. | Entrega E02. |
 | D04 · D07 | decidido | Mismo «Ok»: ambas vías guardan lo mismo; formulario con responsable, fecha objetivo, dependencia y criterio de cierre, más origen. | Formulario y propuestas escriben la descripción estructurada de pmo_create_task (Responsable/Fecha objetivo/Dependencia/Criterio de cierre/SOURCE/ACTION_KEY). | Igual que producción. | Ninguno. | Entrega E02. |
 | D69 (parcial) | decidido | 13-10 10:06: «los usuarios pilotos serán yo y Paula». | — | Pilotos del corte: Álvaro y Paula. | Ninguno. | — |
+| D02 | decidido | Telegram 13-10 22:05: «D02: A». | Controles discretos en el inspector: una acción principal visible («Editar» o «+ Nueva tarea») y el resto en un menú «⋯», igual en escritorio y móvil. No se pusieron botones en las tarjetas de LT porque la pulsación larga ya las selecciona para la minuta. | Por decidir (producción no tiene estos controles). | Ninguno. | Entrega E03. |
+| D05 | decidido | Telegram 13-10 22:06: «Ok», tras pedir más información (ejemplo del 20-10 → 30-10). | La fecha nativa de Vikunja (due_date) manda. La línea «Fecha objetivo» se reescribe con ella en cada cambio, y al quitar la fecha queda «Por confirmar». Las tareas antiguas que solo tienen la línea se siguen leyendo. Se guarda a las 12:00 UTC, así que es el mismo día en Santiago. | Igual al converger. | Ninguno. | Entrega E03. |
+| D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
 
@@ -75,6 +78,35 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   2. Pedir al copiloto «crea la tarea X en la LT Y» y confirmar que se crea sin clic.
   
   Siguientes decisiones del plan: D02 (ubicación) y D05/D06.
+
+### Entrega E03 · D02, D05 y D06: controles discretos, fecha única y bitácora protegida
+
+- Decisiones incluidas: D02 (A), D05, D06 (A). Autorización: Telegram 13-10 22:05 («D02: A … D06: A») y 22:06 («Ok» a D05).
+- Estado: D02, D05 y D06 → verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Directorio y rama: C:/Users/admin/Documents/DSTA-multiuser/dsta-web-mu · feat/multiusuario.
+- Commit base y resultado: 6a5819f → e188492.
+- Comportamiento:
+  - El inspector muestra «Editar» o «+ Nueva tarea» y un menú «⋯» con Mover, Renombrar y Archivar.
+  - El diálogo de edición muestra Título, Responsable, Fecha objetivo, Dependencia, Criterio de cierre y Detalle, con un aviso de cuántos registros tiene la bitácora. Solo envía lo que cambió.
+  - El puente divide la descripción en metadatos, detalle y bitácora (`split_description`; misma lógica en el Worker y en el navegador) y reemplaza solo el detalle.
+  - Cambiar o quitar la fecha reescribe «Fecha objetivo».
+  - La verificación del Worker comprueba el detalle y la línea de fecha.
+- Archivos: src/worker.js, public/structure-actions.js, tools/structure_actions.py, tools/user_copilot.py, tests (bridge, worker, copilot, e2e_structure_ui.mjs).
+- Datos QA: fixtures en memoria y laboratorio local (wrangler dev + Vikunja de laboratorio) con dos usuarios sintéticos `ui-*`, que se crearon y eliminaron. No se tocaron datos de alvaro.
+- Pruebas:
+  - `PYTHONUTF8=1 npm test`: 161 Python OK, más todas las suites JS.
+  - Navegador (`tests/e2e_structure_lab.py`): 9 de 9 OK.
+    - El formulario muestra solo el detalle.
+    - Editar el título conserva la descripción estructurada.
+    - Cambiar detalle, fecha y responsable actualiza la línea de fecha y conserva los metadatos.
+    - El menú «⋯» cabe completo en un móvil de 390 px.
+    - Mover, renombrar y archivar funcionan.
+    - B no ve nada de A.
+    - Sin errores de JavaScript.
+- Prueba visual: capturas en escritorio y en móvil, revisadas.
+- Versiones: Worker staging 4903d603-d00c-4f19-bead-d43248421be4; puente multiusuario reiniciado con e188492.
+- Rollback: revertir e188492, redeploy de staging y reiniciar el puente.
+- Pendiente: prueba del CEO, que consiste en editar una tarea con bitácora y cambiarle la fecha.
 
 ## Plantilla de una decisión
 
