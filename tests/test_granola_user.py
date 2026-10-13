@@ -89,6 +89,19 @@ class GranolaUserTest(unittest.TestCase):
                 service.sync("ana")
             self.assertFalse(service.connected("ana"), "si el refresh falla, queda desconectado y pide reconectar")
 
+    def test_formato_real_de_granola_xml(self):
+        with FakeGranola() as fake:
+            fake.xml = True
+            service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)
+            started = service.authorize("ana", "req-1")
+            code, state = self.consent(started["authorizationUrl"])
+            service.exchange("ana", "req-1", state, code)
+            records = service.sync("ana")
+            self.assertEqual(sorted(r["source_id"] for r in records), ["meet-1", "meet-2"])
+            self.assertEqual(sorted(r["date"] for r in records), ["2026-10-10", "2026-10-11"])
+            self.assertEqual(sorted(r["summary"] for r in records), ["Resumen sintético 1", "Resumen sintético 2"])
+            self.assertEqual(len(self.vault.load("ana")["minutes"]), 2, "context for the Copilot")
+
     def test_state_de_otro_usuario_o_reusado_falla(self):
         with FakeGranola() as fake:
             service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)

@@ -1026,7 +1026,9 @@ export class DashboardChatQueue extends DurableObject {
         : old.taskId === body.taskId && old.action === body.action);
       if (old) return sameRequest ? json(view(old), 202) : json({ error: "Identificador reutilizado para otra acción." }, 409);
       const snapshot = storage.get("data:snapshot") ?? createSnapshot;
-      if (!validSnapshot(snapshot)) return json({ error: "La tarea no está en el snapshot actual." }, 404);
+      if (!validSnapshot(snapshot)) {
+        return json({ error: "Aún no llegan los datos de Vikunja a tu espacio. Espera unos segundos y vuelve a intentar." }, 409);
+      }
       const task = body.taskId !== undefined ? snapshot.tasks.find(item => item.id === body.taskId) : null;
       if (body.taskId !== undefined && (!task || !Number.isSafeInteger(task.project_id) ||
           !snapshot.projects.some(p => p.id === task.project_id))) {

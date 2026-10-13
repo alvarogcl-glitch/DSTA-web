@@ -22,6 +22,7 @@ class FakeGranola:
     def __init__(self):
         self.codes, self.tokens, self.clients = {}, set(), {}
         self.refresh_tokens, self.refreshes, self.expires_in = {}, 0, 3600
+        self.xml = False  # True: answer like the real Granola (XML text, time_range, anyOf ids)
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -103,10 +104,21 @@ class FakeGranola:
                             {"name": "get_meetings", "inputSchema": {"type": "object", "required": ["meeting_ids"],
                              "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}}]}
                     elif method == "tools/call" and message["params"]["name"] == "list_meetings":
-                        result = {"structuredContent": {"meetings": [{"id": m["id"]} for m in MEETINGS]}}
+                        if fake.xml:
+                            assert message["params"]["arguments"].get("time_range"), "real Granola filters by time_range"
+                            rows = "".join(f'<meeting id="{m["id"]}" title="{m["title"]}" date="Oct {m["date"][-2:]}, 2026 9:00 AM"/>' for m in MEETINGS)
+                            result = {"content": [{"type": "text", "text": f"<meetings_data>{rows}</meetings_data>"}]}
+                        else:
+                            result = {"structuredContent": {"meetings": [{"id": m["id"]} for m in MEETINGS]}}
                     elif method == "tools/call" and message["params"]["name"] == "get_meetings":
                         wanted = message["params"]["arguments"]["meeting_ids"]
-                        result = {"structuredContent": {"meetings": [m for m in MEETINGS if m["id"] in wanted]}}
+                        if fake.xml:
+                            rows = "".join(f'<meeting id="{m["id"]}" title="{m["title"]}" date="Oct {m["date"][-2:]}, 2026 9:00 AM">'
+                                           f'<summary>{m["summary"]}</summary><private_notes>{m["private_notes"]}</private_notes></meeting>'
+                                           for m in MEETINGS if m["id"] in wanted)
+                            result = {"content": [{"type": "text", "text": f"Meetings:\n<meetings_data>{rows}</meetings_data>"}]}
+                        else:
+                            result = {"structuredContent": {"meetings": [m for m in MEETINGS if m["id"] in wanted]}}
                     else:
                         return self.send(400, {"error": "unsupported"})
                     return self.send(200, {"jsonrpc": "2.0", "id": rid, "result": result}, {"Mcp-Session-Id": "sess-1"})

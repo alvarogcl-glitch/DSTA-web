@@ -7,7 +7,9 @@ proposed actions; proposals come with the per-user Copilot in F5). Private notes
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
+import xml.etree.ElementTree as ET
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -121,10 +123,12 @@ class GranolaService:
                 raise
 
     def sync(self, actor: str) -> list[dict]:
-        job = str(uuid.uuid4())
         self.ensure_fresh(actor)
-        self.client.sync(actor, job)
-        records = self.store.saved.pop(job, [])
+        secret = self.store.get_authenticated_secret(actor, "granola") or {}
+        token = secret.get("access_token")
+        if not token or not self.connected(actor):
+            raise GranolaError("Connector is disconnected")
+        records = import_meetings(self.client, token)
         # F5 context: the user's recent summaries, kept encrypted in THEIR vault entry.
         with _lock:
             data = self.store._get(actor)
@@ -136,6 +140,82 @@ class GranolaService:
 
     def disconnect(self, actor: str) -> None:
         self.store.disconnect(actor)
+
+
+MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+EMPTY = {"", "no summary", "not available", "no notes", "none", "null"}
+
+
+def iso_date(value: str) -> str:
+    match = re.search(r"\b([A-Za-z]{3})[a-z]*\s+(\d{1,2}),\s+(20\d{2})", value or "")
+    if match and match.group(1).lower() in MONTHS:
+        return f"{match.group(3)}-{MONTHS[match.group(1).lower()]:02d}-{int(match.group(2)):02d}"
+    match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", value or "")
+    return match.group(1) if match else ""
+
+
+def _meetings(result: dict) -> list[dict]:
+    """Granola answers either JSON (structuredContent) or, as the real service does, XML text
+    (<meetings_data><meeting id title date><summary/><private_notes/>...). Same format the
+    production exporter (tools/granola_summary_export.py) reads."""
+    if isinstance(result.get("structuredContent"), dict):
+        return [m for m in result["structuredContent"].get("meetings", []) if isinstance(m, dict)]
+    text = "\n".join(c.get("text", "") for c in result.get("content", []) if isinstance(c, dict) and c.get("type") == "text")
+    start = min([p for p in (text.find("<meetings_data"), text.find("<meeting")) if p >= 0], default=-1)
+    if start < 0:
+        if not text.strip() or "no meetings" in text.lower():
+            return []
+        raise GranolaError("Unsupported meeting output")
+    try:
+        root = ET.fromstring(text[start:])
+    except ET.ParseError:
+        raise GranolaError("Unsupported meeting output") from None
+    nodes = [root] if root.tag == "meeting" else root.findall(".//meeting")
+    out = []
+    for node in nodes:
+        item = dict(node.attrib)
+        for field in ("summary", "private_notes"):
+            child = node.find(field)
+            if child is not None:
+                item[field] = "".join(child.itertext()).strip()
+        out.append(item)
+    return out
+
+
+def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_days") -> list[dict]:
+    """Read-only import with only list_meetings and get_meetings, through the client's allowlisted
+    transport. Returns records with id, version, title, ISO date and summary (+ notes, VM only)."""
+    with client._session() as http:
+        state = {"session": None, "id": 0}
+
+        def rpc(method, params=None, notification=False):
+            state["id"] += 1
+            body = {"jsonrpc": "2.0", "method": method, **({} if notification else {"id": state["id"]}),
+                    **({"params": params} if params is not None else {})}
+            headers = {"Authorization": "Bearer " + token, "Accept": "application/json, text/event-stream",
+                       "Content-Type": "application/json", "MCP-Protocol-Version": "2025-03-26",
+                       **({"Mcp-Session-Id": state["session"]} if state["session"] else {})}
+            raw, response_headers = client._request(http, "POST", client._mcp, headers=headers, body=body, empty=notification)
+            advertised = next((v for k, v in response_headers.items() if k.lower() == "mcp-session-id"), None)
+            if method == "initialize" and advertised:
+                state["session"] = advertised[:1024]
+            return None if notification else client._rpc_result(raw, response_headers, state["id"])
+
+        rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "dsta-multiuser", "version": "1"}})
+        rpc("notifications/initialized", notification=True)
+        listed = _meetings(rpc("tools/call", {"name": "list_meetings", "arguments": {"time_range": days}}))
+        ids = [str(m["id"]) for m in listed if m.get("id")][:500]
+        records = []
+        for start in range(0, len(ids), 10):
+            for meeting in _meetings(rpc("tools/call", {"name": "get_meetings", "arguments": {"meeting_ids": ids[start:start + 10]}})):
+                summary = str(meeting.get("summary") or meeting.get("summarized_notes") or "").strip()
+                if not meeting.get("id") or summary.lower() in EMPTY:
+                    continue  # summary not ready yet: picked up on a later sync
+                notes = str(meeting.get("private_notes") or "")
+                version = hashlib.sha256(f"{summary}\n{notes}".encode("utf-8")).hexdigest()
+                records.append({"source_id": str(meeting["id"]), "version": version, "title": str(meeting.get("title") or ""),
+                                "date": iso_date(str(meeting.get("date") or "")), "summary": summary, "private_notes": notes})
+        return records
 
 
 def inbox_record(record: dict) -> dict:

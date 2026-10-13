@@ -64,6 +64,7 @@ class MultiuserBridge:
         self.copilot = copilot
         self.fetch_snapshot = fetch_snapshot
         self.chat_pool = chat_pool  # None: answer inline (tests, --once)
+        self._ignored: set[str] = set()
 
     def user_base(self, actor: str) -> str:
         return f"{self.base}/u/{actor}"
@@ -83,8 +84,10 @@ class MultiuserBridge:
         for actor, marks in (dispatch.get("pending") or {}).items():
             user = self._user(actor)
             if not user:
-                # Unknown to this VM: never poll or acknowledge someone else's queue.
-                log(f"despacho ignorado: usuario sin vault ({actor[:20]})")
+                # Unknown to this VM: never poll or acknowledge someone else's queue (log once).
+                if actor not in self._ignored:
+                    self._ignored.add(actor)
+                    log(f"despacho ignorado: usuario sin vault ({actor[:20]})")
                 continue
             kinds = [kind for kind in marks if kind in KINDS]
             for kind in kinds:
@@ -287,8 +290,11 @@ def run(bridge: MultiuserBridge, actors: Callable[[], list[str]], *, once: bool)
     while True:
         try:
             if time.monotonic() >= next_publish:
-                next_publish = time.monotonic() + PUBLISH_SECONDS
-                bridge.publish_all(actors())
+                current = actors()
+                published = bridge.publish_all(current)
+                # A user who has not activated their invitation yet (404) or a transient error:
+                # retry soon instead of leaving the dashboard empty for a whole cycle.
+                next_publish = time.monotonic() + (PUBLISH_SECONDS if published >= len(current) else 30)
             bridge.dispatch_once()
             if time.monotonic() >= next_sweep:
                 next_sweep = time.monotonic() + SWEEP_SECONDS
