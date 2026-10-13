@@ -77,3 +77,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:59: F6 preparada: ensayo de cutover en test (bloque 16) y runbook. **No se tocó producción.**
 - Nota: las horas de la bitácora corresponden al reloj de la VM (hora de Chile).
 - 2026-10-13 00:01: Granola: refresh del token implementado y probado; una conexión vencida se ve en el dashboard. 138 tests de Python OK.
+- 2026-10-13 00:02: reporte horario 1 enviado por Telegram.
