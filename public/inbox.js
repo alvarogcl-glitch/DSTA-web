@@ -101,7 +101,7 @@
       ${action.estado === 'error' ? `<p class="dsta-inbox-error">${esc(action.resultado)}</p>` : ''}
       ${previousInstructions(action)}
       <div class="dsta-inbox-choice" role="radiogroup" aria-label="Decisión">${choice('aprobar')}${choice('rechazar')}${choice('')}</div>
-      <label class="dsta-inbox-field"><span>O indica qué hacer</span>${instructionBox(minute, action, 'Ej: créala en LT2 con responsable Nelson y fecha 15-10 · agrégalo como antecedente en #63 · no corresponde')}</label>
+      <label class="dsta-inbox-field"><span>O indica qué hacer</span>${instructionBox(minute, action, 'Ej: créala en otra línea con un responsable y una fecha · agrégalo como antecedente en una tarea existente · no corresponde')}</label>
     </article>`;
   }
 
@@ -118,7 +118,7 @@
         ${minute.resumen ? `<p>${esc(minute.resumen)}</p>` : ''}
         <h4>Aplicado automáticamente · ${automatic.length}</h4>
         ${automatic.length ? '<ul class="dsta-inbox-done">' + automatic.map(a => `<li><b>${esc(a.resultado)}</b>${a.nota ? `<br><span>${esc(a.nota)}</span>` : ''}${previousInstructions(a)}
-          ${discarded(minute) ? '' : `<details class="dsta-inbox-modify"${draftFor(minute.id, a.id).instruccion ? ' open' : ''}><summary>Modificar</summary>${instructionBox(minute, a, 'Ej: cambia el responsable a Nelson · elimina esta tarea · agrega que falta la firma')}</details>`}</li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
+          ${discarded(minute) ? '' : `<details class="dsta-inbox-modify"${draftFor(minute.id, a.id).instruccion ? ' open' : ''}><summary>Modificar</summary>${instructionBox(minute, a, 'Ej: cambia el responsable · elimina esta tarea · agrega que falta la firma')}</details>`}</li>`).join('') + '</ul>' : '<p class="muted">Nada evidente para aplicar sin tu revisión.</p>'}
         <h4>Propuestas para tu revisión · ${proposals.length}</h4>
         ${proposals.map(action => proposal(minute, action)).join('') || '<p class="muted">Sin propuestas pendientes.</p>'}
         ${resolved.length ? `<details><summary>Resueltas · ${resolved.length}</summary><ul class="dsta-inbox-done">${resolved.map(a => `<li>${esc(LABELS[a.tipo])}: ${esc(a.resultado)}</li>`).join('')}</ul></details>` : ''}
