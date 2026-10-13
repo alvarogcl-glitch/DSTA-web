@@ -27,6 +27,22 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D60 · D64 · D65 | decidido · verificado producción | 13-10 10:06: «Baja la cantidad de pruebas y request para no consumir todo el tier gratuito de cloudfare». | Despacho 10 s, publicación 300 s, pruebas locales. | Puente productivo 8 s (acciones/etiquetas) y 12 s (bucle). | **Aplicado en producción** por pedido explícito: commit local 069ebf6 en main, tarea DSTA Hermes Bridge reiniciada; medido ~1.700 req/h (~40.700/día) vs ~4.750/h antes. | Analytics Cloudflare 13-10. Plan de la cuenta: gratuito (confirmado por el CEO). |
 | D69 (parcial) | decidido | 13-10 10:06: «los usuarios pilotos serán yo y Paula». | — | Pilotos del corte: Álvaro y Paula. | Ninguno. | — |
 
+## Entregas
+
+### Entrega E01 · Defectos D18 y D19 del registro de bitácora
+
+- Decisiones incluidas: D18, D19 (defectos de D17, que el CEO ya pidió que funcione: «intenté hacer un nuevo registro pero no se guardó»). Autorización: Telegram 13-10 21:18, «Si avanza con 1 y 2».
+- Alcance aprobado; estado que pasa a: D18 y D19 → verificado local + publicado en piloto (pendiente prueba del CEO).
+- Directorio y rama: C:/Users/admin/Documents/DSTA-multiuser/dsta-web-mu · feat/multiusuario.
+- Commit base y resultado: b9d29f4 → 303708e.
+- Archivos: tools/structure_actions.py, public/task-actions.js, tests/test_structure_actions_bridge.py, tests/test_task_actions.mjs.
+- Datos QA: fixtures en memoria (FakeVikunja y harness vm); no se tocaron datos de alvaro.
+- Pruebas: `PYTHONUTF8=1 npm test` → 155 Python OK más todas las suites JS. Nuevos casos: repetición de la misma solicitud = un registro; caída entre escritura y registro (marca pendiente) = un registro; nueva solicitud con el mismo texto = se escribe; modo cuentas guardando al instante = task.log; fallo de /api/session = no se envía, mensaje visible, borrador conservado; segundo clic mientras se resuelve el modo = ignorado. Modo legado (404) conserva la vía del copiloto.
+- Prueba visual: sin cambios visuales salvo el mensaje de error nuevo; no se hizo revisión de navegador.
+- Versiones: Worker staging f7ceee69-0464-4df9-b881-13d4216773e6; puente multiusuario reiniciado con el commit 303708e.
+- Rollback: revertir 303708e y redeploy de staging; reiniciar el puente.
+- Pendiente: que el CEO pruebe un registro en el piloto. D24/D25 (líneas duplicadas o archivar con tareas) siguen por decidir.
+
 ## Plantilla de una decisión
 
 ### Decisión DNN
