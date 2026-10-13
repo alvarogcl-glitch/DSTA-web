@@ -146,7 +146,8 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
 .dsta-checklist label{display:flex;gap:6px;align-items:center;margin:0;font-size:13px;color:#eef3f8}
 .dsta-section-dialog .checks{display:flex;flex-wrap:wrap;gap:10px}.dsta-section-dialog .checks label{display:flex;gap:4px;margin:0;align-items:center}
 .dsta-section-dialog .row{display:flex;gap:8px;margin-top:14px}.dsta-section-dialog .row button{flex:1}
-.dsta-section-dialog .hint{font-size:12px;color:#9bacbd;margin:4px 0 0}`;
+.dsta-section-dialog .hint{font-size:12px;color:#9bacbd;margin:4px 0 0}
+.dsta-filter-preview{margin:12px 0 0;padding:8px;border-radius:8px;background:#0d1117;border:1px solid #2b5d47;color:#68d391;font-size:13px}`;
   document.head.append(style);
 
   function renderEditor() {
@@ -248,7 +249,7 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
     const picked = box => [...box.querySelectorAll('input:checked')].map(c => Number(c.value));
     const lines = field('Líneas de trabajo (opcional: sin marcar = todas)', checklist(typeof projects !== 'undefined' ? projects : [], f.projectIds, 'Aún no hay líneas.'));
     const labelList = typeof labels !== 'undefined' && Array.isArray(labels) ? labels : [];
-    const labelSelect = field('Etiquetas (opcional: sin marcar = todas)', checklist(labelList, f.labelIds, 'Aún no hay etiquetas.'));
+    const labelSelect = field('Etiquetas (opcional: solo tareas con alguna de las marcadas; sin marcar = todas)', checklist(labelList, f.labelIds, 'Aún no hay etiquetas.'));
     const status = Object.assign(document.createElement('select'), { name: 'status' });
     status.append(new Option('Pendientes + completadas como antecedentes', 'all', false, f.status !== 'open'),
       new Option('Solo pendientes', 'open', false, f.status === 'open'));
@@ -264,9 +265,12 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
     const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Cancelar' });
     cancel.addEventListener('click', () => dialog.close());
     row.append(ok, cancel);
-    form.append(error, row);
-    form.addEventListener('submit', event => {
-      event.preventDefault();
+    // Live preview: how many tasks the current filters select, before saving.
+    const preview = Object.assign(document.createElement('p'), { className: 'dsta-filter-preview' });
+    preview.setAttribute('aria-live', 'polite');
+    form.append(preview, error, row);
+    const allProjects = typeof projects !== 'undefined' ? projects.length : 0;
+    const readFilters = () => {
       const filters = {};
       const words = keywords.value.split(',').map(w => w.trim()).filter(Boolean);
       if (words.length) filters.keywords = words.slice(0, 20);
@@ -274,11 +278,30 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
       if (words.length && chosenFields.length && chosenFields.length < Object.keys(FIELD_LABELS).length) filters.fields = chosenFields;
       if (owner.value.trim()) filters.owner = owner.value.trim();
       if (dependency.value.trim()) filters.dependency = dependency.value.trim();
+      // Ticking every line or every label means "all": it must not exclude tasks without labels.
       const pids = picked(lines);
-      if (pids.length) filters.projectIds = pids;
+      if (pids.length && pids.length < allProjects) filters.projectIds = pids;
       const lids = picked(labelSelect);
-      if (lids.length) filters.labelIds = lids;
+      if (lids.length && lids.length < labelList.length) filters.labelIds = lids;
       filters.status = status.value;
+      return filters;
+    };
+    const updatePreview = () => {
+      const filters = readFilters();
+      if (!filters.keywords && !filters.owner && !filters.dependency && !filters.projectIds && !filters.labelIds) {
+        preview.textContent = 'Agrega al menos un filtro para ver qué tareas incluye.';
+        return;
+      }
+      const found = (typeof tasks !== 'undefined' ? tasks : []).filter(task => matches(task, filters));
+      const open = found.filter(task => !task.done).length;
+      preview.textContent = `Con estos filtros: ${found.length} tarea(s) · ${open} pendiente(s).`;
+    };
+    form.addEventListener('input', updatePreview);
+    form.addEventListener('change', updatePreview);
+    updatePreview();
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const filters = readFilters();
       if (!name.value.trim()) { error.textContent = 'Ponle un nombre a la sección.'; return; }
       if (!filters.keywords && !filters.owner && !filters.dependency && !filters.projectIds && !filters.labelIds) {
         error.textContent = 'Define al menos un filtro (palabra clave, responsable, dependencia, línea o etiqueta).'; return;
