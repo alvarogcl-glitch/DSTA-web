@@ -74,6 +74,31 @@ if (process.env.SHOT_DIR) await mobile.screenshot({ path: `${process.env.SHOT_DI
 await mobile.close();
 step('D02: acciones secundarias en el menú ⋯, visible completo en móvil');
 
+// D23-D25 on the line that still holds the open task.
+async function refusedDialog(page, item, values, message) {
+  await page.click('.structure-more summary');
+  await page.click(`.structure-more button:has-text("${item}")`);
+  const dialog = page.locator('dialog.structure-dialog');
+  for (const [name, value] of Object.entries(values)) await dialog.locator(`[name="${name}"]`).fill(value);
+  await dialog.locator('button[type="submit"]').click();
+  await dialog.locator('.status.error', { hasText: message }).waitFor({ timeout: 30000 });
+  await dialog.locator('button:has-text("Cancelar")').click();
+}
+await openProject(a, 'LT creada desde UI');
+await refusedDialog(a, 'Archivar línea', {}, '1 tareas abiertas');
+await openProject(a, 'LT creada desde UI');
+await refusedDialog(a, 'Renombrar línea', { title: 'lt  BASE a' }, 'Ya existe una línea con ese nombre');
+assert.ok(await a.evaluate(() => projects.some(p => p.title === 'LT creada desde UI')));
+step('D24/D25: no archiva con tareas abiertas ni repite nombres, con mensaje claro');
+await openProject(a, 'LT creada desde UI');
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Editar descripción")');
+await submitDialog(a, { description: 'Objetivo de la línea UI' });
+assert.equal(await a.evaluate(() => projects.find(p => p.title === 'LT creada desde UI').description), 'Objetivo de la línea UI');
+await openProject(a, 'LT creada desde UI');
+assert.match(await a.locator('#detail-body').innerText(), /Objetivo de la línea UI/);
+step('D23: A edita la descripción de la línea y se ve en el inspector');
+
 await openTask(a, 'Tarea editada desde UI');
 if (process.env.SHOT_DIR) { await a.click('.structure-more summary'); await a.screenshot({ path: `${process.env.SHOT_DIR}/e03-desktop.png` }); await a.click('.structure-more summary'); }
 await a.click('.structure-more summary');

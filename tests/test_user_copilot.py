@@ -138,6 +138,16 @@ class ProposalsTest(unittest.TestCase):
                          "D06-A: nunca reemplaza la descripción completa")
         self.assertIn('"ejecutar": true', uc.INSTRUCTIONS.replace("'", '"'), "el prompt explica cuándo marcar ejecutar")
 
+    def test_reglas_de_lineas(self):
+        """D23-D25: describe lines; no duplicate names; never archive a line with open tasks."""
+        reply = ('x\n```acciones\n[{"action":"lt.create","title":"lt  ána"},{"action":"lt.rename","projectId":9,"title":"LT Ana"},'
+                 '{"action":"lt.archive","projectId":8},{"action":"lt.archive","projectId":9},'
+                 '{"action":"lt.describe","projectId":9,"description":"Objetivo"}]\n```')
+        self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "lt.archive", "projectId": 9},
+                                                                   {"action": "lt.describe", "projectId": 9, "description": "Objetivo"}])
+        prompt = uc.build_prompt(JOB, {"projects": [{"id": 9, "title": "LT B", "description": "Objetivo B"}], "tasks": []}, [])
+        self.assertIn("Descripción de la línea: Objetivo B", prompt)
+
     def test_reabrir_solo_tareas_completadas(self):
         reply = 'x\n```acciones\n[{"action":"task.reopen","taskId":82},{"action":"task.reopen","taskId":81}]\n```'
         self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.reopen", "taskId": 82}])

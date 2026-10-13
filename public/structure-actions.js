@@ -25,7 +25,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
   const byId = id => projects.find(p => String(p.id) === String(id));
   const taskById = id => tasks.find(t => String(t.id) === String(id));
   const ACTION_TEXT = {
-    'lt.create': 'Nueva línea de trabajo', 'lt.rename': 'Renombrar línea', 'lt.archive': 'Archivar línea',
+    'lt.create': 'Nueva línea de trabajo', 'lt.rename': 'Renombrar línea', 'lt.describe': 'Descripción de la línea', 'lt.archive': 'Archivar línea',
     'task.create': 'Nueva tarea', 'task.update': 'Editar tarea', 'task.move': 'Mover tarea a otra línea',
   };
 
@@ -218,6 +218,10 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
       button('Renombrar línea', () => open('lt.rename', [
         { name: 'title', label: 'Nuevo nombre', value: project.title, required: true },
       ], v => ({ projectId: project.id, title: v.title.trim() })));
+      button('Editar descripción', () => open('lt.describe', [
+        { name: 'description', label: 'Descripción de la línea', type: 'textarea', value: project.description || '' },
+      ], v => ({ projectId: project.id, description: v.description.trim() })));
+      // D25: the Worker and the bridge refuse it while the line has open tasks (the message says how many).
       button('Archivar línea', () => open('lt.archive', [], () => ({ projectId: project.id })), true);
     } else {
       return;

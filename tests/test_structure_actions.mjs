@@ -46,6 +46,7 @@ const valid = [
   { action: 'task.reopen', requestId: uuid(), taskId: 15 },
   { action: 'lt.create', requestId: uuid(), title: 'LT nueva' },
   { action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT2 renombrada' },
+  { action: 'lt.describe', requestId: uuid(), projectId: 4, description: ' Objetivo ' },
   { action: 'lt.archive', requestId: uuid(), projectId: 4 },
   { action: 'task.log', requestId: uuid(), taskId: 15, entry: 'Avance con el proveedor', entryDate: '2026-10-13', logKind: 'Avance' },
   { action: 'task.create', requestId: uuid(), projectId: 3, title: 'Con estructura', owner: 'Paula', dependency: 'Finanzas', criterion: 'Enviado', origin: 'form' },
@@ -73,6 +74,19 @@ const invalid = [
 ];
 for (const body of invalid) assert.equal((await call(env, 'POST', '/api/task-actions', body)).status, 400, JSON.stringify(body).slice(0, 80));
 
+// 1b. D24/D25: duplicate line names and archiving a line with open tasks are refused up front.
+for (const [body, message] of [
+  [{ action: 'lt.create', requestId: uuid(), title: '  lt1 ' }, /Ya existe una línea/],
+  [{ action: 'lt.rename', requestId: uuid(), projectId: 4, title: 'LT1' }, /Ya existe una línea/],
+  [{ action: 'lt.archive', requestId: uuid(), projectId: 3 }, /1 tareas abiertas/],
+]) {
+  const refused = await call(env, 'POST', '/api/task-actions', body);
+  assert.equal(refused.status, 409, body.action);
+  assert.match(refused.body.error, message);
+}
+assert.equal((await call(env, 'POST', '/api/task-actions', { action: 'lt.rename', requestId: uuid(), projectId: 3, title: 'lt1' })).status, 202,
+  'renaming a line to its own name with other casing is allowed');
+
 // 2. Scope: references must exist in the current snapshot.
 for (const body of [
   { action: 'task.create', requestId: uuid(), projectId: 99, title: 'fuera' },
@@ -90,6 +104,7 @@ const proofs = {
   'task.reopen': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], done: false }] })],
   'lt.create': [{ projectId: 5 }, s => ({ ...s, projects: [...s.projects, { id: 5, title: 'LT nueva' }] })],
   'lt.rename': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2 renombrada' }] })],
+  'lt.describe': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0], { id: 4, title: 'LT2', description: 'Objetivo' }] })],
   'lt.archive': [{ projectId: 4 }, s => ({ ...s, projects: [s.projects[0]], tasks: s.tasks.filter(t => t.project_id !== 4) })],
   'task.log': [{ taskId: 15 }, s => ({ ...s, tasks: [{ ...s.tasks[0], description: 'd\n\nAvance 2026-10-13: Avance con el proveedor' }] })],
 };

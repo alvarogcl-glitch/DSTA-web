@@ -117,7 +117,8 @@ function validSnapshot(snapshot) {
        Date.parse(snapshot.observationStartedAt) > Date.parse(snapshot.timestamp))) return false;
   const validRecord = item => item && typeof item === "object" && !Array.isArray(item) &&
     Number.isSafeInteger(item.id) && item.id > 0 && typeof item.title === "string";
-  if (snapshot.projects.some(item => !validRecord(item)) || snapshot.tasks.some(item => !validRecord(item))) return false;
+  if (snapshot.projects.some(item => !validRecord(item) || (item.description !== undefined && typeof item.description !== "string")) ||
+      snapshot.tasks.some(item => !validRecord(item))) return false;
   if (snapshot.labels !== undefined) {
     if (!Array.isArray(snapshot.labels) || snapshot.labels.some(l => !validRecord(l) ||
         typeof l.hex_color !== "string" || !/^[0-9a-f]{6}$/i.test(l.hex_color)) ||
@@ -279,11 +280,14 @@ const ACTION_SCHEMAS = {
   "task.reopen": { required: ["taskId"], optional: [] },
   "lt.create": { required: ["title"], optional: [] },
   "lt.rename": { required: ["projectId", "title"], optional: [] },
+  "lt.describe": { required: ["projectId", "description"], optional: [] },
   "lt.archive": { required: ["projectId"], optional: [] },
   // Same entry format as pmo_append_log: "<kind> <YYYY-MM-DD>: <entry>" appended to the description.
   "task.log": { required: ["taskId", "entry", "entryDate"], optional: ["logKind"] },
 };
 const LOG_KINDS = new Set(["Actualización", "Avance", "Seguimiento", "Nota", "Cierre"]);
+// D24: same normalization as tools/structure_actions.line_key.
+const lineKey = title => String(title || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
 // Same split as tools/structure_actions.split_description: metadata block, detail, trailing log.
 const METADATA_LABELS = new Set(["responsable", "fecha objetivo", "dependencia", "criterio de cierre", "source", "action_key"]);
 const LOG_ENTRY = /^(?:Actualización|Avance|Cierre|Nota|Seguimiento) \d{4}-\d{2}-\d{2}: /;
@@ -351,6 +355,7 @@ function actionResultMatches(job, snapshot, result) {
       return Boolean(created && created.title === job.title.trim());
     }
     case "lt.rename": return result.projectId === job.projectId && project(job.projectId)?.title === job.title.trim();
+    case "lt.describe": return result.projectId === job.projectId && project(job.projectId)?.description === job.description.trim();
     case "lt.archive": return result.projectId === job.projectId && !project(job.projectId);
     case "task.log": return result.taskId === job.taskId && String(task(job.taskId)?.description || "").includes(logLine(job));
     default: return false;
@@ -1175,6 +1180,15 @@ export class DashboardChatQueue extends DurableObject {
       }
       if (body.projectId !== undefined && !snapshot.projects.some(p => p.id === body.projectId)) {
         return json({ error: "La línea de trabajo no está en el snapshot actual." }, 404);
+      }
+      // D24/D25 early feedback (the bridge re-checks against Vikunja before writing).
+      if (["lt.create", "lt.rename"].includes(body.action) &&
+          snapshot.projects.some(p => p.id !== body.projectId && lineKey(p.title) === lineKey(body.title))) {
+        return json({ error: "Ya existe una línea con ese nombre." }, 409);
+      }
+      if (body.action === "lt.archive") {
+        const open = snapshot.tasks.filter(t => t.project_id === body.projectId && !t.done).length;
+        if (open) return json({ error: `La línea tiene ${open} tareas abiertas: complétalas o muévelas primero.` }, 409);
       }
       for (const [key, job] of jobs()) {
         if (["completed", "error"].includes(job.status) && now - Date.parse(job.completedAt) > 604_800_000) storage.delete(key);

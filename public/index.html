@@ -242,7 +242,7 @@ function back(){
  else closeDirect();
 }
 function taskView(t){return {title:'#'+t.id+' · '+t.title,taskId:String(t.id),fields:[['Estado',t.done?'Completada':'Abierta'],['Línea',t.project],['Responsable',t.owner],['Fecha / horizonte',t.date],['Dependencia',t.dependency],['Descripción estructurada',{html:descriptionLog(t.description)}]]}}
-function projectView(p){const all=tasks.filter(t=>String(t.project_id)===String(p.id)),items=all.filter(t=>!t.done);return {title:p.title,projectId:String(p.id),fields:[['Tareas totales',all.length],['Abiertas',items.length],['Completadas',all.length-items.length],['Responsables de tareas abiertas',[...new Set(items.map(t=>t.owner))].join(', ')||'Ninguno']],items}}
+function projectView(p){const all=tasks.filter(t=>String(t.project_id)===String(p.id)),items=all.filter(t=>!t.done);return {title:p.title,projectId:String(p.id),fields:[...(p.description?[['Descripción',p.description]]:[]),['Tareas totales',all.length],['Abiertas',items.length],['Completadas',all.length-items.length],['Responsables de tareas abiertas',[...new Set(items.map(t=>t.owner))].join(', ')||'Ninguno']],items}}
 function rebuildInspection(view){
  if(view.labelId)return window.DstaLabels?.labelView(view.labelId)||null;
  const project=view.projectId&&projects.find(p=>String(p.id)===view.projectId);

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
@@ -29,7 +30,7 @@ TASK_FIELDS = (
 PROJECT_FIELDS = ("id", "title", "description", "parent_project_id", "is_archived", "hex_color", "identifier",
                   "position", "is_favorite", "background_blur_hash", "background_information")
 NO_DUE_DATE = "0001-01-01T00:00:00Z"
-ACTIONS = {"task.create", "task.update", "task.move", "task.reopen", "task.log", "lt.create", "lt.rename", "lt.archive"}
+ACTIONS = {"task.create", "task.update", "task.move", "task.reopen", "task.log", "lt.create", "lt.rename", "lt.describe", "lt.archive"}
 LOG_KINDS = {"Actualización", "Avance", "Seguimiento", "Nota", "Cierre"}
 
 
@@ -69,6 +70,36 @@ def _task(request: Callable, task_id: int, project_id: int) -> dict:
     if any(field not in task for field in TASK_FIELDS):
         raise ValueError("No se pueden preservar todos los campos de la tarea")
     return task
+
+
+def line_key(title: str) -> str:
+    """D24: line names compare without case, accents or repeated spaces."""
+    text = unicodedata.normalize("NFKD", str(title or ""))
+    return " ".join("".join(c for c in text if not unicodedata.combining(c)).lower().split())
+
+
+def _pages(request: Callable, path: str) -> list[dict]:
+    items: list[dict] = []
+    for page in range(1, 101):
+        batch = request("GET", f"{path}?page={page}&per_page=100")
+        if not isinstance(batch, list):
+            raise RuntimeError("Respuesta inválida de Vikunja")
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+    return items
+
+
+def _unique_line_title(request: Callable, title: str, own_id: int | None) -> None:
+    root_id = _root(request)
+    for project in _pages(request, "/api/v1/projects"):
+        if (project.get("parent_project_id") == root_id and not project.get("is_archived") and project.get("id") != own_id
+                and line_key(project.get("title")) == line_key(title)):
+            raise ValueError("Ya existe una línea con ese nombre")
+
+
+def _line_tasks(request: Callable, project_id: int) -> list[dict]:
+    return _pages(request, f"/api/v1/projects/{project_id}/tasks")
 
 
 STRUCTURED_FIELDS = (("owner", "Responsable"), ("dueDate", "Fecha objetivo"), ("dependency", "Dependencia"),
@@ -222,8 +253,13 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
                 raise RuntimeError("Vikunja no confirmó la tarea")
         return {"taskId": task_id}
 
+    if action == "lt.rename":
+        _unique_line_title(request, title, job["projectId"])
+
     if action == "lt.create":
         def create() -> dict:
+            # Inside the remembered step: a retry after success must not see its own line as a duplicate.
+            _unique_line_title(request, title, None)
             root_id = _root(request)
             created = request("PUT", "/api/v1/projects", payload={"title": title, "parent_project_id": root_id})
             if not isinstance(created, dict) or created.get("parent_project_id") != root_id:
@@ -235,7 +271,13 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
     payload = {field: project[field] for field in PROJECT_FIELDS if field in project}
     if action == "lt.rename":
         payload["title"] = title
+    elif action == "lt.describe":  # D23
+        payload["description"] = str(job.get("description") or "").strip()
     else:
+        # D25: only lines without open tasks; completed ones are archived with it, never deleted.
+        open_tasks = sum(1 for task in _line_tasks(request, job["projectId"]) if not task.get("done"))
+        if open_tasks:
+            raise ValueError(f"La línea tiene {open_tasks} tareas abiertas: complétalas o muévelas primero")
         payload["is_archived"] = True
     written = request("POST", f"/api/v1/projects/{job['projectId']}", payload=payload)
     if not isinstance(written, dict) or written.get("id") != job["projectId"]:

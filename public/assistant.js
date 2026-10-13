@@ -158,6 +158,7 @@
       case 'task.reopen': return `Reabrir «${taskName(p.taskId)}»`;
       case 'lt.create': return `Crear línea «${p.title}»`;
       case 'lt.rename': return `Renombrar ${lineName(p.projectId)} → «${p.title}»`;
+      case 'lt.describe': return `Cambiar la descripción de ${lineName(p.projectId)}`;
       case 'lt.archive': return `Archivar ${lineName(p.projectId)}`;
       default: return p.action;
     }

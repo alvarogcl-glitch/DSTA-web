@@ -35,9 +35,16 @@ class FakeVikunja:
         self.next_id = 200
 
     def __call__(self, method, path, payload=None, **kwargs):
+        path, _, query = path.partition("?")
         parts = path.strip("/").split("/")  # api v1 <res> <id> [tasks]
         res, ident = parts[2], (int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None)
         store = self.projects if res == "projects" else self.tasks
+        if method == "GET" and "page=" in query:  # paginated lists (one page)
+            if "page=1&" not in query:
+                return []
+            if ident is None:
+                return copy.deepcopy(list(self.projects.values()))
+            return copy.deepcopy([t for t in self.tasks.values() if t["project_id"] == ident])
         if method == "GET":
             if ident not in store:
                 raise ValueError("404")
@@ -145,6 +152,34 @@ class StructureActionsTest(unittest.TestCase):
         self.run_action({"action": "task.move", "taskId": 100, "sourceProjectId": 8, "projectId": 9})
         self.assertEqual(self.vk.tasks[100]["project_id"], 9)
         self.assertEqual(self.vk.tasks[100]["assignees"], [{"id": 9}])
+
+    def test_nombres_de_linea_unicos(self):
+        """D24: no two active lines with the same name (case, accents and spaces ignored)."""
+        for job in ({"action": "lt.create", "title": "lt  a1"}, {"action": "lt.rename", "projectId": 9, "title": "LT Á1"}):
+            with self.assertRaisesRegex(ValueError, "Ya existe una línea con ese nombre"):
+                self.run_action(job)
+        self.assertEqual(self.vk.writes, [])
+        self.run_action({"action": "lt.rename", "projectId": 8, "title": "lt a1"})  # same line, other casing: allowed
+        self.run_action({"action": "lt.create", "title": "LT ajena"})  # another user's root does not count
+        created = self.run_action({"action": "lt.create", "title": "Nueva única", "id": "req-new"})
+        self.assertEqual(self.run_action({"action": "lt.create", "title": "Nueva única", "id": "req-new"}), created,
+                         "a retry of the same request is not a duplicate")
+
+    def test_archivar_solo_sin_tareas_abiertas(self):
+        """D25: a line with open tasks is not archived; completed ones go with it."""
+        with self.assertRaisesRegex(ValueError, "1 tareas abiertas"):
+            self.run_action({"action": "lt.archive", "projectId": 8})
+        self.assertFalse(self.vk.projects[8]["is_archived"])
+        self.vk.tasks[100]["done"] = True
+        self.run_action({"action": "lt.archive", "projectId": 8, "id": "req-2"})
+        self.assertTrue(self.vk.projects[8]["is_archived"])
+        self.assertIn(100, self.vk.tasks, "completed tasks are kept")
+
+    def test_descripcion_de_linea(self):
+        """D23: editing a line's description keeps its other fields."""
+        self.run_action({"action": "lt.describe", "projectId": 8, "description": " Objetivo de la línea "})
+        self.assertEqual(self.vk.projects[8]["description"], "Objetivo de la línea")
+        self.assertEqual((self.vk.projects[8]["title"], self.vk.projects[8]["hex_color"]), ("LT A1", "00ff00"))
 
     def test_reabrir_tarea_completada(self):
         """D14: reopening only flips done; every other field is preserved."""

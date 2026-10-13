@@ -102,7 +102,8 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
         project_id = int(project["id"])
         raw_tasks = pages(base_url, f"/api/v1/projects/{project_id}/tasks", token)
         project_summary.append(
-            {"id": project["id"], "title": project["title"], "count": len(raw_tasks)}
+            {"id": project["id"], "title": project["title"], "count": len(raw_tasks),
+             "description": str(project.get("description") or "")}
         )
         for raw in raw_tasks:
             description = raw.get("description") or ""

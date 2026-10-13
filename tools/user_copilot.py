@@ -19,6 +19,7 @@ import json
 import os
 import re
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -45,6 +46,7 @@ INSTRUCTIONS = (
     '(la bitácora no se edita ni se borra), '
     '{"action":"task.move","taskId":<id>,"projectId":<LT destino>}, {"action":"complete","taskId":<id>}, {"action":"task.reopen","taskId":<id completada>}, '
     '{"action":"lt.create","title":"..."}, {"action":"lt.rename","projectId":<LT>,"title":"..."}, '
+    '{"action":"lt.describe","projectId":<LT>,"description":"..."}, '
     '{"action":"lt.archive","projectId":<LT>}. Omite los campos que no sepas. Pedido explícito, por ejemplo: '
     '{"action":"complete","taskId":<id>,"ejecutar": true}.')
 
@@ -68,6 +70,8 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
         by_project.setdefault(task.get("project_id"), []).append(task)
     for project in snapshot.get("projects", []):
         lines.append(f"### {project.get('title', '')} (LT {project.get('id')})")
+        if project.get("description"):
+            lines.append(f"Descripción de la línea: {project['description']}")
         for task in by_project.get(project.get("id"), []):
             state = "completada" if task.get("done") else "abierta"
             extra = " · ".join(v for v in (task.get("owner"), task.get("date")) if v)
@@ -93,9 +97,15 @@ SCHEMAS = {
     # D06-A: an edit replaces only the detail; metadata goes in its fields and the log is append-only.
     "task.update": (("taskId", "title"), ("detail", "dueDate", "owner", "dependency", "criterion")),
     "task.move": (("taskId", "projectId"), ()), "task.reopen": (("taskId",), ()),
-    "lt.create": (("title",), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
+    "lt.create": (("title",), ()), "lt.describe": (("projectId", "description"), ()), "lt.rename": (("projectId", "title"), ()), "lt.archive": (("projectId",), ()),
 }
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def line_key(title) -> str:
+    """Same normalization as structure_actions.line_key (case, accents and spaces ignored)."""
+    text = unicodedata.normalize("NFKD", str(title or ""))
+    return " ".join("".join(c for c in text if not unicodedata.combining(c)).lower().split())
 
 
 def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
@@ -127,6 +137,14 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
     if clean["action"] == "complete" and tasks[clean["taskId"]].get("done"):
         return None
     if clean["action"] == "task.reopen" and not tasks[clean["taskId"]].get("done"):
+        return None
+    # D24/D25: same rules as the dashboard buttons.
+    if clean["action"] in ("lt.create", "lt.rename") and any(
+            p.get("id") != clean.get("projectId") and line_key(p.get("title")) == line_key(clean["title"])
+            for p in snapshot.get("projects", [])):
+        return None
+    if clean["action"] == "lt.archive" and any(
+            t.get("project_id") == clean["projectId"] and not t.get("done") for t in tasks.values()):
         return None
     if clean["action"] == "task.move" and tasks[clean["taskId"]].get("project_id") == clean["projectId"]:
         return None
