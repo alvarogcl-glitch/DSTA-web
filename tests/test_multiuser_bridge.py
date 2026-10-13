@@ -175,6 +175,27 @@ class MinuteInboxBridgeTest(unittest.TestCase):
         self.assertEqual(done, [{"id": "d1"}])
 
 
+class SummaryBridgeTest(unittest.TestCase):
+    def test_resumenes_ia_por_usuario(self):
+        finished = []
+
+        class FakeCopilot:
+            def ask(self, actor, user, prompt):
+                assert "Revisar contrato" in prompt and user["vikunjaToken"] == "token-de-A"
+                return '{"summaries":[{"id":7,"summary":"Resumen","nextAction":"Firmar","attention":"normal"},{"id":999,"summary":"ajena"}]}'
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if "kind=summary" in url:
+                return {"job": {"id": "s1", "kind": "summary", "tasks": [{"id": 7, "title": "Revisar contrato"}]}}
+            return {"ok": True}
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json, process_job=None,
+                                    finish_job=lambda base, token, job, **kw: finished.append((base, job["id"], kw)),
+                                    users_dir=Path("C:/tmp/x"), publish_snapshot=lambda *a, **k: "ts", copilot=FakeCopilot())
+        bridge.publish_all(["demo-a"])
+        self.assertEqual(finished, [(f"{BASE}/u/demo-a", "s1", {"summaries": [
+            {"id": 7, "summary": "Resumen", "nextAction": "Firmar", "attention": "normal"}]})], "solo ids pedidos")
+
+
 class FakeGranolaService:
     def __init__(self):
         self.calls = []

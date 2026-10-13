@@ -156,6 +156,26 @@ class MultiuserBridge:
             return
         self.finish_job(base, self.token, job, error=COPILOT_PENDING if job.get("kind") == "chat" else SUMMARY_NOT_APPLICABLE)
 
+    def summarize(self, actor: str, user: dict, job: dict) -> None:
+        """AI summaries for the user's AI-enabled sections, on their isolated Copilot."""
+        import json as _json
+        import hermes_bridge as hb
+        base = self.user_base(actor)
+        try:
+            tasks = job.get("tasks") or []
+            allowed = {str(task.get("id")) for task in tasks}
+            reply = self.copilot.ask(actor, user, f"{hb.SUMMARY_INSTRUCTIONS}\n\nTareas para resumir:\n{_json.dumps(tasks, ensure_ascii=False)}")
+            start, end = reply.find("{"), reply.rfind("}")
+            items = _json.loads(reply[start:end + 1]).get("summaries", []) if start >= 0 else []
+            summaries = [item for item in items if isinstance(item, dict) and str(item.get("id")) in allowed]
+            self.finish_job(base, self.token, job, summaries=summaries)
+        except Exception as error:
+            log(f"resúmenes de {actor[:20]} fallaron ({type(error).__name__})")
+            try:
+                self.finish_job(base, self.token, job, error="No se pudieron generar los resúmenes.")
+            except Exception:
+                pass
+
     def answer_chat(self, actor: str, user: dict, job: dict) -> None:
         """F5: answer with the user's own snapshot and minutes, on the isolated Copilot."""
         import user_copilot
@@ -288,6 +308,11 @@ class MultiuserBridge:
                 published += 1
                 # Status lights: the Worker shows red after 12 min without a report.
                 self.report_health(actor, user, {"id": ""})
+                # AI summaries for sections that enable them are queued by the snapshot itself.
+                if self.copilot:
+                    summary = self.request_json(f"{self.user_base(actor)}/api/bridge/next?kind=summary", token=self.token, timeout=10).get("job")
+                    if summary:
+                        self._run(self.analysis_pool, self.summarize, actor, user, summary)
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 log(f"snapshot de {actor[:20]} falló ({type(error).__name__})")
         return published

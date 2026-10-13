@@ -704,6 +704,93 @@ async function granolaBridgeUpdate(request, env, box) {
   }, box);
 }
 
+// ── Customisable dashboard sections (layout per box) ────────────────────────────────────
+const BUILTIN_SECTIONS = {
+  portfolio: "Portafolio por línea de trabajo", upcoming: "Tareas con fechas próximas",
+  cata: "Cata 1-1", labels: "Portafolio por etiqueta", inventory: "Inventario operativo completo",
+};
+const FILTER_FIELDS = new Set(["title", "description", "owner", "dependency", "criterion"]);
+export function defaultLayout({ cata = true } = {}) {
+  return { version: 1, sections: Object.entries(BUILTIN_SECTIONS)
+    .filter(([key]) => cata || key !== "cata")
+    .map(([key, title]) => ({ id: key, kind: "builtin", key, title, enabled: true })) };
+}
+const fold = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// Same semantics as public/layout.js: keywords OR (whole words, case/accent-insensitive) over the
+// chosen fields; every other given criterion must hold (AND).
+export function taskMatchesFilters(task, filters = {}) {
+  if (filters.status === "open" && task.done) return false;
+  const keywords = (filters.keywords || []).map(fold).filter(Boolean);
+  if (keywords.length) {
+    const fields = filters.fields?.length ? filters.fields : ["title", "description", "owner", "dependency", "criterion"];
+    const text = fields.map(field => fold(task[field])).join(" \n ");
+    if (!keywords.some(word => new RegExp(`(^|[^a-z0-9])${escapeRegExp(word)}($|[^a-z0-9])`).test(text))) return false;
+  }
+  if (filters.owner && !fold(task.owner).includes(fold(filters.owner))) return false;
+  if (filters.dependency && !fold(task.dependency).includes(fold(filters.dependency))) return false;
+  if (filters.projectIds?.length && !filters.projectIds.includes(task.project_id)) return false;
+  if (filters.labelIds?.length && !(task.label_ids || []).some(id => filters.labelIds.includes(id))) return false;
+  return true;
+}
+function cleanLayout(layout) {
+  if (!layout || layout.version !== 1 || !Array.isArray(layout.sections) || !layout.sections.length || layout.sections.length > 30) return null;
+  const ids = new Set();
+  const text = (value, max) => typeof value === "string" && value.trim() && value.trim().length <= max ? value.trim() : null;
+  const sections = [];
+  for (const section of layout.sections) {
+    if (!section || typeof section !== "object" || !/^[a-z0-9-]{1,40}$/.test(section.id || "") || ids.has(section.id)) return null;
+    ids.add(section.id);
+    const title = text(section.title, 80);
+    if (!title || typeof section.enabled !== "boolean") return null;
+    if (section.kind === "builtin") {
+      if (!BUILTIN_SECTIONS[section.key] || section.id !== section.key) return null;
+      sections.push({ id: section.id, kind: "builtin", key: section.key, title, enabled: section.enabled });
+      continue;
+    }
+    if (section.kind !== "custom" || !section.filters || typeof section.filters !== "object") return null;
+    const f = section.filters, filters = {};
+    if (f.keywords !== undefined) {
+      if (!Array.isArray(f.keywords) || f.keywords.length > 20 || f.keywords.some(k => !text(k, 60))) return null;
+      filters.keywords = f.keywords.map(k => k.trim());
+    }
+    if (f.fields !== undefined) {
+      if (!Array.isArray(f.fields) || f.fields.some(field => !FILTER_FIELDS.has(field))) return null;
+      filters.fields = f.fields;
+    }
+    for (const key of ["owner", "dependency"]) {
+      if (f[key] !== undefined && f[key] !== "") {
+        if (!text(f[key], 80)) return null;
+        filters[key] = f[key].trim();
+      }
+    }
+    for (const key of ["projectIds", "labelIds"]) {
+      if (f[key] !== undefined) {
+        if (!Array.isArray(f[key]) || f[key].length > 50 || f[key].some(id => !Number.isSafeInteger(id) || id <= 0)) return null;
+        filters[key] = f[key];
+      }
+    }
+    if (f.status !== undefined) {
+      if (!["open", "all"].includes(f.status)) return null;
+      filters.status = f.status;
+    }
+    if (!filters.keywords?.length && !filters.owner && !filters.dependency && !filters.projectIds?.length && !filters.labelIds?.length) return null;
+    sections.push({ id: section.id, kind: "custom", title, enabled: section.enabled,
+      ...(section.ai === true ? { ai: true } : {}), filters });
+  }
+  return { version: 1, sections };
+}
+async function layoutRoute(request, env, box) {
+  if (request.method === "GET") return json({ layout: await chatStub(env, box).layout() });
+  if (request.method !== "PUT") return json({ error: "Método no permitido" }, 405);
+  const parsed = await readJson(request, 32_000);
+  if (parsed.error) return parsed.error;
+  const layout = cleanLayout(parsed.body?.layout);
+  if (!layout) return json({ error: "Configuración de secciones inválida." }, 400);
+  await chatStub(env, box).saveLayout(layout);
+  return json({ ok: true, layout });
+}
+
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
 // Snapshot and Cata summaries remain in Workers KV, where eventual consistency is acceptable.
 export class DashboardChatQueue extends DurableObject {
@@ -1162,6 +1249,24 @@ export class DashboardChatQueue extends DurableObject {
 
   healthStatus() { return this.ctx.storage.kv.get("data:health") || {}; }
 
+  layout() {
+    // Production keeps its five sections (Cata 1-1 included); new users start with four.
+    return this.ctx.storage.kv.get("data:layout") || defaultLayout({ cata: this.legacyAllowed() });
+  }
+
+  saveLayout(layout) {
+    this.ctx.storage.kv.put("data:layout", layout);
+    return true;
+  }
+
+  // Tasks that get AI summaries: Cata 1-1 (if shown) plus every enabled custom section with AI.
+  summaryTasks(tasks) {
+    const sections = this.layout().sections.filter(section => section.enabled);
+    const cata = sections.some(section => section.kind === "builtin" && section.key === "cata");
+    const ai = sections.filter(section => section.kind === "custom" && section.ai);
+    return tasks.filter(task => (cata && isCataTask(task)) || ai.some(section => taskMatchesFilters(task, section.filters)));
+  }
+
   // F2: delete everything stored for a removed user (only reachable for user boxes).
   async wipe() {
     if (typeof this.ctx.storage.deleteAll === "function") {
@@ -1237,7 +1342,7 @@ export class DashboardChatQueue extends DurableObject {
 
   async enqueueChangedCataTasks(tasks) {
     if (!this.env.DSTA_BRIDGE_TOKEN) return;
-    const cataTasks = tasks.filter(isCataTask).slice(0, 80);
+    const cataTasks = this.summaryTasks(tasks).slice(0, 80);
     const hashes = await Promise.all(cataTasks.map(hash));
     const existing = await this.storedSummaries();
     const storage = this.ctx.storage.kv;
@@ -1423,7 +1528,7 @@ export default {
 
       // Basic auth is ambient browser authority: reject foreign-site writes before
       // reading a body or scheduling a job. CLI clients without Origin remain valid.
-      if (request.method === "POST" && ["/api/assistant", "/api/label-actions", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh"].includes(url.pathname)) {
+      if (["POST", "PUT"].includes(request.method) && ["/api/assistant", "/api/label-actions", "/api/task-actions", "/api/minutes/seen", "/api/minutes/decide", "/api/health/refresh", "/api/preferences/layout"].includes(url.pathname)) {
         const origin = request.headers.get("origin");
         const site = request.headers.get("sec-fetch-site");
         if ((origin !== null && origin !== url.origin) || (site && site !== "same-origin" && site !== "none")) {
@@ -1481,6 +1586,7 @@ export default {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return serveSnapshot(env, box);
     }
+    if (url.pathname === "/api/preferences/layout") return layoutRoute(request, env, box);
     if (url.pathname === "/api/label-actions") return announce(labelActionRoute(request, url, env, box), "label");
     if (url.pathname === "/api/task-actions") return announce(taskActionRoute(request, url, env, box), "action");
     if (url.pathname === "/api/assistant") {
