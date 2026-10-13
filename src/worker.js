@@ -716,8 +716,7 @@ export function defaultLayout({ cata = true } = {}) {
     .map(([key, title]) => ({ id: key, kind: "builtin", key, title, enabled: true })) };
 }
 const fold = value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// Same semantics as public/layout.js: keywords OR (whole words, case/accent-insensitive) over the
+// Same semantics as public/layout.js: keywords OR (partial, case/accent-insensitive) over the
 // chosen fields; every other given criterion must hold (AND).
 export function taskMatchesFilters(task, filters = {}) {
   if (filters.status === "open" && task.done) return false;
@@ -725,7 +724,7 @@ export function taskMatchesFilters(task, filters = {}) {
   if (keywords.length) {
     const fields = filters.fields?.length ? filters.fields : ["title", "description", "owner", "dependency", "criterion"];
     const text = fields.map(field => fold(task[field])).join(" \n ");
-    if (!keywords.some(word => new RegExp(`(^|[^a-z0-9])${escapeRegExp(word)}($|[^a-z0-9])`).test(text))) return false;
+    if (!keywords.some(word => text.includes(word))) return false;
   }
   if (filters.owner && !fold(task.owner).includes(fold(filters.owner))) return false;
   if (filters.dependency && !fold(task.dependency).includes(fold(filters.dependency))) return false;

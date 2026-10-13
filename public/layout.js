@@ -1,6 +1,6 @@
 'use strict';
 // Customisable dashboard sections: order, on/off, names and custom filter sections (keywords,
-// owner, dependency, work lines, labels, status) with optional AI summaries — like Cata 1-1.
+// owner, dependency, work lines, labels, status) with optional AI summaries.
 // The layout is stored per box (/api/preferences/layout) and edited from the settings gear.
 (() => {
   const BUILTIN_ANCHORS = { portfolio: '#projects', upcoming: '#upcoming', cata: '#cata', labels: '#label-section', inventory: '#rows' };
@@ -8,7 +8,6 @@
   let layout = null;
 
   const fold = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // Same semantics as taskMatchesFilters in src/worker.js.
   function matches(task, filters = {}) {
     if (filters.status === 'open' && task.done) return false;
@@ -16,7 +15,7 @@
     if (keywords.length) {
       const fields = filters.fields?.length ? filters.fields : Object.keys(FIELD_LABELS);
       const text = fields.map(field => fold(task[field])).join(' \n ');
-      if (!keywords.some(word => new RegExp(`(^|[^a-z0-9])${escapeRegExp(word)}($|[^a-z0-9])`).test(text))) return false;
+      if (!keywords.some(word => text.includes(word))) return false;
     }
     if (filters.owner && !fold(task.owner).includes(fold(filters.owner))) return false;
     if (filters.dependency && !fold(task.dependency).includes(fold(filters.dependency))) return false;
@@ -54,6 +53,10 @@
       previous = element;
     }
     document.querySelectorAll('section[data-custom-section]').forEach(element => { if (!wanted.has(element)) element.remove(); });
+    for (const key of Object.keys(BUILTIN_ANCHORS)) {
+      const element = builtinSection(key);
+      if (element && !wanted.has(element)) element.hidden = true;
+    }
     renderCustom();
   }
 
@@ -96,7 +99,7 @@
     renderSummaries();
   }
 
-  // AI summaries (computed on the server for sections with AI enabled), shown like Cata 1-1.
+  // AI summaries (computed on the server for sections with AI enabled).
   function renderSummaries() {
     const summaries = window.__dstaAiSummaries || {};
     document.querySelectorAll('.dsta-ai-section .priority-card[data-task]').forEach(card => {
@@ -139,7 +142,8 @@ dialog.dsta-section-dialog{width:min(520px,calc(100vw - 32px));background:#151b2
 dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
 .dsta-section-dialog label{display:block;margin:10px 0 4px;font-size:13px;color:#c5d1dd}
 .dsta-section-dialog input[type=text],.dsta-section-dialog select{width:100%;padding:8px;border-radius:8px;border:1px solid #3a4859;background:#0d1117;color:#eef3f8}
-.dsta-section-dialog select[multiple]{min-height:90px}
+.dsta-checklist{max-height:150px;overflow:auto;border:1px solid #3a4859;border-radius:8px;padding:6px 8px;background:#0d1117;display:grid;gap:4px}
+.dsta-checklist label{display:flex;gap:6px;align-items:center;margin:0;font-size:13px;color:#eef3f8}
 .dsta-section-dialog .checks{display:flex;flex-wrap:wrap;gap:10px}.dsta-section-dialog .checks label{display:flex;gap:4px;margin:0;align-items:center}
 .dsta-section-dialog .row{display:flex;gap:8px;margin-top:14px}.dsta-section-dialog .row button{flex:1}
 .dsta-section-dialog .hint{font-size:12px;color:#9bacbd;margin:4px 0 0}`;
@@ -219,7 +223,7 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
     form.append(Object.assign(document.createElement('h2'), { textContent: existing ? 'Editar sección' : 'Nueva sección' }));
     const name = field('Nombre de la sección', Object.assign(document.createElement('input'), { type: 'text', value: section.title, maxLength: 80, required: true, name: 'title' }));
     const keywords = field('Palabras clave (separadas por coma)', Object.assign(document.createElement('input'), { type: 'text', value: (f.keywords || []).join(', '), name: 'keywords' }),
-      'Basta que aparezca una. Ej.: Cata, Catalina');
+      'Basta que aparezca una; también encuentra palabras parciales. Ej.: proveedor, contrato');
     const fieldsBox = Object.assign(document.createElement('div'), { className: 'checks' });
     for (const [key, label] of Object.entries(FIELD_LABELS)) {
       const check = Object.assign(document.createElement('input'), { type: 'checkbox', value: key, checked: !f.fields?.length || f.fields.includes(key) });
@@ -230,21 +234,28 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
     field('Buscar las palabras en', fieldsBox);
     const owner = field('Responsable contiene', Object.assign(document.createElement('input'), { type: 'text', value: f.owner || '', name: 'owner', maxLength: 80 }));
     const dependency = field('Dependencia contiene', Object.assign(document.createElement('input'), { type: 'text', value: f.dependency || '', name: 'dependency', maxLength: 80 }));
-    const multi = (items, chosen) => {
-      const select = Object.assign(document.createElement('select'), { multiple: true });
-      for (const item of items) select.append(new Option(item.title, String(item.id), false, (chosen || []).includes(item.id)));
-      return select;
+    const checklist = (items, chosen, empty) => {
+      const box = Object.assign(document.createElement('div'), { className: 'dsta-checklist' });
+      if (!items.length) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: empty }));
+      for (const item of items) {
+        const check = Object.assign(document.createElement('input'), { type: 'checkbox', value: String(item.id), checked: (chosen || []).includes(item.id) });
+        const wrap = document.createElement('label');
+        wrap.append(check, document.createTextNode(item.title));
+        box.append(wrap);
+      }
+      return box;
     };
-    const lines = field('Líneas de trabajo (opcional)', multi(typeof projects !== 'undefined' ? projects : [], f.projectIds), 'Ctrl/Cmd + clic para elegir varias.');
+    const picked = box => [...box.querySelectorAll('input:checked')].map(c => Number(c.value));
+    const lines = field('Líneas de trabajo (opcional: sin marcar = todas)', checklist(typeof projects !== 'undefined' ? projects : [], f.projectIds, 'Aún no hay líneas.'));
     const labelList = typeof labels !== 'undefined' && Array.isArray(labels) ? labels : [];
-    const labelSelect = field('Etiquetas (opcional)', multi(labelList, f.labelIds));
+    const labelSelect = field('Etiquetas (opcional: sin marcar = todas)', checklist(labelList, f.labelIds, 'Aún no hay etiquetas.'));
     const status = Object.assign(document.createElement('select'), { name: 'status' });
-    status.append(new Option('Pendientes + completadas como antecedentes (como Cata 1-1)', 'all', false, f.status !== 'open'),
+    status.append(new Option('Pendientes + completadas como antecedentes', 'all', false, f.status !== 'open'),
       new Option('Solo pendientes', 'open', false, f.status === 'open'));
     field('Qué tareas mostrar', status);
     const ai = Object.assign(document.createElement('input'), { type: 'checkbox', checked: Boolean(section.ai), name: 'ai' });
     const aiLabel = document.createElement('label');
-    aiLabel.append(ai, document.createTextNode(' Mostrar resúmenes con IA (como Cata 1-1)'));
+    aiLabel.append(ai, document.createTextNode(' Mostrar resúmenes con IA en las tarjetas'));
     form.append(aiLabel);
     const error = Object.assign(document.createElement('p'), { className: 'hint' });
     error.setAttribute('role', 'alert');
@@ -263,9 +274,9 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
       if (words.length && chosenFields.length && chosenFields.length < Object.keys(FIELD_LABELS).length) filters.fields = chosenFields;
       if (owner.value.trim()) filters.owner = owner.value.trim();
       if (dependency.value.trim()) filters.dependency = dependency.value.trim();
-      const pids = [...lines.selectedOptions].map(o => Number(o.value));
+      const pids = picked(lines);
       if (pids.length) filters.projectIds = pids;
-      const lids = [...labelSelect.selectedOptions].map(o => Number(o.value));
+      const lids = picked(labelSelect);
       if (lids.length) filters.labelIds = lids;
       filters.status = status.value;
       if (!name.value.trim()) { error.textContent = 'Ponle un nombre a la sección.'; return; }

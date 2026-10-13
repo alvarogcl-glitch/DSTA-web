@@ -57,7 +57,8 @@ for (const bad of [
 // 4. Matcher (same semantics the browser uses).
 const task = { id: 5, title: 'Revisar contrato', owner: 'Nelson Pérez', description: 'Pendiente firma', dependency: 'Legal', done: false, project_id: 3, label_ids: [7] };
 assert.ok(taskMatchesFilters(task, { keywords: ['nelson'], fields: ['owner'] }), 'case/accent-insensitive');
-assert.ok(!taskMatchesFilters(task, { keywords: ['Nel'], fields: ['owner'] }), 'whole words');
+assert.ok(taskMatchesFilters(task, { keywords: ['Nel'], fields: ['owner'] }), 'partial words match (more intuitive)');
+assert.ok(!taskMatchesFilters(task, { keywords: ['Nelson'], fields: ['title'] }), 'only in the chosen fields');
 assert.ok(taskMatchesFilters(task, { keywords: ['firma'], fields: ['description'], projectIds: [3], labelIds: [7] }));
 assert.ok(!taskMatchesFilters(task, { keywords: ['firma'], fields: ['description'], projectIds: [4] }), 'all criteria must hold');
 assert.ok(taskMatchesFilters(task, { dependency: 'legal' }));
