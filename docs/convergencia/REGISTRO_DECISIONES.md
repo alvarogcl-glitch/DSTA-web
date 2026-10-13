@@ -69,7 +69,8 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 - Prueba visual: sin revisión en navegador; queda la prueba del CEO.
 - Versiones: Worker staging 99149651-5972-4db8-93de-125705045d55; puente multiusuario reiniciado con 3d37438.
 - Rollback: revertir 3d37438, redeploy de staging y reiniciar el puente.
-- Pendiente: prueba del CEO, en dos pasos:
+- Verificación del CEO (Telegram 13-10 22:02: «1 check / 2 check»): formulario con campos nuevos y creación sin clic desde el copiloto OK. D03, D04, D07 → **verificado piloto**.
+- Prueba que se le pidió al CEO, en dos pasos:
   1. Crear desde el formulario con los campos nuevos.
   2. Pedir al copiloto «crea la tarea X en la LT Y» y confirmar que se crea sin clic.
   
