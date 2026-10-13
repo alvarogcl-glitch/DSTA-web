@@ -555,14 +555,41 @@ async function accountsLogout(env, session) {
 
 // The bridge is trusted for every user, but must say which one it acts for; the box comes
 // from D1, never from a name the caller builds.
-async function bridgeBox(request, env, url) {
-  const authorized = url.pathname === "/api/ingest" ? ingestAuthorized(request, env) : bridgeAuthorized(request, env);
+async function bridgeBox(request, env, bridgePath, pathActor = null) {
+  const authorized = bridgePath === "/api/ingest" ? ingestAuthorized(request, env) : bridgeAuthorized(request, env);
   if (!authorized) return { error: json({ error: "No autorizado" }, 401) };
-  const actorId = request.headers.get("x-dsta-actor") || "";
+  const headerActor = request.headers.get("x-dsta-actor");
+  if (pathActor && headerActor && headerActor !== pathActor) return { error: json({ error: "Usuario contradictorio." }, 400) };
+  const actorId = pathActor || headerActor || "";
   if (!ACTOR_ID.test(actorId)) return { error: json({ error: "Falta el usuario (X-DSTA-Actor)." }, 400) };
   const user = await env.DB.prepare("SELECT id, do_name FROM users WHERE id = ? AND disabled_at IS NULL").bind(actorId).first();
   if (!user) return { error: json({ error: "Usuario no encontrado." }, 404) };
   return { box: boxOf(user) };
+}
+
+// F1 dispatcher: a single box remembers which users have pending work, so the bridge makes
+// one poll for N users and only then polls the queues of those users.
+const DISPATCH_BOX = "dispatch";
+const DISPATCH_KINDS = new Set(["chat", "action", "label", "health"]);
+async function markPending(env, actorId, kind) {
+  await chatStub(env, DISPATCH_BOX).fetch(new Request("https://chat.internal/dispatch/mark", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor: actorId, kind }),
+  }));
+}
+async function dispatchRoute(request, env) {
+  if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+  if (request.method === "GET") return chatStub(env, DISPATCH_BOX).fetch("https://chat.internal/dispatch/list");
+  if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+  const parsed = await readJson(request, 4096);
+  if (parsed.error) return parsed.error;
+  const { actor, kinds, seenAt } = parsed.body || {};
+  if (!ACTOR_ID.test(String(actor || "")) || !Array.isArray(kinds) || !kinds.length ||
+      kinds.some(kind => !DISPATCH_KINDS.has(kind)) || !Number.isFinite(seenAt)) {
+    return json({ error: "Confirmación de despacho inválida." }, 400);
+  }
+  return chatStub(env, DISPATCH_BOX).fetch(new Request("https://chat.internal/dispatch/ack", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor, kinds, seenAt }),
+  }));
 }
 
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
@@ -571,6 +598,8 @@ export class DashboardChatQueue extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const storage = this.ctx.storage.kv;
+
+    if (url.pathname.startsWith("/dispatch/")) return this.dispatchRequest(request, url);
 
     if (url.pathname.startsWith("/labels/")) return this.labelRequest(request, url);
 
@@ -713,6 +742,32 @@ export class DashboardChatQueue extends DurableObject {
       return json({ ok: true });
     }
 
+    return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
+  async dispatchRequest(request, url) {
+    const storage = this.ctx.storage.kv;
+    if (url.pathname === "/dispatch/mark" && request.method === "POST") {
+      const { actor, kind } = await request.json();
+      const marks = storage.get(`pending:${actor}`) || {};
+      marks[kind] = Date.now();
+      storage.put(`pending:${actor}`, marks);
+      return json({ ok: true });
+    }
+    if (url.pathname === "/dispatch/list" && request.method === "GET") {
+      const pending = Object.fromEntries([...storage.list({ prefix: "pending:" })]
+        .map(([key, marks]) => [key.slice("pending:".length), marks]));
+      return json({ now: Date.now(), pending });
+    }
+    if (url.pathname === "/dispatch/ack" && request.method === "POST") {
+      const { actor, kinds, seenAt } = await request.json();
+      const marks = storage.get(`pending:${actor}`) || {};
+      // Only marks not newer than the dispatch read are cleared: work queued meanwhile stays.
+      for (const kind of kinds) if (marks[kind] !== undefined && marks[kind] <= seenAt) delete marks[kind];
+      if (Object.keys(marks).length) storage.put(`pending:${actor}`, marks);
+      else storage.delete(`pending:${actor}`);
+      return json({ ok: true });
+    }
     return json({ error: "Ruta interna no encontrada." }, 404);
   }
 
@@ -1092,13 +1147,19 @@ export default {
       "/api/bridge/minute": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/upsert", box)],
       "/api/bridge/decision-done": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/decision-done", box)],
     };
-    const bridgeRoute = bridgeRoutes[url.pathname];
+    // Accounts mode: the bridge may name the actor in the path (/u/<actor>/api/bridge/...).
+    const prefixed = accounts ? /^\/u\/([a-z0-9][a-z0-9-]{0,62})(\/api\/(?:bridge\/[a-z-]+|ingest))$/.exec(url.pathname) : null;
+    if (accounts && url.pathname.startsWith("/u/") && !prefixed) return json({ error: "No encontrado" }, 404);
+    const bridgePath = prefixed ? prefixed[2] : url.pathname;
+    if (accounts && bridgePath === "/api/bridge/dispatch" && !prefixed) return dispatchRoute(request, env);
+    const bridgeRoute = bridgeRoutes[bridgePath];
     if (bridgeRoute) {
       if (request.method !== bridgeRoute[0]) return json({ error: "Método no permitido" }, 405);
       if (!accounts) return bridgeRoute[1](request, LEGACY_BOX);
-      const resolved = await bridgeBox(request, env, url);
+      const resolved = await bridgeBox(request, env, bridgePath, prefixed ? prefixed[1] : null);
       return resolved.error || bridgeRoute[1](request, resolved.box);
     }
+    if (prefixed) return json({ error: "No encontrado" }, 404);
 
     // Android fetches installation metadata without the user's Basic credentials.
     // Expose only exact, generic PWA assets; all dashboard files and APIs stay private.
@@ -1151,29 +1212,40 @@ export default {
       }
     }
 
+    // Accounts mode: announce new work to the dispatcher after a successful browser write.
+    const announce = async (pending, kind) => {
+      const response = await pending;
+      if (kind && accounts && session && request.method === "POST" && response.status >= 200 && response.status < 300) {
+        await markPending(env, session.actor.id, kind);
+      }
+      return response;
+    };
+
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return chatStub(env, box).fetch("https://chat.internal/minutes/list");
     }
     if (url.pathname === "/api/minutes/seen" || url.pathname === "/api/minutes/decide") {
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-      return browserMinuteRoute(request, env, url.pathname.replace("/api", ""), box);
+      // Minute decisions ride on the chat poll (see /next in the Durable Object).
+      return announce(browserMinuteRoute(request, env, url.pathname.replace("/api", ""), box),
+        url.pathname === "/api/minutes/decide" ? "chat" : null);
     }
 
     if (url.pathname === "/api/health/refresh") {
       if (request.method === "GET") return json({ health: await chatStub(env, box).healthStatus() });
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
       if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
-      return json(await chatStub(env, box).requestHealthCheck(), 202);
+      return announce(Promise.resolve(json(await chatStub(env, box).requestHealthCheck(), 202)), "health");
     }
     if (url.pathname === "/api/dashboard") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return serveSnapshot(env, box);
     }
-    if (url.pathname === "/api/label-actions") return labelActionRoute(request, url, env, box);
-    if (url.pathname === "/api/task-actions") return taskActionRoute(request, url, env, box);
+    if (url.pathname === "/api/label-actions") return announce(labelActionRoute(request, url, env, box), "label");
+    if (url.pathname === "/api/task-actions") return announce(taskActionRoute(request, url, env, box), "action");
     if (url.pathname === "/api/assistant") {
-      if (request.method === "POST") return createAssistantJob(request, env, box);
+      if (request.method === "POST") return announce(createAssistantJob(request, env, box), "chat");
       if (request.method === "GET") return readAssistantJob(url, env, box);
       return json({ error: "Método no permitido" }, 405);
     }

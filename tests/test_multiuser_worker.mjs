@@ -166,4 +166,38 @@ for (let i = 0; i < 12 && status !== 429; i += 1) {
 }
 assert.equal(status, 429);
 
+// 12. F1: the bridge may name the actor in the path (/u/<actor>/api/bridge/...), so the
+// single-user bridge functions work per user just by receiving a per-user base URL.
+const viaPath = await call('/u/demo-b/api/bridge/next?kind=action', { headers: { authorization: 'Bearer bridge-test' } });
+assert.equal(viaPath.status, 200);
+assert.equal((await call('/u/ghost/api/bridge/next', { headers: { authorization: 'Bearer bridge-test' } })).status, 404);
+assert.equal((await call('/u/demo-b/api/bridge/next', { headers: { authorization: 'Bearer wrong' } })).status, 401);
+assert.equal((await call('/u/demo-b/api/dashboard', { cookie: b })).status, 404, 'the /u/ prefix is only for the bridge');
+assert.equal((await call('/u/demo-a/api/bridge/next', { headers: { authorization: 'Bearer bridge-test', 'x-dsta-actor': 'demo-b' } })).status, 400,
+  'path and header naming different actors is rejected');
+
+// 13. F1: dispatcher. One poll tells the bridge which users have pending work.
+assert.equal((await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer wrong' } })).status, 401);
+const d0 = await (await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer bridge-test' } })).json();
+const pendingKinds = actor => Object.keys(d0.pending?.[actor] || {});
+assert.ok(pendingKinds('demo-a').includes('action'), 'A queued an action in step 6');
+assert.ok(typeof d0.now === 'number');
+await call('/api/assistant', { method: 'POST', cookie: b, body: { message: 'hola desde B' } });
+const d1r = await (await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.ok(Object.keys(d1r.pending['demo-b'] || {}).includes('chat'), 'B\'s chat is announced');
+// Ack clears only marks not newer than the dispatch read, so a job arriving meanwhile is kept.
+const ack = await call('/api/bridge/dispatch', { method: 'POST', headers: { authorization: 'Bearer bridge-test', noOrigin: '1' },
+  body: { actor: 'demo-b', kinds: ['chat'], seenAt: d1r.now } });
+assert.equal(ack.status, 200);
+const d2 = await (await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.ok(!Object.keys(d2.pending['demo-b'] || {}).includes('chat'));
+await new Promise(resolve => setTimeout(resolve, 5));
+assert.equal((await call('/api/task-actions', { method: 'POST', cookie: b, body: { action: 'complete', taskId: 40, requestId: crypto.randomUUID() } })).status, 202);
+await call('/api/bridge/dispatch', { method: 'POST', headers: { authorization: 'Bearer bridge-test', noOrigin: '1' },
+  body: { actor: 'demo-b', kinds: ['action'], seenAt: d1r.now } });
+const d3 = await (await call('/api/bridge/dispatch', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.ok(Object.keys(d3.pending['demo-b'] || {}).includes('action'), 'a stale ack never erases a newer mark');
+assert.equal((await call('/api/bridge/dispatch', { method: 'POST', headers: { authorization: 'Bearer bridge-test', noOrigin: '1' },
+  body: { actor: 'demo-b', kinds: ['bogus'], seenAt: d3.now } })).status, 400);
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');

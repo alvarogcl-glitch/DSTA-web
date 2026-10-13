@@ -19,6 +19,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+_tools_dir = str(Path(__file__).resolve().parent)
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+from user_context import root_project_id
+
 POLL_SECONDS = 30
 HEARTBEAT_SECONDS = 300
 USER_AGENT = "DSTA-Dashboard-Publisher/1.0"
@@ -77,11 +82,12 @@ def description_field(description: str, name: str) -> str:
 def fetch_dashboard(base_url: str, token: str) -> dict:
     observation_started_at = datetime.now(timezone.utc).isoformat()
     projects = pages(base_url, "/api/v1/projects", token)
-    if not any(int(project.get("id") or 0) == 2 for project in projects):
+    root_id = root_project_id()
+    if not any(int(project.get("id") or 0) == root_id for project in projects):
         raise RuntimeError("No se encontró la raíz PMO-DSTA; no se publica información parcial")
     scope = sorted(
         (project for project in projects
-         if int(project.get("parent_project_id") or 0) == 2 and not project.get("is_archived")),
+         if int(project.get("parent_project_id") or 0) == root_id and not project.get("is_archived")),
         key=lambda project: (float(project.get("position") or 0), str(project.get("title") or "").casefold()),
     )
 

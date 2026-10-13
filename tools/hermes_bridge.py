@@ -33,6 +33,7 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from task_mutation_lock import task_lock
+from user_context import root_project_id
 import label_actions
 
 _publisher_spec = importlib.util.spec_from_file_location(
@@ -593,11 +594,12 @@ def execute_completion(job: dict, request: Callable, *, server_url: str | None =
         task = request("GET", path)
         if not isinstance(task, dict) or task.get("id") != task_id or task.get("project_id") != project_id:
             raise ValueError("La tarea cambió de alcance")
-        root = request("GET", "/api/v1/projects/2")
+        root_id = root_project_id()
+        root = request("GET", f"/api/v1/projects/{root_id}")
         project = request("GET", f"/api/v1/projects/{project_id}")
-        if (not isinstance(root, dict) or root.get("id") != 2 or root.get("is_archived") is not False or
+        if (not isinstance(root, dict) or root.get("id") != root_id or root.get("is_archived") is not False or
                 not isinstance(project, dict) or project.get("id") != project_id or
-                project.get("parent_project_id") != 2 or project.get("is_archived") is not False):
+                project.get("parent_project_id") != root_id or project.get("is_archived") is not False):
             raise ValueError("No es una línea activa de PMO-DSTA")
         if type(task.get("done")) is not bool:
             raise ValueError("Estado de tarea inválido")

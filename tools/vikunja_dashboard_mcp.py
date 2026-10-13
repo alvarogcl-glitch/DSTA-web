@@ -64,7 +64,8 @@ TASK_UPDATE_FIELDS = (
     "is_favorite",
 )
 TASK_EDITABLE_FIELDS = {"title", "description", "priority", "due_date", "done", "project_id"}
-PMO_ROOT_PROJECT_ID = 2
+# Multiuser mode launches this MCP per job with the user's root in DSTA_ROOT_PROJECT_ID.
+PMO_ROOT_PROJECT_ID = int(os.environ.get("DSTA_ROOT_PROJECT_ID", "2"))
 PROJECT_UPDATE_FIELDS = ("id", "title", "description", "parent_project_id", "is_archived",
                          "hex_color", "identifier", "position", "is_favorite",
                          "background_blur_hash", "background_information")

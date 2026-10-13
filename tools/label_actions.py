@@ -6,6 +6,7 @@ from pathlib import Path
 import unicodedata
 from urllib.error import HTTPError
 from task_mutation_lock import task_lock
+from user_context import root_project_id
 
 PALETTE = {item['hex'] for item in json.loads(
     (Path(__file__).resolve().parents[1] / 'public' / 'label-palette.json').read_text(encoding='utf-8'))}
@@ -31,11 +32,12 @@ def list_all(request, path):
 
 def require_task(request, task_id, project_id):
     task = request('GET', f'/api/v1/tasks/{task_id}')
-    root = request('GET', '/api/v1/projects/2')
+    root_id = root_project_id()
+    root = request('GET', f'/api/v1/projects/{root_id}')
     project = request('GET', f'/api/v1/projects/{project_id}')
     if (task.get('id') != task_id or task.get('project_id') != project_id or
-            root.get('id') != 2 or root.get('is_archived') is not False or
-            project.get('id') != project_id or project.get('parent_project_id') != 2 or
+            root.get('id') != root_id or root.get('is_archived') is not False or
+            project.get('id') != project_id or project.get('parent_project_id') != root_id or
             project.get('is_archived') is not False):
         raise ValueError('La tarea ya no pertenece a una línea activa PMO-DSTA')
     return task
