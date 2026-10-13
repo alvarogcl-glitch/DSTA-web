@@ -90,4 +90,4 @@ El corte productivo requiere la autorización explícita del usuario sobre el re
 
 ## Próximo paso
 
-Decidir D01: creación con copiloto principal y formulario opcional; solo copiloto; o formulario principal y copiloto opcional. La recomendación es la primera, conservando comodidad y alternativa determinista. D01 no resuelve automáticamente D03: se preguntará por separado si la IA ejecuta o propone. Después resolver D04 y D07 para que todas las vías guarden una tarea equivalente.
+El usuario pidió más antecedentes antes de decidir D01. Revisar [REVISION_CREACION.md](REVISION_CREACION.md), con los tres recorridos actuales y un ejemplo común; ampliar o demostrar si hace falta. Después elegir acceso principal y alternativa. D01 no resuelve automáticamente D03: se discutirá por separado si la IA ejecuta o propone. D04 y D07 definirán que todas las vías guarden una tarea equivalente.

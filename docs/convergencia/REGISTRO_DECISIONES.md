@@ -6,7 +6,7 @@ Este archivo es la fuente del estado vigente de las decisiones D01–D72. La com
 
 - Todas las decisiones D01–D72: **por decidir**.
 - B01: **en revisión**, sin implementación iniciada.
-- D01: pregunta presentada en este chat el 13 de octubre de 2026; respuesta pendiente al crear este registro. No tratar la opción preseleccionada como respuesta.
+- D01: el usuario respondió que necesita más antecedentes antes de decidir. Estado: por decidir, en explicación. Leer [REVISION_CREACION.md](REVISION_CREACION.md); ninguna opción fue elegida. No repetir la pregunta sin presentar los recorridos y separar acceso principal de ejecución de IA.
 - Las instrucciones generales de conservar comodidad, aislamiento y continuidad están confirmadas por la solicitud del usuario; no son una elección de cada función.
 - No se aprobaron cambios a producción ni un corte.
 
