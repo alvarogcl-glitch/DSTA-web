@@ -83,6 +83,17 @@ class MultiuserBridgeTest(unittest.TestCase):
         self.assertIn("Copilot", finished[0]["error"])
         self.assertEqual(finished[0]["base"], f"{BASE}/u/demo-a")
 
+    def test_publicacion_periodica_reporta_semaforos_de_cada_usuario(self):
+        posts = []
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            posts.append((url, payload))
+            return {"ok": True}
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json, process_job=None,
+                                    finish_job=None, users_dir=Path("C:/tmp/x"), publish_snapshot=lambda *a, **k: "ts")
+        self.assertEqual(bridge.publish_all(["demo-a", "demo-b"]), 2)
+        health = [u for u, p in posts if u.endswith("/api/bridge/health")]
+        self.assertEqual(health, [f"{BASE}/u/demo-a/api/bridge/health", f"{BASE}/u/demo-b/api/bridge/health"])
+
     def test_barrido_revisa_a_todos_los_usuarios_del_vault(self):
         worker = FakeWorker({}, {("demo-b", "action"): [{"id": "retry-b", "kind": "action"}]})
         processed, finished = [], []

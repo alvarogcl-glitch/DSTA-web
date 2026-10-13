@@ -235,6 +235,8 @@ class MultiuserBridge:
                     self.publish_snapshot(self.user_base(actor), self.token, user["vikunjaToken"],
                                           user.get("vikunjaUrl", "http://127.0.0.1:3456"))
                 published += 1
+                # Status lights: the Worker shows red after 12 min without a report.
+                self.report_health(actor, user, {"id": ""})
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 log(f"snapshot de {actor[:20]} falló ({type(error).__name__})")
         return published
