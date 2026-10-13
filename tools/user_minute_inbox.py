@@ -110,6 +110,36 @@ def scope_actions(actions: list[dict], snapshot: dict | None) -> None:
                                 "indica la tarea o línea correcta antes de aprobar.")[:400]
 
 
+INSTRUCTION_NOTE = ("\n\nAdemás del JSON indicado, incluye la clave \"descartar\": true SOLO si la instrucción pide "
+                    "descartar o no realizar esta acción; en cualquier otro caso false. Si no puedes cumplir la "
+                    "instrucción (por ejemplo, la línea o tarea indicada no existe en el contexto), devuelve "
+                    "operaciones vacías, descartar=false y explica el motivo en resumen.")
+
+
+def apply_user_instruction(action: dict, record: dict, instruction: str, ask: Callable[[str], str], vk,
+                           context: str, apply_ops: Callable = None) -> None:
+    """Production instruction semantics, except that an instruction that could not be carried out
+    never silently discards the proposal: it stays visible with the reason (estado 'error')."""
+    prompt = context + mi.instruction_prompt(record, action, instruction).replace("Álvaro", "la persona") + INSTRUCTION_NOTE
+    try:
+        decoded = mi.loads_lenient(mi.extract_json(ask(prompt)))
+    except ValueError:
+        decoded = mi.loads_lenient(mi.extract_json(ask(prompt + mi.RETRY_NOTE)))
+    operations = [op for op in (decoded.get("operaciones") or []) if isinstance(op, dict)]
+    summary = mi.text_field(decoded.get("resumen"), 400)
+    if operations:
+        mi.apply_instruction(action, record, instruction, lambda _prompt: json.dumps(decoded, ensure_ascii=False), vk)
+        return
+    action.setdefault("instrucciones", []).append({"texto": instruction[:1500], "resultado": summary or "Sin cambios", "fecha": mi.now()})
+    if decoded.get("descartar") is True and not action.get("auto"):
+        action["estado"], action["resultado"] = "rechazada", "Descartada según tu instrucción"
+    elif not action.get("auto"):
+        action["estado"] = "error"
+        action["resultado"] = f"No se aplicó tu instrucción: {summary or 'no se pudo interpretar'}"[:400]
+    else:
+        action["resultado"] = f"{action['resultado']} → Instrucción sin cambios: {summary}"[:600]
+
+
 def public_record(record: dict) -> dict:
     """What the Worker inbox receives (no minute text / private notes)."""
     return {key: value for key, value in record.items() if key not in ("texto",)}
@@ -192,8 +222,7 @@ class UserMinuteInbox:
                 vk = vk or self.vk_factory(user)
                 context = (f"Contexto (no tienes herramientas, usa solo esto):\n## Tareas abiertas por línea\n"
                            f"{_tasks_block(snapshot)}\n\n## {record.get('texto', '')}\n\n")
-                mi.apply_instruction(action, record, instruction,
-                                     lambda prompt: ask(context + prompt.replace("Álvaro", "la persona")), vk)
+                apply_user_instruction(action, record, instruction, ask, vk, context)
                 continue
             if not action or action.get("auto") or action["estado"] not in {"propuesta", "error"}:
                 continue

@@ -87,6 +87,21 @@ class UserMinuteInboxTest(unittest.TestCase):
         self.assertEqual(dropped["estado"], "descartada")
         self.assertIsNone(self.inbox.process("paula", USER, {**MINUTE, "version": "v3"}, SNAP, self.ask), "descartada sigue fuera")
 
+    def test_instruccion_imposible_no_descarta_en_silencio(self):
+        record = self.inbox.process("paula", USER, MINUTE, SNAP, self.ask)
+        proposal = next(a for a in record["acciones"] if not a.get("auto"))
+        impossible = lambda prompt: json.dumps({"resumen": "No existe la línea LT2 en tu espacio.", "descartar": False, "operaciones": []})
+        decided = self.inbox.decide("paula", USER, {"minuteId": record["id"], "decisions": [
+            {"actionId": proposal["id"], "decision": "instruccion", "instruccion": "cambia a LT2"}]}, SNAP, impossible)
+        action = next(a for a in decided["acciones"] if a["id"] == proposal["id"])
+        self.assertEqual(action["estado"], "error", "queda visible para corregirla")
+        self.assertIn("No existe la línea LT2", action["resultado"])
+        self.assertEqual(decided["estado"], "por_revisar")
+        discard = lambda prompt: json.dumps({"resumen": "La descarto.", "descartar": True, "operaciones": []})
+        decided = self.inbox.decide("paula", USER, {"minuteId": record["id"], "decisions": [
+            {"actionId": proposal["id"], "decision": "instruccion", "instruccion": "no corresponde"}]}, SNAP, discard)
+        self.assertEqual(next(a for a in decided["acciones"] if a["id"] == proposal["id"])["estado"], "rechazada")
+
     def test_cada_usuario_tiene_su_propia_bandeja(self):
         self.inbox.process("paula", USER, MINUTE, SNAP, self.ask)
         self.assertFalse(self.inbox.is_current("alvaro", MINUTE))
