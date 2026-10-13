@@ -123,6 +123,25 @@ class StructureActionsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_action({"action": "task.log", "taskId": 100, "sourceProjectId": 8, "entry": "x", "entryDate": "2026-10-13", "logKind": "Chisme"})
 
+    def test_registro_repetido_se_escribe_una_sola_vez(self):
+        """D18: if the confirmation is lost and the same request is delivered again, one entry only."""
+        job = {"action": "task.log", "taskId": 100, "sourceProjectId": 8, "entry": "Avance único", "entryDate": "2026-10-13"}
+        self.run_action(job)
+        self.run_action(job)  # same request id delivered again
+        self.assertEqual(self.vk.tasks[100]["description"].count("Actualización 2026-10-13: Avance único"), 1)
+        # Crash after writing but before recording "done": the pending marker (written before the
+        # write) survives, so the entry already at the end is not appended again.
+        done = self.cache / "structure-created" / "req-1.json"
+        done.unlink()
+        (self.cache / "structure-pending").mkdir(parents=True, exist_ok=True)
+        (self.cache / "structure-pending" / "req-1").write_text("", encoding="utf-8")
+        self.run_action(job)
+        self.assertEqual(self.vk.tasks[100]["description"].count("Actualización 2026-10-13: Avance único"), 1)
+        # A different request with the same text (a deliberate new entry) is written.
+        with user_context.using_root(7):
+            sa.execute({"id": "req-2", "kind": "action", **job}, self.vk, cache_dir=self.cache, server_url="http://lab")
+        self.assertEqual(self.vk.tasks[100]["description"].count("Actualización 2026-10-13: Avance único"), 2)
+
     def test_accion_desconocida(self):
         with self.assertRaises(ValueError):
             self.run_action({"action": "lt.delete", "projectId": 8})

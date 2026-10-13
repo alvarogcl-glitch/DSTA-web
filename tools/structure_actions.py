@@ -114,15 +114,33 @@ def execute(job: dict, request: Callable, *, cache_dir: Path | None = None, serv
         if kind not in LOG_KINDS or not entry or len(entry) > 2500 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(job.get("entryDate", ""))):
             raise ValueError("Registro inválido")
         task_id = job["taskId"]
+        line = f"{kind} {job['entryDate']}: {entry}"
+        # D18: one entry per request. A request already applied returns its result; a request
+        # whose write may have happened before a crash (pending marker) is not appended again
+        # when its line is already the last entry. A NEW request with the same text is written.
+        done = cache_dir / "structure-created" / f"{job['id']}.json" if cache_dir else None
+        pending = cache_dir / "structure-pending" / f"{job['id']}" if cache_dir else None
+        if done and done.exists():
+            return json.loads(done.read_text(encoding="utf-8"))
         with lock(server_url, task_id):
             current = _task(request, task_id, job["sourceProjectId"])
-            payload = {field: current[field] for field in TASK_FIELDS}
             original = str(current.get("description") or "")
-            payload["description"] = original + ("\n\n" if original else "") + f"{kind} {job['entryDate']}: {entry}"
-            written = request("POST", f"/api/v1/tasks/{task_id}", payload=payload)
-            if not isinstance(written, dict) or written.get("id") != task_id:
-                raise RuntimeError("Vikunja no confirmó el registro")
-        return {"taskId": task_id}
+            already = pending is not None and pending.exists() and original.rstrip().endswith(line)
+            if not already:
+                if pending:
+                    pending.parent.mkdir(parents=True, exist_ok=True)
+                    pending.write_text("", encoding="utf-8")
+                payload = {field: current[field] for field in TASK_FIELDS}
+                payload["description"] = original + ("\n\n" if original else "") + line
+                written = request("POST", f"/api/v1/tasks/{task_id}", payload=payload)
+                if not isinstance(written, dict) or written.get("id") != task_id:
+                    raise RuntimeError("Vikunja no confirmó el registro")
+        result = {"taskId": task_id}
+        if done:
+            done.parent.mkdir(parents=True, exist_ok=True)
+            done.write_text(json.dumps(result), encoding="utf-8")
+            pending.unlink(missing_ok=True)
+        return result
 
     if action in ("task.update", "task.move"):
         task_id = job["taskId"]

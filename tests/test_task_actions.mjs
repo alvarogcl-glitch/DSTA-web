@@ -37,8 +37,15 @@ async function scenario(mode) {
       return true;
     },
     fetch: async (url, opts) => {
+      if (url === '/api/session') {
+        if (mode === 'log-session-fail') throw Error('Sin red');
+        return mode === 'log-accounts' ? { ok: true, status: 200, json: async () => ({ actor: { id: 'ana' } }) }
+          : { ok: false, status: 404, json: async () => ({ error: 'No encontrado' }) };
+      }
       if (opts.method === 'POST') {
-        posts++; sent = JSON.parse(opts.body); if (mode.startsWith('complete')) { assert.equal(url, '/api/task-actions'); assert.equal(JSON.parse(storage.values().next().value).id, sent.requestId, 'persist before send'); }
+        posts++; sent = JSON.parse(opts.body);
+        if (mode === 'log-accounts') assert.equal(url, '/api/task-actions', 'accounts mode: verified action, never the copilot');
+        if (mode.startsWith('complete')) { assert.equal(url, '/api/task-actions'); assert.equal(JSON.parse(storage.values().next().value).id, sent.requestId, 'persist before send'); }
         return { ok: mode !== 'rejected' && mode !== 'complete-500', status: mode === 'complete-500' ? 500 : 202, json: async () => mode === 'rejected' ? { error: 'Sin autorización' } : { id: '12345678-1234-1234-1234-123456789012' } };
       }
       return { ok: true, json: async () => mode === 'complete-error' ? { status: 'error', error: 'Fallo terminal' } : (mode === 'timeout' || mode === 'complete-timeout') ? { status: 'running' } : { status: 'completed', snapshotTimestamp: '2026-10-05T12:00:00Z' } };
@@ -65,6 +72,13 @@ async function scenario(mode) {
   if (mode.startsWith('complete')) complete.click();
   else section.form.submit({ preventDefault() {} });
   complete.click();
+  if (mode === 'log-session-fail') {
+    for (let i = 0; i < 200; i++) await Promise.resolve();
+    assert.equal(posts, 0, 'D19: if the mode cannot be determined, nothing is sent');
+    assert.match(section.status.textContent, /no se envió/i);
+    assert.equal(section.form.elements.entry.value, 'Acuerdo <literal>', 'the draft is kept');
+    return;
+  }
   if (mode === 'complete-storage') {
     for (let i=0;i<30;i++) await Promise.resolve();
     assert.equal(posts,0,'blocked storage must prevent all writes before losing idempotency');
@@ -81,10 +95,13 @@ async function scenario(mode) {
   context.inspection = { taskId: '17' };
   context.showInspection(context.inspection);
   assert.equal(posts, 1, 'no se duplica la solicitud pendiente');
-  if (mode.startsWith('complete')) { assert.deepEqual(Object.keys(sent).sort(), ['action', 'requestId', 'taskId']); assert.equal(sent.action, 'complete'); } else assert.deepEqual(sent.history, [], 'log preserves copilot');
+  if (mode.startsWith('complete')) { assert.deepEqual(Object.keys(sent).sort(), ['action', 'requestId', 'taskId']); assert.equal(sent.action, 'complete'); }
+  else if (mode === 'log-accounts') {
+    assert.deepEqual([sent.action, sent.entry, sent.entryDate, sent.logKind], ['task.log', 'Acuerdo <literal>', '2026-10-05', 'Nota']);
+  } else assert.deepEqual(sent.history, [], 'log preserves copilot');
   assert.equal(sent.taskId, 17);
-  if (mode === 'success') {
-    assert.match(sent.message, /pmo_append_log/);
+  if (mode === 'success' || mode === 'log-accounts') {
+    if (mode === 'success') assert.match(sent.message, /pmo_append_log/, 'single-user keeps its copilot path');
     assert.equal(section.form.elements.entry.value, '');
     assert.equal(section.status.textContent, 'Registro guardado en la bitácora.');
     assert.equal(section.form.hidden, true, 'guardar cierra el formulario');
@@ -97,7 +114,7 @@ async function scenario(mode) {
   }
   assert.match(toast.children[0].textContent, /#17/);
   assert.equal(toast.hidden, false, 'feedback sigue visible tras navegar');
-  if (['success', 'complete'].includes(mode)) {
+  if (['success', 'complete', 'log-accounts'].includes(mode)) {
     assert.match(toast.children[0].textContent, mode === 'complete' ? /Tarea completada/ : /Registro guardado/);
     assert.equal(dismissTimers.length, 1);
     dismissTimers[0]();
@@ -118,7 +135,7 @@ async function scenario(mode) {
     assert.equal(storage.size,0,'successful manual read releases terminal request');
   }
 }
-for (const mode of ['success', 'complete', 'stale', 'rejected', 'timeout', 'complete-500', 'complete-stale', 'complete-timeout', 'complete-error', 'complete-storage']) await scenario(mode);
+for (const mode of ['success', 'log-accounts', 'log-session-fail', 'complete', 'stale', 'rejected', 'timeout', 'complete-500', 'complete-stale', 'complete-timeout', 'complete-error', 'complete-storage']) await scenario(mode);
 const css = readFileSync(new URL('../public/task-actions.css', import.meta.url), 'utf8');
 assert.match(css, /@media\s*\(any-hover:none\),\s*\(pointer:coarse\),\s*\(max-width:620px\)/, 'etiqueta visible en móvil y táctil');
 const touch = css.slice(css.indexOf('@media(any-hover:none)'));
