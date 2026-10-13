@@ -46,9 +46,9 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F2.3 Incluida en el e2e de laboratorio: tras la baja, el token responde 401, la sesión 401, el login 401 y el vault ya no existe.
 
 ### F3 · LTs y tareas desde la UI
-- [ ] F3.1 Acciones crear/editar/mover/archivar de LT y tarea en la cola de acciones.
-- [ ] F3.2 UI para esas acciones.
-- [ ] F3.3 E2E con 2 usuarios.
+- [x] F3.1 `task.create`, `task.update`, `task.move`, `lt.create`, `lt.rename` y `lt.archive` en la cola de acciones. Esquema estricto por acción (`complete` conserva su contrato de 1 KB), alcance limitado al snapshot y un solo cambio pendiente por elemento. Se completan solo con un snapshot posterior que prueba el resultado. En el puente, `tools/structure_actions.py` reenvía objetos completos (Vikunja borra los campos omitidos) y no duplica creaciones en reintentos. Tests: `test_structure_actions.mjs` y 7 en Python.
+- [x] F3.2 `public/structure-actions.js`: botón «+ Nueva línea»; en el inspector de una LT, «+ Nueva tarea», «Renombrar» y «Archivar»; en el de una tarea, «Editar» y «Mover». Diálogos accesibles; la vista se refresca solo cuando el Worker confirma.
+- [x] F3.3 `tests/e2e_structure_lab.py` y `e2e_structure_ui.mjs`: navegador, puente multiusuario real en bucle, Vikunja de laboratorio y wrangler dev. 7/7: A crea, edita, mueve, renombra y archiva (unos 3 s por acción) y B no ve nada.
 
 ### F4 · Granola por usuario
 - [ ] F4.1 OAuth Granola: callback vía Worker, canje y refresh en la VM.
@@ -71,3 +71,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.
 - 2026-10-12 23:25: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.
 - 2026-10-12 23:38: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.
+- 2026-10-12 23:42: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
