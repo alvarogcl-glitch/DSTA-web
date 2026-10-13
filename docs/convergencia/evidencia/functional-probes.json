@@ -1,0 +1,10 @@
+{
+  "archive_line_with_task": {
+    "archived": true,
+    "tasks_retained_in_vikunja": 1
+  },
+  "duplicate_line_title_allowed": true,
+  "form_creation_has_structured_owner_or_traceability": false,
+  "same_log_job_execution_replay_occurrences": 2,
+  "granola_test_origin_configured": false
+}

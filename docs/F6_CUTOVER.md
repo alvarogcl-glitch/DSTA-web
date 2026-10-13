@@ -1,5 +1,10 @@
 # F6: paso a producción del DSTA multiusuario (runbook)
 
+Antes de usar este runbook, cerrar la equivalencia acordada en
+[convergencia/PLAN.md](convergencia/PLAN.md). Sus decisiones pueden cambiar el perfil del dueño,
+las herramientas del copiloto y la migración. Revisar todos los pasos contra el resultado final
+y ensayar corte/rollback; este archivo no autoriza ejecutarlos.
+
 > **Requiere aprobación explícita del CEO para cada paso que toque `dsta-web`.** Nada de esto se ejecutó.
 > Ensayo probado: bloque 16 de `tests/test_multiuser_worker.mjs`. El CEO mapeado a `pmo-dsta` ve sus datos sin migración, y el puente actual funciona sin cambios de código si su URL apunta a `/u/ceo`.
 
@@ -33,5 +38,5 @@
 
 ## Riesgos conocidos
 - Si en el paso 4 el puente del CEO aún apunta a la URL sin `/u/ceo`, sus llamadas responden 400 y el dashboard queda desactualizado hasta corregir el paso 3. Por eso el paso 3 va antes del 4. Durante el intervalo entre ambos el puente falla con 404, porque la ruta `/u/` no existe en modo de usuario único; es inofensivo y dura minutos.
-- Refresh del token de Granola pendiente: al vencer, el usuario reconecta.
-- El Copilot multiusuario es de solo lectura; proponer acciones confirmables queda para un próximo incremento.
+- Refresh del token de Granola implementado; si falla se solicita reconexión. Validar renovación real en el alcance de aceptación elegido.
+- El Copilot multiusuario actual no tiene herramientas de escritura, pero ya propone acciones confirmables con Aplicar. La ejecución definitiva se elegirá en las decisiones D01/D03 del plan de convergencia.

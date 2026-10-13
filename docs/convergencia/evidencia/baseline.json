@@ -1,0 +1,89 @@
+{
+  "reference_date": "2026-10-13",
+  "timezone": "America/Santiago",
+  "production_commit": "40128b6841ddc9edb060ba403d7b84a570fe71b7",
+  "pilot_commit": "f721cb4e15e8f8f8f595501dd6a2eb2f84037bae",
+  "production_worker_version": "e5b15c54-c9fe-4d98-b51a-62d8f1f6f891",
+  "pilot_worker_version": "051f7146-63f4-48f3-9dce-43ec599cd3b6",
+  "compiled_worker_matches": {
+    "production": true,
+    "pilot": true
+  },
+  "production_vikunja": {
+    "projects": 8,
+    "tasks": 164,
+    "labels": 5,
+    "task_fields": [
+      "action_key",
+      "criterion",
+      "date",
+      "dependency",
+      "description",
+      "done",
+      "id",
+      "label_ids",
+      "owner",
+      "project",
+      "project_id",
+      "source",
+      "title"
+    ]
+  },
+  "pilot_users": [
+    {
+      "actor": "alvaro",
+      "root": 403,
+      "vikunja_url": "http://127.0.0.1:14701",
+      "granola_state": "ready",
+      "minutes": 30,
+      "vikunja_current": {
+        "projects": 1,
+        "tasks": 7,
+        "labels": 2,
+        "task_fields": [
+          "action_key",
+          "criterion",
+          "date",
+          "dependency",
+          "description",
+          "done",
+          "id",
+          "label_ids",
+          "owner",
+          "project",
+          "project_id",
+          "source",
+          "title"
+        ]
+      },
+      "inbox": {
+        "minutes": 30,
+        "states": {
+          "procesada": 19,
+          "descartada": 5,
+          "por_revisar": 6
+        },
+        "automatic": 0,
+        "actions": {
+          "aplicada": 5,
+          "error": 3,
+          "propuesta": 35
+        },
+        "latest": "2026-10-13T16:00:42.228076-03:00"
+      }
+    }
+  ],
+  "tests": {
+    "production_js": "passed",
+    "pilot_js": "passed",
+    "remote_e2e_rerun": false,
+    "pilot_python": 154,
+    "production_python": 117
+  },
+  "limits": [
+    "Worker equality verified; authenticated current UI/assets not independently compared",
+    "Counts are an audit snapshot; revalidate current state",
+    "Granola ready and imported minutes do not independently verify real token refresh",
+    "Functional probes use FakeVikunja; not mutations on personal data"
+  ]
+}

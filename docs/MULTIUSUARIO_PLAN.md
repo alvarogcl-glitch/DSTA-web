@@ -1,11 +1,18 @@
 # DSTA multiusuario: plan y checklist de avance
 
-Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` solo si está verificado con una prueba o evidencia, que se anota al lado.
+La convergencia funcional y visual solicitada el 13 de octubre de 2026 se gestiona en
+[convergencia/PLAN.md](convergencia/PLAN.md). Sus decisiones, pruebas y estado de continuidad
+prevalecen para ese trabajo. Este checklist conserva el historial de implementación de fases;
+algunas notas pendientes fueron superadas por incrementos posteriores. No equivale a aceptación
+de paridad con producción. Staging actualmente contiene la cuenta y minutas personales de Álvaro;
+no tratar sus datos como sintéticos o desechables.
+
+Historial del avance de fases técnicas. Se actualiza al cerrar cada tarea. Se marca `[x]` solo si está verificado con una prueba o evidencia, que se anota al lado. La equivalencia y aceptación del usuario se registran en el plan de convergencia.
 
 - **Repo / rama:** worktree `C:/Users/admin/Documents/DSTA-multiuser/dsta-web-mu`, rama `feat/multiusuario` (creada desde `main` 73b64be).
 - **Diseño:** `C:/Users/admin/Startup Team/reports/dsta-multiusuario-rutas-v2-2026-10-13.md` (ruta 1+).
 - **Producción** (`dsta-web`, carpeta `Codex/2026-09-22/hola/work/DSTA-web`): NO se toca hasta F6, y F6 requiere aprobación explícita del CEO.
-- **Staging:** Worker `dsta-web-staging` en workers.dev, con D1 y DO propios y solo datos sintéticos (`wrangler.staging.jsonc`).
+- **Staging:** Worker `dsta-web-staging` en workers.dev, con D1 y DO propios (`wrangler.staging.jsonc`). La cuenta Álvaro actualmente contiene datos y minutas personales; QA debe usar datos y cuentas separados.
 
 ## Requisitos del CEO (2026-10-13)
 

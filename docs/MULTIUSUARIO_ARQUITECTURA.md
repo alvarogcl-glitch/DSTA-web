@@ -1,5 +1,10 @@
 # DSTA multiusuario: arquitectura y operación
 
+Para el trabajo de equivalencia solicitado por el usuario, leer
+[convergencia/PLAN.md](convergencia/PLAN.md) y su registro de decisiones. La comparación vigente
+incluye evidencia fechada de servidores y datos. Los cambios de flujo se eligen allí antes de
+implementar; esta arquitectura describe la base existente.
+
 Rama `feat/multiusuario`. El plan y el estado están en `MULTIUSUARIO_PLAN.md`; el paso a producción, en `F6_CUTOVER.md`.
 
 ## Idea central
@@ -24,7 +29,7 @@ VM: multiuser_bridge ── GET /api/bridge/dispatch (1 sondeo para N usuarios)
 | Puente por usuario | `/u/<actor>/api/bridge/*`, `bridgeBox` | El actor se resuelve desde D1; el puente de usuario único funciona igual con la base `/u/<actor>` |
 | Despacho | `/api/bridge/dispatch`, DO `dispatch` | Marcas por tipo (`chat`, `action`, `label`, `health`, `granola`); un ack nunca borra una marca más nueva |
 | Estructura (F3) | `ACTION_SCHEMAS` y `actionResultMatches` en el Worker, `tools/structure_actions.py`, `public/structure-actions.js` | Crear, editar, mover y archivar LT y tareas; se verifican con un snapshot posterior |
-| Puente multiusuario | `tools/multiuser_bridge.py` | Despacho, barrido cada 5 min, snapshot cada 120 s, Granola cada hora, Copilot en un pool de 2 |
+| Puente multiusuario | `tools/multiuser_bridge.py` | Despacho cada 10 s, barrido y snapshot cada 5 min, Granola cada hora, Copilot en un pool de 2, análisis y decisiones en pools separados |
 | Vault | `tools/user_vault.py` | DPAPI de la cuenta Windows con entropía de la app; `%LOCALAPPDATA%/dsta-multiuser/vault` |
 | Raíz por usuario | `tools/user_context.py` | Contextvar que usan el publicador, la completación, las etiquetas y el MCP |
 | Alta y baja | `tools/provision_user.py` | Cuenta Vikunja, raíz, token acotado, vault e invitación; la baja revoca y borra todo |
@@ -45,6 +50,6 @@ VM: multiuser_bridge ── GET /api/bridge/dispatch (1 sondeo para N usuarios)
 
 ## Límites conocidos
 - El Copilot multiusuario no escribe por sí mismo: propone acciones (bloque ```acciones```) y la persona las aplica con un clic, por la cola verificada de F3.
-- Granola: falta la prueba con el servicio real; el refresh solo está probado contra el Granola sintético.
-- La bandeja multiusuario no genera acciones propuestas desde las minutas; eso sí ocurre en el modo del CEO.
-- Requests/día calculados, no medidos.
+- Granola: la cuenta Álvaro tiene conexión guardada como ready y 30 minutas importadas en la revisión del 13 de octubre; refresh implementado. La auditoría no repitió renovación real del token.
+- La bandeja multiusuario ya analiza reuniones, aplica acciones evidentes y ofrece revisión/instrucciones con `user_minute_inbox.py`. Sus rutas no publican inmediatamente el snapshot de tareas.
+- La publicación periódica actual es de 300 s, aunque el navegador consulte cada 30 s. Medir consumo/capacidad actuales al acordar frecuencia; las cifras históricas no definen el plan contratado.
