@@ -69,9 +69,10 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 
 ## Bitácora
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.
-- 2026-10-12 23:25: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.
-- 2026-10-12 23:38: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.
-- 2026-10-12 23:42: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
-- 2026-10-12 23:50: **F4 completa con Granola sintético.** La prueba real queda pendiente de una cuenta de prueba.
-- 2026-10-12 23:59: **F5 completa.** Canarios en vivo 6/6 y respaldo Claude verificado en vivo. **Decisión operativa:** el puente de staging no queda corriendo toda la noche, porque sumaría ~10.000 requests/día a la cuenta donde producción ya usa casi todo el plan gratis de Workers y podría tumbarla.
-- 2026-10-13 00:02: F6 preparada: ensayo de cutover en test (bloque 16) y runbook. **No se tocó producción.**
+- 2026-10-12 23:22: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.
+- 2026-10-12 23:32: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.
+- 2026-10-12 23:41: **F3 completa.** UI E2E 7/7 con el puente real; `npm test` en verde.
+- 2026-10-12 23:49: **F4 completa con Granola sintético.** La prueba real queda pendiente de una cuenta de prueba.
+- 2026-10-12 23:58: **F5 completa.** Canarios en vivo 6/6 y respaldo Claude verificado en vivo. **Decisión operativa:** el puente de staging no queda corriendo toda la noche, porque sumaría ~10.000 requests/día a la cuenta donde producción ya usa casi todo el plan gratis de Workers y podría tumbarla.
+- 2026-10-12 23:59: F6 preparada: ensayo de cutover en test (bloque 16) y runbook. **No se tocó producción.**
+- Nota: las horas de la bitácora corresponden al reloj de la VM (hora de Chile).
