@@ -101,6 +101,15 @@ class GranolaUserTest(unittest.TestCase):
             self.assertEqual(sorted(r["date"] for r in records), ["2026-10-10", "2026-10-11"])
             self.assertEqual(sorted(r["summary"] for r in records), ["Resumen sintético 1", "Resumen sintético 2"])
             self.assertEqual(len(self.vault.load("ana")["minutes"]), 2, "context for the Copilot")
+            # D31: an archive that keeps older meetings once they leave Granola's 30-day window.
+            data = self.vault.load("ana")
+            data["minuteArchive"] = [{"id": "g-vieja", "title": "Comité de agosto", "date": "2026-08-01", "summary": "Acuerdo antiguo"}]
+            self.vault.save("ana", data)
+            service.sync("ana")
+            archive = self.vault.load("ana")["minuteArchive"]
+            self.assertEqual([m["date"] for m in archive], ["2026-10-11", "2026-10-10", "2026-08-01"])
+            self.assertTrue(all(m["id"].startswith("g-") for m in archive))
+            self.assertEqual(len({m["id"] for m in archive}), 3, "re-syncing does not duplicate")
 
     def test_state_de_otro_usuario_o_reusado_falla(self):
         with FakeGranola() as fake:

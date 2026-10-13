@@ -222,6 +222,32 @@ class ExecuteProposalsBridgeTest(unittest.TestCase):
         self.assertEqual(processed, ["act-1"], "the queued action is executed without waiting for the next dispatch")
 
 
+class CitedMinutesBridgeTest(unittest.TestCase):
+    def test_minuta_citada_se_adjunta_para_abrirla(self):
+        """D32: the answer carries the text of the user's minutes it cites; D31: the question searches the archive."""
+        finished, prompts = [], []
+        user = {**USERS["demo-a"], "minuteArchive": [{"id": "g-2", "title": "Comité", "date": "2026-07-01", "summary": "Acuerdo licitación"}]}
+
+        class FakeCopilot:
+            def answer(self, actor, user, job, snapshot, minutes):
+                prompts.append(minutes)
+                return "Ver [Comité](minuta:g-2)."
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            if url.endswith("/api/bridge/dispatch") and method == "GET":
+                return {"now": 1, "pending": {"demo-a": {"chat": 1}}}
+            if "kind=chat" in url:
+                return {"job": {"id": "chat-1", "kind": "chat", "message": "¿qué pasó con la licitación?"}} if not finished else {"job": None}
+            return {"ok": True}
+
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user={"demo-a": user}.get, request_json=request_json,
+                                    process_job=lambda *a: None, finish_job=lambda base, token, job, **kw: finished.append(kw),
+                                    users_dir=Path("C:/tmp/x"), copilot=FakeCopilot(), fetch_snapshot=lambda u: {"projects": [], "tasks": []})
+        bridge.dispatch_once()
+        self.assertEqual([m["id"] for m in prompts[0]], ["g-2"])
+        self.assertEqual(finished[0]["minutes"], {"g-2": {"titulo": "Comité", "fecha": "2026-07-01", "contenido": "Acuerdo licitación"}})
+
+
 class ExecuteLabelProposalsBridgeTest(unittest.TestCase):
     def test_etiqueta_pedida_se_aplica_de_inmediato(self):
         """D30: an explicit label request drains the label queue right after the answer."""

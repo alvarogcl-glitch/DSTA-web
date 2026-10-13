@@ -183,9 +183,12 @@ class MultiuserBridge:
         try:
             with using_root(user["rootProjectId"]):
                 snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
-            reply = self.copilot.answer(actor, user, job, snapshot, user_copilot.minutes_for(user))
+            minutes = user_copilot.minutes_for(user, str(job.get("message") or ""))  # D31: + older matches
+            reply = self.copilot.answer(actor, user, job, snapshot, minutes)
             reply, proposals = user_copilot.split_proposals(reply, snapshot)
-            self.finish_job(base, self.token, job, reply=reply, **({"proposals": proposals} if proposals else {}))
+            cited = user_copilot.cited_minutes(user, reply)  # D32: open cited minutes from the chat
+            self.finish_job(base, self.token, job, reply=reply, **({"proposals": proposals} if proposals else {}),
+                            **({"minutes": cited} if cited else {}))
             executed = [proposal for proposal in proposals if proposal.get("execute")]
             # D03: the Worker queued them as verified actions; apply now, not on the next dispatch.
             if any(not p["action"].startswith("label.") for p in executed):

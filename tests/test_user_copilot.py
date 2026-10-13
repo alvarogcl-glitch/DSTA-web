@@ -92,6 +92,39 @@ class UserCopilotTest(unittest.TestCase):
         with self.assertRaises(uc.CopilotUnavailable):
             self.copilot(Runner()).answer("ana", {"llm": {"provider": "openai-api"}}, JOB, SNAP_A, MINUTES_A)
 
+    def test_respaldo_directo_por_diez_minutos(self):
+        """D35: after a Hermes failure, Claude answers directly for 10 minutes, then Hermes is retried."""
+        now = [1000.0]
+        runner = Runner(hermes_ok=False)
+        copilot = uc.UserCopilot(hermes_cli="C:/x/hermes.exe", hermes_home=Path("C:/ceo/hermes"), claude_cli="C:/x/claude.exe",
+                                 work_dir=Path("C:/tmp/copilot"), run=runner, clock=lambda: now[0])
+        hermes_chats = lambda: sum(1 for c in runner.calls if "hermes" in Path(c["args"][0]).name and c["args"][1] == "chat")
+        copilot.answer("ana", {}, JOB, SNAP_A, MINUTES_A)
+        self.assertEqual(hermes_chats(), 1)
+        now[0] += 300
+        self.assertIn("respaldo", copilot.answer("ana", {}, JOB, SNAP_A, MINUTES_A).lower())
+        self.assertEqual(hermes_chats(), 1, "within 10 minutes Hermes is not retried")
+        now[0] += 301
+        runner.hermes_ok = True
+        self.assertEqual(copilot.answer("ana", {}, JOB, SNAP_A, MINUTES_A), "Respuesta Hermes")
+
+    def test_buscar_minutas_antiguas_y_citarlas(self):
+        """D31/D32: older minutes matching the question join the recent ones, and cited ones can be opened."""
+        user = {"minutes": [{"id": "g-1", "title": "Reciente", "date": "2026-10-10", "summary": "nada"}],
+                "minuteArchive": [{"id": "g-1", "title": "Reciente", "date": "2026-10-10", "summary": "nada"},
+                                  {"id": "g-2", "title": "Comité proveedores", "date": "2026-07-01", "summary": "Acordamos licitación eléctrica"},
+                                  {"id": "g-3", "title": "Otra", "date": "2026-06-01", "summary": "sin relación"}]}
+        minutes = uc.minutes_for(user, "¿Qué acordamos sobre la licitacion electrica con proveedores?")
+        self.assertEqual([m["id"] for m in minutes], ["g-1", "g-2"])
+        self.assertTrue(minutes[1]["found"])
+        prompt = uc.build_prompt(JOB, SNAP_A, minutes)
+        self.assertIn("Minutas anteriores relacionadas", prompt)
+        self.assertIn("(minuta:g-2)", prompt)
+        cited = uc.cited_minutes(user, "Ver [Comité proveedores](minuta:g-2) y [falsa](minuta:g-999)")
+        self.assertEqual(list(cited), ["g-2"])
+        self.assertEqual(cited["g-2"]["contenido"], "Acordamos licitación eléctrica")
+        self.assertEqual(uc.minutes_for(user, ""), user["minutes"])
+
     def test_identificador_de_usuario_en_rutas_es_seguro(self):
         with self.assertRaises(ValueError):
             self.copilot(Runner()).answer("../ceo", {}, JOB, SNAP_A, MINUTES_A)

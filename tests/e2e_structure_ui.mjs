@@ -136,6 +136,26 @@ await a.waitForFunction(() => projects.some(p => p.title === 'LT renombrada desd
 if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/e06-settings.png` });
 await a.click('#dsta-settings-toggle');
 step('D27: A restaura la línea desde ⚙ Configuración y vuelve a aparecer');
+
+// D37: "Aplicar todas" applies the suggested changes in order through the real queue and bridge.
+// Only the model's answer is simulated (there is no LLM in the lab).
+const ltA = await a.evaluate(t => projects.find(p => p.title === t).id, cfg.A.lt);
+const chatId = '11111111-2222-4333-8444-555555555555';
+await a.route('**/api/assistant**', route => route.request().method() === 'POST'
+  ? route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: chatId }) })
+  : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: chatId, status: 'completed',
+    reply: 'Te sugiero dos tareas.', proposals: [
+      { action: 'task.create', projectId: ltA, title: 'Sugerida uno', origin: 'copilot' },
+      { action: 'task.create', projectId: ltA, title: 'Sugerida dos', origin: 'copilot' }] }) }));
+await a.click('#dsta-assistant-toggle');
+await a.fill('#dsta-assistant-input', '¿qué me sugieres?');
+await a.click('#dsta-assistant-send');
+await a.click('.dsta-proposals button:has-text("Aplicar todas")', { timeout: 30000 });
+await a.waitForFunction(() => ['Sugerida uno', 'Sugerida dos'].every(t => tasks.some(x => x.title === t)), null, { timeout: 120000 });
+assert.ok(await a.locator('.dsta-proposals button:has-text("Aplicar todas")').isHidden());
+await a.unroute('**/api/assistant**');
+await a.click('#dsta-assistant-close');
+step('D37: «Aplicar todas» aplica las sugerencias en orden por la cola verificada');
 await openProject(a, 'LT renombrada desde UI');
 await a.click('.structure-more summary');
 await a.click('.structure-more button:has-text("Archivar línea")');

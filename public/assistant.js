@@ -209,9 +209,12 @@
       const queued = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
       await watchAction(requestId, note, queueUrl(proposal));
+      button.hidden = true;
+      return true;
     } catch (error) {
       note.textContent = error.message;
       button.disabled = false;
+      return false;
     }
   }
   function renderProposals(bubble, proposals) {
@@ -219,6 +222,7 @@
     const box = document.createElement('div');
     box.className = 'dsta-proposals';
     box.style.cssText = 'margin-top:10px;display:grid;gap:6px';
+    const pending = [];
     for (const proposal of proposals) {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
@@ -242,6 +246,22 @@
       }
       row.append(button, label, note);
       box.append(row);
+      if (!proposal.requestId) pending.push({ proposal, button, note });
+    }
+    // D37: suggestions can be applied together, one after another in the proposed order; it stops at
+    // the first failure so a later change never runs on top of one that did not happen.
+    if (pending.length > 1) {
+      const all = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Aplicar todas' });
+      all.style.cssText = 'width:auto;padding:4px 10px;justify-self:start';
+      all.addEventListener('click', async () => {
+        all.disabled = true;
+        for (const item of pending) {
+          if (item.button.hidden) continue;
+          if (!await applyProposal(item.proposal, item.button, item.note)) { all.disabled = false; return; }
+        }
+        all.hidden = true;
+      });
+      box.append(all);
     }
     bubble.append(box);
   }

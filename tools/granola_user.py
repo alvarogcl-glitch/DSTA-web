@@ -132,9 +132,14 @@ class GranolaService:
         # F5 context: the user's recent summaries, kept encrypted in THEIR vault entry.
         with _lock:
             data = self.store._get(actor)
+            entry = lambda r, size: {"id": inbox_record(r)["id"], "title": str(r.get("title") or "")[:200],
+                                     "date": str(r.get("date") or "")[:10], "summary": str(r.get("summary") or "")[:size]}
             recent = sorted(records, key=lambda r: str(r.get("date") or ""), reverse=True)[:30]
-            data["minutes"] = [{"title": str(r.get("title") or "")[:200], "date": str(r.get("date") or "")[:10],
-                                "summary": str(r.get("summary") or "")[:1500]} for r in recent]
+            data["minutes"] = [entry(r, 1500) for r in recent]
+            # D31: an archive that outlives Granola's 30-day window, so older meetings can be searched.
+            archive = {m.get("id"): m for m in (data.get("minuteArchive") or []) if isinstance(m, dict)}
+            archive.update({item["id"]: item for item in (entry(r, MINUTE_ARCHIVE_CHARS) for r in records)})
+            data["minuteArchive"] = sorted(archive.values(), key=lambda m: str(m.get("date") or ""), reverse=True)[:MINUTE_ARCHIVE_SIZE]
             self.store._save(actor, data)
         return records
 
@@ -142,6 +147,8 @@ class GranolaService:
         self.store.disconnect(actor)
 
 
+MINUTE_ARCHIVE_SIZE = 300
+MINUTE_ARCHIVE_CHARS = 4000
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
 EMPTY = {"", "no summary", "not available", "no notes", "none", "null"}
 

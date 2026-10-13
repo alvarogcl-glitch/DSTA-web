@@ -19,6 +19,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,8 @@ SESSION_ID = re.compile(r"^session_id:\s*(\S+)\s*$", re.MULTILINE)
 LISTED_SESSION = re.compile(r"\b(\d{8}_\d{6}_[0-9a-f]{6})\b")
 HERMES_TIMEOUT = 180
 CLAUDE_TIMEOUT = 150
+HERMES_COOLDOWN = 600  # D35: seconds on Claude after a Hermes failure, as in production
+MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
 MAX_CONTEXT_CHARS = 60_000
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
@@ -101,14 +104,21 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
     if snapshot.get("archivedProjects"):
         secondary.append(["", "## Líneas archivadas (se pueden restaurar)"] +
                          [f"- {p.get('title', '')} (LT {p.get('id')})" for p in snapshot["archivedProjects"]])
+    if minutes:
+        # D31/D32: recent minutes plus older ones found for this question; cite them by id.
+        def minute_line(m: dict) -> str:
+            cite = f" [cítala como [{m.get('title', '')}](minuta:{m['id']})]" if m.get("id") else ""
+            size = 1500 if m.get("found") else 600
+            return f"- {m.get('date', '')} · {m.get('title', '')}{cite}: {str(m.get('summary', ''))[:size]}"
+        recent = [m for m in minutes if not m.get("found")]
+        found = [m for m in minutes if m.get("found")]
+        secondary.append(["", "## Minutas recientes"] + [minute_line(m) for m in recent[:15]] +
+                         (["", "## Minutas anteriores relacionadas con la pregunta"] + [minute_line(m) for m in found[:5]] if found else []))
     done = [t for t in snapshot.get("tasks", []) if t.get("done")]
     if done:
         secondary.append(["", "## Tareas completadas (resumen)"] +
                          [head(t) + f" [LT {t.get('project_id')}]" + (f": {str(t['description'])[:300]}".replace("\n", " ") if t.get("description") else "")
                           for t in done])
-    if minutes:
-        secondary.append(["", "## Minutas recientes"] + [
-            f"- {m.get('date', '')} · {m.get('title', '')}: {str(m.get('summary', ''))[:600]}" for m in minutes[:15]])
     context = "\n".join(essential)
     omitted = 0
     if len(context) > MAX_CONTEXT_CHARS:
@@ -249,9 +259,10 @@ def clean(text: str) -> str:
 class UserCopilot:
     def __init__(self, *, hermes_cli: str, hermes_home: Path, claude_cli: str, work_dir: Path,
                  provider: str = "openai-codex", model: str = "gpt-6-luna", claude_model: str = "sonnet",
-                 run: Callable = default_run):
+                 run: Callable = default_run, clock: Callable[[], float] = time.monotonic):
         self.hermes_cli, self.hermes_home, self.claude_cli = hermes_cli, hermes_home, claude_cli
         self.work_dir, self.provider, self.model, self.claude_model, self.run = work_dir, provider, model, claude_model, run
+        self.clock, self.hermes_down_until = clock, 0.0
 
     def answer(self, actor: str, user: dict, job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
         return self.ask(actor, user, build_prompt(job, snapshot, minutes))
@@ -265,9 +276,12 @@ class UserCopilot:
             raise CopilotUnavailable("El proveedor de IA configurado para este usuario aún no está disponible.")
         cwd = self.work_dir / actor
         cwd.mkdir(parents=True, exist_ok=True)
-        reply = self._hermes(actor, prompt, cwd)
-        if reply:
-            return reply
+        # D35: like production, after a Hermes failure go straight to Claude for 10 minutes.
+        if self.clock() >= self.hermes_down_until:
+            reply = self._hermes(actor, prompt, cwd)
+            if reply:
+                return reply
+            self.hermes_down_until = self.clock() + HERMES_COOLDOWN
         reply = self._claude(prompt, cwd)
         if reply:
             return reply + BACKUP_NOTE
@@ -313,7 +327,45 @@ class UserCopilot:
         return clean(out)[:20_000] if code == 0 else ""
 
 
-def minutes_for(user: dict) -> list[dict]:
-    """Recent Granola summaries kept in the user's vault entry (title, date, summary)."""
-    value = user.get("minutes") or []
+def _stored(user: dict, key: str) -> list[dict]:
+    value = user.get(key) or []
     return value if isinstance(value, list) else json.loads(value)
+
+
+WORD = re.compile(r"[a-z0-9]{4,}")
+
+
+def _words(text: str) -> set[str]:
+    return set(WORD.findall(line_key(text)))
+
+
+def minutes_for(user: dict, query: str = "") -> list[dict]:
+    """The user's 15 most recent Granola summaries plus (D31) up to 5 older ones from THEIR archive
+    that best match the question. Never another user's minutes: both lists live in this vault entry."""
+    recent = _stored(user, "minutes")[:15]
+    seen = {m.get("id") for m in recent if m.get("id")} | {(m.get("title"), m.get("date")) for m in recent}
+    wanted = _words(query)
+    if not wanted:
+        return recent
+    scored = []
+    for minute in _stored(user, "minuteArchive"):
+        if minute.get("id") in seen or (minute.get("title"), minute.get("date")) in seen:
+            continue
+        title_hits = len(wanted & _words(minute.get("title", "")))
+        hits = len(wanted & _words(minute.get("summary", ""))) + 2 * title_hits
+        if hits:
+            scored.append((hits, str(minute.get("date") or ""), minute))
+    found = [{**m, "found": True} for _, _, m in sorted(scored, key=lambda item: (item[0], item[1]), reverse=True)[:5]]
+    return recent + found
+
+
+def cited_minutes(user: dict, reply: str) -> dict[str, dict]:
+    """D32: text of the user's minutes the copilot linked as [título](minuta:<id>), for the chat viewer."""
+    by_id = {m["id"]: m for m in _stored(user, "minuteArchive") + _stored(user, "minutes") if m.get("id")}
+    cited: dict[str, dict] = {}
+    for minute_id in MINUTE_LINK.findall(reply or ""):
+        minute = by_id.get(minute_id.strip())
+        if minute and minute_id.strip() not in cited and len(cited) < 5:
+            cited[minute_id.strip()] = {"titulo": minute.get("title", ""), "fecha": minute.get("date", ""),
+                                        "contenido": str(minute.get("summary") or "")}
+    return cited
