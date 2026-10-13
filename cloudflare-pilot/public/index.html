@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08111d">
+  <title>Piloto multiusuario DSTA · Laboratorio</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="DSTA laboratorio">
+        <span class="brand-mark">D</span><span>DSTA <small>LABORATORIO</small></span>
+      </a>
+      <span class="environment"><i></i> Entorno aislado</span>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">PILOTO TÉCNICO · AUTENTICACIÓN Y AISLAMIENTO</p>
+      <h1 id="page-title">Cada cuenta, <span>su propio espacio.</span></h1>
+      <p class="lede">Prueba de sesiones y autorización por actor sobre Cloudflare Workers + D1.</p>
+    </section>
+
+    <section id="login-panel" class="panel login-panel" aria-labelledby="login-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">ACCESO DE PRUEBA</p><h2 id="login-title">Inicia sesión</h2></div>
+        <span class="step">01 / 02</span>
+      </div>
+      <form id="login-form">
+        <label for="email">Correo de laboratorio</label>
+        <input id="email" name="email" type="email" autocomplete="username" placeholder="cuenta-a@dsta.test" required maxlength="254">
+        <label for="password">Contraseña de prueba</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+        <button class="button primary" type="submit">Entrar al espacio <span aria-hidden="true">→</span></button>
+        <p id="login-message" class="message" role="status" aria-live="polite"></p>
+      </form>
+      <p class="hint">Usa una de las dos cuentas sintéticas. Si recibiste una invitación, ábrela primero para crear tu contraseña.</p>
+    </section>
+
+    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title">
+      <div class="workspace-heading">
+        <div><p class="eyebrow">ESPACIO ACTIVO</p><h2 id="workspace-title">Tu laboratorio</h2></div>
+        <button id="logout-button" class="button secondary" type="button">Cerrar sesión</button>
+      </div>
+      <div class="actor-card">
+        <span class="actor-icon" aria-hidden="true">◎</span>
+        <div><span class="label">Sesión autenticada</span><strong id="actor-name"></strong><span id="actor-email" class="muted"></span></div>
+        <span class="secure-pill">ACTOR AISLADO</span>
+      </div>
+      <div class="section-heading"><div><p class="eyebrow">D1 · DATOS SINTÉTICOS</p><h3>Registros de esta cuenta</h3></div><span id="item-count" class="count">0</span></div>
+      <div id="items" class="items" aria-live="polite"></div>
+
+      <form id="item-form" class="panel create-panel">
+        <div><p class="eyebrow">PRUEBA DE ESCRITURA</p><h3>Crear registro privado</h3><p class="muted">El servidor asigna el actor desde la sesión; ignora cualquier actor enviado por el cliente.</p></div>
+        <label for="item-title">Título</label>
+        <input id="item-title" name="title" required maxlength="120" placeholder="Ej.: Caso de aislamiento A">
+        <label for="item-detail">Detalle de prueba</label>
+        <textarea id="item-detail" name="detail" maxlength="1000" rows="3" placeholder="Solo texto sintético"></textarea>
+        <button class="button primary" type="submit">Guardar en mi espacio <span aria-hidden="true">↗</span></button>
+        <p id="item-message" class="message" role="status" aria-live="polite"></p>
+      </form>
+
+      <section class="probe-card" aria-labelledby="probe-title">
+        <div><p class="eyebrow">CONTROL DE AUTORIZACIÓN</p><h3 id="probe-title">Intento de lectura cruzada</h3><p class="muted">La API intentará leer el registro de la otra cuenta usando tu sesión actual.</p></div>
+        <button id="probe-button" class="button secondary" type="button">Probar bloqueo</button>
+        <p id="probe-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <aside class="boundary-note">
+      <span class="boundary-icon" aria-hidden="true">✓</span>
+      <div><strong>Solo datos sintéticos</strong><p>Este piloto no se conecta a Vikunja, Granola, Ollama ni al Worker de producción. No ingreses información real.</p></div>
+    </aside>
+    <footer><span>DSTA · PILOTO DE AISLAMIENTO</span><span>Sesiones expiran en 8 horas</span></footer>
+  </main>
+</body>
+</html>

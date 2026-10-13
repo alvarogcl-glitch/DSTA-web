@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08111d">
+  <meta name="referrer" content="no-referrer">
+  <title>Activar cuenta · DSTA Laboratorio</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/invite.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="DSTA laboratorio">
+        <span class="brand-mark">D</span><span>DSTA <small>LABORATORIO</small></span>
+      </a>
+      <span class="environment"><i></i> Entorno aislado</span>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">INVITACIÓN · UN SOLO USO</p>
+      <h1 id="page-title">Activa tu cuenta, <span>con tu propia contraseña.</span></h1>
+      <p class="lede">Nadie más la ve: se guarda solo como hash en D1.</p>
+    </section>
+
+    <section class="panel login-panel" aria-labelledby="invite-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">CREAR CONTRASEÑA</p><h2 id="invite-title">Elige tu contraseña</h2></div>
+      </div>
+      <form id="invite-form">
+        <label for="password">Contraseña (mínimo 14 caracteres)</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" required minlength="14" maxlength="256">
+        <label for="confirm">Repite la contraseña</label>
+        <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="14" maxlength="256">
+        <button class="button primary" type="submit">Activar cuenta <span aria-hidden="true">→</span></button>
+      </form>
+      <p id="invite-message" class="message" role="status" aria-live="polite"></p>
+      <p class="hint">Usa una contraseña inventada para este piloto; nunca una que uses en otro servicio.</p>
+    </section>
+
+    <aside class="boundary-note">
+      <span class="boundary-icon" aria-hidden="true">✓</span>
+      <div><strong>Solo datos sintéticos</strong><p>Este piloto no se conecta a Vikunja, Granola, Ollama ni al Worker de producción. No ingreses información real.</p></div>
+    </aside>
+  </main>
+</body>
+</html>

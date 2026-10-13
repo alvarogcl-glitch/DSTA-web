@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dsta-multiuser-pilot-20261012",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-12",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "404-page"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dsta-multiuser-pilot-20261012-db",
+      "database_id": "fea867fa-8899-4bc5-9b87-7e34ee59ad81",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
