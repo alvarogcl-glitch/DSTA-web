@@ -46,6 +46,13 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D28 | decidido | Mismo. | Copiloto: descripciones completas de las tareas abiertas (hasta 4.000 caracteres cada una) y resumen de las completadas (300). Límite total de 60.000 caracteres. Si algo no cabe, se le avisa al modelo que lo diga en vez de suponer. | Igual al converger. | Ninguno. | Entrega E06. |
 | D29 | decidido | Mismo. | El snapshot incluye `created`. El copiloto ve «creada AAAA-MM-DD» en hora de Chile y la fecha de hoy en Chile. | Igual al converger. | Ninguno. | Entrega E06. |
 | D30 | decidido | Mismo. | El copiloto conoce el catálogo de etiquetas y las de cada tarea, y propone `label.assign`/`label.unassign` sobre etiquetas existentes. Regla D03: lo pedido se ejecuta por la cola de etiquetas verificada; lo sugerido queda con «Aplicar». Las demás etiquetas no se tocan. | Igual al converger. | Ninguno. | Entrega E06. |
+| D31 | decidido | Telegram 13-10 23:26: «Ok a todo menos d37». | La sincronización con Granola mantiene en el vault de cada usuario un archivo de hasta 300 minutas (4.000 caracteres cada una), que sobrevive a la ventana de 30 días. El copiloto recibe las 15 recientes más hasta 5 anteriores que coinciden con la pregunta (palabras, sin tildes). Nunca minutas de otro usuario. | Equivalente al converger. | Ninguno. | Entrega E07. |
+| D32 | decidido | Mismo. | El copiloto cita como [título](minuta:id); el puente adjunta el texto de las minutas citadas del usuario y el chat las abre en el visor existente. | Igual. | Ninguno. | Entrega E07. |
+| D33 | decidido (fuera de alcance) | Mismo. | Sin recordatorios en el piloto. | Producción mantiene los de Hermes. | Ninguno. | Reabrir si hay demanda. |
+| D34 | decidido (sin cambios) | Mismo. | Conversación solo en la pestaña, sin memoria entre usuarios y con sesiones purgadas. | Igual. | Ninguno. | — |
+| D35 | decidido | Mismo. | Si Hermes falla, el copiloto usa Claude directo durante 10 minutos, como producción; las respuestas de respaldo van marcadas. | Igual. | Ninguno. | Entrega E07. |
+| D36 | decidido (pospuesto) | Mismo. | Solo el perfil ceo-hermes. Cualquier otro proveedor muestra un mensaje claro y no usa credenciales. | Igual. | Ninguno. | — |
+| D37 | decidido | Telegram 13-10 23:27: «Ok», tras el ejemplo. | Máximo 5 cambios por respuesta, en el orden propuesto. Lo pedido explícitamente se ejecuta solo. Las sugerencias tienen «Aplicar todas», que aplica en orden y se detiene en el primer fallo. Lo que depende de algo recién creado se hace en dos mensajes. | Igual al converger. | Ninguno. | Entrega E07. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -171,6 +178,22 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Navegador con usuarios sintéticos: 13 de 13. Incluye archivar y luego restaurar desde ⚙.
 - Versiones: Worker staging dd6ee1a2-8c15-4412-9fef-2369defb8b1c; puente reiniciado con 98e48f4.
 - Rollback: revertir 98e48f4, redeploy de staging y reiniciar el puente.
+
+### Entrega E07 · D31, D32, D35 y D37: minutas, respaldo y aplicar todas
+
+- Autorización: Telegram 13-10 23:26 («Ok a todo menos d37») y 23:27 («Ok» a D37).
+- Estado: verificado en local y publicado en el piloto. El archivo de minutas se llena en la próxima sincronización horaria con Granola. Falta la prueba del CEO.
+- Commit base y resultado: e591570 → 2e0e6d2 (rama feat/multiusuario).
+- Cambios:
+  - `granola_user.sync`: agrega `id` a las minutas y mantiene `minuteArchive`.
+  - `user_copilot`: nuevas funciones `minutes_for(user, query)` y `cited_minutes`, más el enfriamiento de Hermes.
+  - Puente: pasa la pregunta a la búsqueda de minutas y adjunta las citadas.
+  - `assistant.js`: botón «Aplicar todas».
+- Pruebas:
+  - `npm test`: 175 Python OK, más todas las suites JS.
+  - Navegador: 14 de 14. «Aplicar todas» aplica dos sugerencias por la cola y el puente reales; solo se simuló la respuesta del modelo.
+- Versiones: Worker staging ecdfac8a-11c9-4b98-9949-6e9497b9b348; puente reiniciado con 2e0e6d2.
+- Rollback: revertir 2e0e6d2, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 
