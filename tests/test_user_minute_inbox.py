@@ -59,6 +59,16 @@ class UserMinuteInboxTest(unittest.TestCase):
         self.assertRegex(record["id"], r"^[\w-]{1,80}$")
         self.assertNotIn("Llamar a Rodrigo el jueves", json.dumps(umi.public_record(record)), "notas privadas no van al Worker")
 
+    def test_tareas_ajenas_mencionadas_en_la_minuta_no_se_aplican(self):
+        foreign = {"resumen": "x", "antecedentes": [], "acciones": [
+            {"tipo": "actualizar", "evidente": True, "confianza": "alta", "task_id": 63, "nota": "avance"},
+            {"tipo": "crear", "evidente": True, "confianza": "alta", "project_id": 999, "titulo": "Nueva", "nota": "n"}]}
+        record = self.inbox.process("paula", USER, MINUTE, SNAP, lambda prompt: json.dumps(foreign))
+        self.assertEqual(self.applied, [], "nada automático sobre elementos que no son de la usuaria")
+        self.assertTrue(all(a["estado"] == "propuesta" and not a.get("auto") for a in record["acciones"]))
+        self.assertIsNone(record["acciones"][0]["task_id"])
+        self.assertIn("#63", record["acciones"][0]["motivo"])
+
     def test_no_reprocesa_la_misma_version(self):
         self.inbox.process("paula", USER, MINUTE, SNAP, self.ask)
         self.assertIsNone(self.inbox.process("paula", USER, MINUTE, SNAP, self.ask))

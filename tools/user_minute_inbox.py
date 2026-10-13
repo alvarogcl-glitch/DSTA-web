@@ -90,6 +90,26 @@ def analysis_prompt(minute: dict, snapshot: dict | None) -> str:
             f"## Tareas abiertas por línea\n{_tasks_block(snapshot)}\n\n## {_minute_block(minute)}\n\n{rules}")
 
 
+def scope_actions(actions: list[dict], snapshot: dict | None) -> None:
+    """Minutes often cite task numbers of other portfolios (e.g. "#63"). Only the user's own tasks
+    and lines are valid targets; anything else becomes a proposal asking for the right target."""
+    snapshot = snapshot or {}
+    task_ids = {t.get("id") for t in snapshot.get("tasks", [])}
+    project_ids = {p.get("id") for p in snapshot.get("projects", [])}
+    for action in actions:
+        missing = []
+        if action.get("task_id") is not None and action["task_id"] not in task_ids:
+            missing.append(f"la tarea #{action['task_id']}")
+            action["task_id"] = None
+        if action.get("project_id") is not None and action["project_id"] not in project_ids:
+            missing.append(f"la línea {action['project_id']}")
+            action["project_id"] = None
+        if missing:
+            action["evidente"] = False
+            action["motivo"] = (f"La minuta menciona {' y '.join(missing)}, que no existe en tu espacio: "
+                                "indica la tarea o línea correcta antes de aprobar.")[:400]
+
+
 def public_record(record: dict) -> dict:
     """What the Worker inbox receives (no minute text / private notes)."""
     return {key: value for key, value in record.items() if key not in ("texto",)}
@@ -133,6 +153,7 @@ class UserMinuteInbox:
         record = {**base, "minuta": base["sourceId"], "detectadaEn": mi.now(), "resumen": plan["resumen"] or base["resumen"],
                   "antecedentes": plan["antecedentes"], "acciones": plan["acciones"], "vista": False,
                   "texto": _minute_block(minute)}
+        scope_actions(record["acciones"], snapshot)
         vk = self.vk_factory(user) if any(mi.is_evident(a) for a in record["acciones"]) else None
         for action in record["acciones"]:
             if mi.is_evident(action):
