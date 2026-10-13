@@ -245,7 +245,9 @@ class MultiuserBridge:
 def vikunja_checker(request_json: Callable) -> Callable:
     def check(user: dict) -> tuple[bool, str]:
         try:
-            request_json(user["vikunjaUrl"].rstrip("/") + "/api/v1/user", token=user["vikunjaToken"], timeout=10)
+            # API tokens cannot read /user (401): check the user's own root project instead.
+            request_json(f"{user['vikunjaUrl'].rstrip('/')}/api/v1/projects/{user['rootProjectId']}",
+                         token=user["vikunjaToken"], timeout=10)
             return True, "Vikunja responde con la credencial del usuario"
         except (HTTPError, URLError, OSError, ValueError):
             return False, "Vikunja no responde o la credencial no es válida"
