@@ -34,16 +34,16 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - [x] F0.6 `dsta-web-staging` desplegado en https://dsta-web-staging.alvaro-gcl.workers.dev (versión bd94c2f1; D1 `dsta-web-staging-db` aa680c9d). 25/25 pruebas contra la URL real. Producción `dsta-web` sin cambios (deployments idénticos).
 
 ### F1 · Puente multiusuario
-- [ ] F1.1 Despachador `/api/bridge/next` multiplexado (una consulta para N usuarios).
-- [ ] F1.2 `UserContext` en el puente: token Vikunja, raíz y home por usuario desde un vault cifrado en la VM.
-- [ ] F1.3 Raíz de proyecto parametrizada (sin fijar la raíz 2).
-- [ ] F1.4 Prueba con Vikunja de laboratorio y 2 usuarios: la acción de A usa el token de A.
-- [ ] F1.5 Medición de requests/día dentro del límite.
+- [x] F1.1 Despachador `/api/bridge/dispatch`: un sondeo para N usuarios. Las escrituras del navegador marcan el tipo de trabajo, y una confirmación nunca borra una marca más nueva que la lectura (test 13 del Worker). El puente también acepta `/u/<actor>/api/bridge/...`.
+- [x] F1.2 `tools/multiuser_bridge.py` y `tools/user_vault.py` (DPAPI). Cada trabajo corre con el token, la raíz y el directorio de su usuario; los usuarios sin vault se ignoran (4 tests del puente y 4 del vault).
+- [x] F1.3 `tools/user_context.py`: contextvar con default 2. Se usa en el publicador, la completación, las etiquetas y el MCP (`DSTA_ROOT_PROJECT_ID`). La suite de producción sigue pasando.
+- [x] F1.4 `tests/e2e_multiuser_lab.py`: 23/23 con Vikunja de laboratorio :14701 y wrangler dev. La acción de A se ejecuta con el token de A, la tarea de B no cambia y el token de A recibe 403 sobre la raíz de B.
+- [~] F1.5 Cálculo (no medido en Cloudflare): despacho cada 3 s = 28.800/día, más un snapshot cada 120 s por usuario (720/día). Con 15 usuarios son unas 40.000/día del puente multiusuario, frente a 100.000-120.000/día del puente actual. **Pendiente:** medirlo con datos reales de Cloudflare en F6.
 
 ### F2 · Alta de usuarios
-- [ ] F2.1 Script admin: crea el usuario Vikunja, su token, su proyecto raíz y la invitación al dashboard.
-- [ ] F2.2 Baja de usuario: revoca sesiones, token y vault.
-- [ ] F2.3 Prueba de alta y baja de punta a punta con un usuario sintético.
+- [x] F2.1 `tools/provision_user.py provision`: cuenta Vikunja con contraseña aleatoria, raíz propia, token API acotado a 7 grupos y 365 días, vault DPAPI e invitación de un solo uso (solo hash en D1).
+- [x] F2.2 `provision_user.py remove`: revoca el token de Vikunja, borra el cajón del DO (`/api/bridge/wipe`, prohibido para `pmo-dsta`), la cuenta, las sesiones y las invitaciones en D1, y el vault. La cuenta Vikunja se conserva y se desactiva a mano si hace falta.
+- [x] F2.3 Incluida en el e2e de laboratorio: tras la baja, el token responde 401, la sesión 401, el login 401 y el vault ya no existe.
 
 ### F3 · LTs y tareas desde la UI
 - [ ] F3.1 Acciones crear/editar/mover/archivar de LT y tarea en la cola de acciones.
@@ -70,3 +70,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 ## Bitácora
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.
 - 2026-10-12 23:25: **F0 completa.** Staging desplegado y verificado 25/25. El token del puente de staging vive en `%LOCALAPPDATA%/dsta-staging/bridge-token`, fuera del repo.
+- 2026-10-12 23:38: **F1 completa** (F1.5 calculada, medición pendiente) y **F2 completa**. Staging redeployado (versión ef32fbf2), 25/25 contra la URL real. `npm test`: 117 Python OK más 15 suites Node.

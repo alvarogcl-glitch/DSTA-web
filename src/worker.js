@@ -967,6 +967,16 @@ export class DashboardChatQueue extends DurableObject {
 
   healthStatus() { return this.ctx.storage.kv.get("data:health") || {}; }
 
+  // F2: delete everything stored for a removed user (only reachable for user boxes).
+  async wipe() {
+    if (typeof this.ctx.storage.deleteAll === "function") {
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    const storage = this.ctx.storage.kv;
+    for (const [key] of [...storage.list({ prefix: "" })]) storage.delete(key);
+  }
+
   saveHealth(health) {
     const storage = this.ctx.storage.kv;
     const current = storage.get("data:health") || {};
@@ -1152,6 +1162,17 @@ export default {
     if (accounts && url.pathname.startsWith("/u/") && !prefixed) return json({ error: "No encontrado" }, 404);
     const bridgePath = prefixed ? prefixed[2] : url.pathname;
     if (accounts && bridgePath === "/api/bridge/dispatch" && !prefixed) return dispatchRoute(request, env);
+    // F2: removing a user wipes their box. Accounts mode only; the production box is never wiped.
+    if (accounts && bridgePath === "/api/bridge/wipe") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      const resolved = await bridgeBox(request, env, bridgePath, prefixed ? prefixed[1] : null);
+      if (resolved.error) return resolved.error;
+      if (resolved.box === LEGACY_BOX || resolved.box === DISPATCH_BOX) {
+        return json({ error: "Ese cajón no se puede borrar." }, 403);
+      }
+      await chatStub(env, resolved.box).wipe();
+      return json({ ok: true });
+    }
     const bridgeRoute = bridgeRoutes[bridgePath];
     if (bridgeRoute) {
       if (request.method !== bridgeRoute[0]) return json({ error: "Método no permitido" }, 405);

@@ -200,4 +200,15 @@ assert.ok(Object.keys(d3.pending['demo-b'] || {}).includes('action'), 'a stale a
 assert.equal((await call('/api/bridge/dispatch', { method: 'POST', headers: { authorization: 'Bearer bridge-test', noOrigin: '1' },
   body: { actor: 'demo-b', kinds: ['bogus'], seenAt: d3.now } })).status, 400);
 
+// 14. F2: removing a user wipes their box through the bridge; never the production box.
+assert.equal((await call('/u/demo-b/api/bridge/wipe', { method: 'POST', body: {}, headers: { authorization: 'Bearer wrong', noOrigin: '1' } })).status, 401);
+assert.equal((await call('/u/demo-b/api/bridge/wipe', { method: 'POST', body: {}, headers: { authorization: 'Bearer bridge-test', noOrigin: '1' } })).status, 200);
+assert.equal((await call('/api/dashboard', { cookie: b })).status, 503, 'B\'s data is gone after the wipe');
+sqlite.prepare("INSERT INTO users(id,email,display_name,password_salt,password_hash,do_name) VALUES('ceo','ceo@dsta.test','CEO','x','y','pmo-dsta')").run();
+assert.equal((await call('/u/ceo/api/bridge/wipe', { method: 'POST', body: {}, headers: { authorization: 'Bearer bridge-test', noOrigin: '1' } })).status, 403,
+  'the production box can never be wiped');
+const legacyEnv = { DASHBOARD_USER: 'u', DASHBOARD_PASSWORD: 'p', INGEST_TOKEN: 'i', DSTA_BRIDGE_TOKEN: 'bridge-test', CHAT_STATE: env.CHAT_STATE };
+assert.equal((await worker.fetch(new Request(`${ORIGIN}/api/bridge/wipe`, { method: 'POST', headers: { authorization: 'Bearer bridge-test' } }), legacyEnv)).status, 401,
+  'single-user mode has no wipe route (falls back to Basic Auth)');
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');
