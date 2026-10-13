@@ -35,6 +35,7 @@ if _tools_dir not in sys.path:
 from task_mutation_lock import task_lock
 from user_context import root_project_id
 import label_actions
+import structure_actions
 
 _publisher_spec = importlib.util.spec_from_file_location(
     "dsta_publish_dashboard", Path(__file__).with_name("publish_dashboard.py"))
@@ -468,13 +469,16 @@ _snapshot_lock = threading.Lock()
 
 def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url: str,
                      *, action_job: dict | None = None, label_job: dict | None = None,
-                     label_result: dict | None = None) -> str:
+                     label_result: dict | None = None, action_result: dict | None = None) -> str:
     if not vikunja_token:
         raise RuntimeError("Falta VIKUNJA_API_TOKEN para actualización inmediata")
     with _snapshot_lock:
         snapshot = fetch_dashboard(vikunja_url, vikunja_token)
         if action_job is not None:
             snapshot["actionConfirmation"] = {"id": action_job["id"], "attempt": action_job["attempt"]}
+            if action_result is not None:
+                # Structure actions (F3) prove their result; "complete" keeps its legacy shape.
+                snapshot["actionConfirmation"]["result"] = action_result
         if label_job is not None:
             snapshot["labelConfirmation"] = {"id": label_job["id"], "attempt": label_job["attempt"], "result": label_result}
         request_json(f"{base_url}/api/bridge/snapshot", token=token, method="POST", payload=snapshot, timeout=40)
@@ -688,10 +692,16 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                         raise RuntimeError("El intento ya no tiene una concesión válida")
                 return request_json(vikunja_url.rstrip("/") + path, token=vikunja_token,
                                     method=method, timeout=20, **kwargs)
-            execute_completion(job, action_request, server_url=vikunja_url)
+            if job.get("action", "complete") == "complete":
+                execute_completion(job, action_request, server_url=vikunja_url)
+                action_result = None
+            else:
+                action_result = structure_actions.execute(job, action_request, cache_dir=hermes_home / "cache",
+                                                          server_url=vikunja_url, lock=task_lock)
             written = time.monotonic()
             try:
-                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url, action_job=job)
+                timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url, action_job=job,
+                                             action_result=action_result)
             except Exception:
                 finish_job(base_url, token, job, refresh_error="No se pudo confirmar el snapshot actualizado.")
             else:

@@ -266,6 +266,63 @@ function labelResultMatches(job, snapshot, result) {
   }
 }
 
+// F3: structure actions share the leased, snapshot-verified action queue with "complete".
+// Each action has a strict schema; "complete" keeps its exact legacy shape.
+const ACTION_SCHEMAS = {
+  complete: { required: ["taskId"], optional: [] },
+  "task.create": { required: ["projectId", "title"], optional: ["description", "dueDate"] },
+  "task.update": { required: ["taskId", "title"], optional: ["description", "dueDate"] },
+  "task.move": { required: ["taskId", "projectId"], optional: [] },
+  "lt.create": { required: ["title"], optional: [] },
+  "lt.rename": { required: ["projectId", "title"], optional: [] },
+  "lt.archive": { required: ["projectId"], optional: [] },
+};
+function validAction(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const schema = ACTION_SCHEMAS[body.action];
+  if (!schema || typeof body.requestId !== "string" || !ACTION_UUID.test(body.requestId)) return false;
+  const allowed = new Set(["action", "requestId", ...schema.required, ...schema.optional]);
+  if (Object.keys(body).some(key => !allowed.has(key)) || schema.required.some(key => body[key] === undefined)) return false;
+  for (const key of ["taskId", "projectId"]) {
+    if (body[key] !== undefined && (!Number.isSafeInteger(body[key]) || body[key] <= 0)) return false;
+  }
+  if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 250)) return false;
+  if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 20_000)) return false;
+  if (body.dueDate !== undefined && (typeof body.dueDate !== "string" || !/^(\d{4}-\d{2}-\d{2})?$/.test(body.dueDate))) return false;
+  return true;
+}
+// The bridge proves a structure action with its post-write snapshot plus the ids it touched.
+function actionResultMatches(job, snapshot, result) {
+  if (!snapshot || !result || typeof result !== "object" || Array.isArray(result)) return false;
+  const task = id => snapshot.tasks.find(t => t.id === id);
+  const project = id => snapshot.projects.find(p => p.id === id);
+  switch (job.action) {
+    case "task.create": {
+      const created = Number.isSafeInteger(result.taskId) ? task(result.taskId) : null;
+      return Boolean(created && created.title === job.title.trim() && created.project_id === job.projectId);
+    }
+    case "task.update": {
+      const updated = result.taskId === job.taskId ? task(job.taskId) : null;
+      return Boolean(updated && updated.title === job.title.trim() &&
+        (job.description === undefined || updated.description === job.description) &&
+        (!job.dueDate || updated.date === job.dueDate));
+    }
+    case "task.move": {
+      const moved = result.taskId === job.taskId ? task(job.taskId) : null;
+      return Boolean(moved && moved.project_id === job.projectId);
+    }
+    case "lt.create": {
+      const created = Number.isSafeInteger(result.projectId) ? project(result.projectId) : null;
+      return Boolean(created && created.title === job.title.trim());
+    }
+    case "lt.rename": return result.projectId === job.projectId && project(job.projectId)?.title === job.title.trim();
+    case "lt.archive": return result.projectId === job.projectId && !project(job.projectId);
+    default: return false;
+  }
+}
+const actionTarget = job => job.taskId ? `t:${job.taskId}` :
+  (String(job.action || "").startsWith("lt.") && job.projectId ? `p:${job.projectId}` : null);
+
 async function taskActionRoute(request, url, env, box = LEGACY_BOX) {
   if (!env.DSTA_BRIDGE_TOKEN) return json({ error: "Puente no configurado" }, 503);
   if (request.method === "GET") {
@@ -274,14 +331,15 @@ async function taskActionRoute(request, url, env, box = LEGACY_BOX) {
     return chatStub(env, box).fetch(`https://chat.internal/actions/status?id=${id}`);
   }
   if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
-  const parsed = await readJson(request, 1024);
+  const parsed = await readJson(request, 24_000);
   if (parsed.error) return parsed.error;
   const body = parsed.body;
-  if (!body || Array.isArray(body) || Object.keys(body).sort().join(",") !== "action,requestId,taskId" ||
-      body.action !== "complete" || !Number.isSafeInteger(body.taskId) || body.taskId <= 0 ||
-      typeof body.requestId !== "string" || !ACTION_UUID.test(body.requestId)) {
-    return json({ error: "Acción estructurada inválida." }, 400);
+  // "complete" keeps its original 1 KB bound; only structure actions may carry descriptions.
+  if ((!body || !ACTION_SCHEMAS[body.action] || body.action === "complete") &&
+      new TextEncoder().encode(JSON.stringify(body)).byteLength > 1024) {
+    return json({ error: "Solicitud demasiado grande" }, 413);
   }
+  if (!validAction(body)) return json({ error: "Acción estructurada inválida." }, 400);
   return forwardToChatObject(env, "/actions/create", body, box);
 }
 
@@ -843,25 +901,37 @@ export class DashboardChatQueue extends DurableObject {
     const storage = this.ctx.storage.kv;
     const now = Date.now();
     const jobs = () => [...storage.list({ prefix: "action:" })];
-    const view = job => ({ id: job.id, kind: "action", taskId: job.taskId, status: job.status,
-      error: job.error || "", refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "" });
+    const view = job => ({ id: job.id, kind: "action", action: job.action || "complete", taskId: job.taskId, status: job.status,
+      error: job.error || "", refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "",
+      ...(job.result ? { result: job.result } : {}) });
     if (url.pathname === "/actions/create" && request.method === "POST") {
       const old = storage.get(`action:${body.requestId}`);
-      if (old) return old.taskId === body.taskId && old.action === body.action
-        ? json(view(old), 202) : json({ error: "Identificador reutilizado para otra acción." }, 409);
+      const sameRequest = old && (old.request ? JSON.stringify(old.request) === JSON.stringify(body)
+        : old.taskId === body.taskId && old.action === body.action);
+      if (old) return sameRequest ? json(view(old), 202) : json({ error: "Identificador reutilizado para otra acción." }, 409);
       const snapshot = storage.get("data:snapshot") ?? createSnapshot;
-      const task = validSnapshot(snapshot) ? snapshot.tasks.find(item => item.id === body.taskId) : null;
-      if (!task || !Number.isSafeInteger(task.project_id) || !snapshot.projects.some(p => p.id === task.project_id)) {
+      if (!validSnapshot(snapshot)) return json({ error: "La tarea no está en el snapshot actual." }, 404);
+      const task = body.taskId !== undefined ? snapshot.tasks.find(item => item.id === body.taskId) : null;
+      if (body.taskId !== undefined && (!task || !Number.isSafeInteger(task.project_id) ||
+          !snapshot.projects.some(p => p.id === task.project_id))) {
         return json({ error: "La tarea no está en el snapshot actual." }, 404);
+      }
+      if (body.projectId !== undefined && !snapshot.projects.some(p => p.id === body.projectId)) {
+        return json({ error: "La línea de trabajo no está en el snapshot actual." }, 404);
       }
       for (const [key, job] of jobs()) {
         if (["completed", "error"].includes(job.status) && now - Date.parse(job.completedAt) > 604_800_000) storage.delete(key);
       }
-      const existing = jobs().find(([, job]) => job.taskId === body.taskId && ["queued", "running"].includes(job.status));
-      if (existing) return json({ error: "La tarea ya tiene una acción pendiente.", id: existing[1].id }, 409);
+      const target = actionTarget(body);
+      const existing = target && jobs().find(([, job]) => actionTarget(job) === target && ["queued", "running"].includes(job.status));
+      if (existing) return json({ error: "Ya hay un cambio pendiente sobre ese elemento.", id: existing[1].id }, 409);
       if (jobs().length >= 500) return json({ error: "Cola de acciones llena." }, 429);
-      const job = { id: body.requestId, kind: "action", action: "complete", taskId: task.id,
-        projectId: task.project_id, status: "queued", createdAt: new Date(now).toISOString(), attempts: 0 };
+      const { requestId, ...fields } = body;
+      const job = body.action === "complete"
+        ? { id: body.requestId, kind: "action", action: "complete", taskId: task.id,
+          projectId: task.project_id, status: "queued", createdAt: new Date(now).toISOString(), attempts: 0 }
+        : { ...fields, id: requestId, kind: "action", request: body, ...(task ? { sourceProjectId: task.project_id } : {}),
+          status: "queued", createdAt: new Date(now).toISOString(), attempts: 0 };
       storage.put(`action:${job.id}`, job);
       return json(view(job), 202);
     }
@@ -898,10 +968,15 @@ export class DashboardChatQueue extends DurableObject {
       const snapshot = storage.get("data:snapshot");
       const confirmedAttempt = job.snapshotConfirmation?.attempt === body.attempt &&
         job.snapshotConfirmation?.timestamp === body.snapshotTimestamp;
-      const verified = body.snapshotTimestamp && Number.isFinite(Date.parse(body.snapshotTimestamp)) &&
-        (confirmedAttempt || Date.parse(body.snapshotTimestamp) >= Date.parse(job.startedAt)) &&
-        Date.parse(snapshot?.timestamp) >= Date.parse(body.snapshotTimestamp) &&
-        snapshot.tasks.some(task => task.id === job.taskId && task.project_id === job.projectId && task.done === true);
+      const proof = job.confirmation;
+      const verified = job.action && job.action !== "complete"
+        ? Boolean(proof?.attempt === body.attempt && proof.timestamp === body.snapshotTimestamp &&
+          actionResultMatches(job, snapshot, proof.result))
+        : body.snapshotTimestamp && Number.isFinite(Date.parse(body.snapshotTimestamp)) &&
+          (confirmedAttempt || Date.parse(body.snapshotTimestamp) >= Date.parse(job.startedAt)) &&
+          Date.parse(snapshot?.timestamp) >= Date.parse(body.snapshotTimestamp) &&
+          snapshot.tasks.some(task => task.id === job.taskId && task.project_id === job.projectId && task.done === true);
+      if (verified && proof?.result && job.action !== "complete") job.result = proof.result;
       job.error = body.error ? "No se pudo completar la tarea de forma segura; revisa su estado y alcance." : "";
       job.refreshError = !job.error && !verified ? "No se pudo confirmar el snapshot actualizado." : "";
       job.snapshotTimestamp = verified ? body.snapshotTimestamp : "";
@@ -1004,13 +1079,15 @@ export class DashboardChatQueue extends DurableObject {
     let actionJob = null;
     if (actionConfirmation !== null) {
       if (!actionConfirmation || typeof actionConfirmation !== "object" ||
-          Object.keys(actionConfirmation).sort().join(",") !== "attempt,id" ||
           typeof actionConfirmation.id !== "string" || typeof actionConfirmation.attempt !== "string") return false;
       actionJob = storage.get(`action:${actionConfirmation.id}`);
       if (!actionJob || actionJob.status !== "running" || storage.get("action-current") !== actionJob.id ||
-          actionJob.attempt !== actionConfirmation.attempt || actionJob.leaseUntil <= Date.now() ||
-          !snapshot.tasks.some(task => task.id === actionJob.taskId &&
-            task.project_id === actionJob.projectId && task.done === true)) return false;
+          actionJob.attempt !== actionConfirmation.attempt || actionJob.leaseUntil <= Date.now()) return false;
+      const keys = Object.keys(actionConfirmation).sort().join(",");
+      const structural = actionJob.action && actionJob.action !== "complete";
+      if (structural ? keys !== "attempt,id,result" || !actionResultMatches(actionJob, snapshot, actionConfirmation.result)
+        : keys !== "attempt,id" || !snapshot.tasks.some(task => task.id === actionJob.taskId &&
+          task.project_id === actionJob.projectId && task.done === true)) return false;
     }
     let labelJob = null;
     if (labelConfirmation !== null) {
@@ -1025,6 +1102,9 @@ export class DashboardChatQueue extends DurableObject {
     storage.put("data:snapshot", snapshot);
     if (actionJob) {
       actionJob.snapshotConfirmation = { attempt: actionConfirmation.attempt, timestamp: snapshot.timestamp };
+      if (actionConfirmation.result) {
+        actionJob.confirmation = { attempt: actionConfirmation.attempt, timestamp: snapshot.timestamp, result: actionConfirmation.result };
+      }
       storage.put(`action:${actionJob.id}`, actionJob);
     }
     if (labelJob) {
