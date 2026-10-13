@@ -80,3 +80,4 @@ Fuente de verdad del avance. Se actualiza al cerrar cada tarea. Se marca `[x]` s
 - 2026-10-13 00:02: reporte horario 1 enviado por Telegram.
 - 2026-10-13 00:23: Copilot con propuestas aplicables con un clic. Se corrigieron dos bugs: las propuestas con campos opcionales vacíos se descartaban, y «Aplicado» se mostraba antes de refrescar el dashboard.
 - 2026-10-13 00:30: F1.5 medido en producción: unos 112.000 requests/día (sobre el límite gratis). Plan de la cuenta sin confirmar (403).
+- 2026-10-13 00:32: **Ejecución detenida: se alcanzó el límite de uso.** La revisión de seguridad independiente (QA) se interrumpió antes de terminar; queda pendiente. Todo está commiteado en feat/multiusuario (sin push y sin tocar producción).
