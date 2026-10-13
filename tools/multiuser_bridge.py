@@ -30,9 +30,9 @@ from user_context import using_root  # noqa: E402
 
 KINDS = ("action", "label", "chat", "health", "granola")
 DRAIN_LIMIT = 5
-DISPATCH_SECONDS = 3
+DISPATCH_SECONDS = 10
 SWEEP_SECONDS = 300
-PUBLISH_SECONDS = 120
+PUBLISH_SECONDS = 300
 GRANOLA_SYNC_SECONDS = 3600
 GRANOLA_FAILED = "No se pudo completar la conexión con Granola. Inténtalo de nuevo."
 COPILOT_PENDING = ("El Copilot multiusuario aún no está habilitado en este entorno (fase F5). "

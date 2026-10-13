@@ -49,8 +49,8 @@ _inbox_spec = importlib.util.spec_from_file_location("dsta_minute_inbox", Path(_
 minute_inbox = importlib.util.module_from_spec(_inbox_spec)
 _inbox_spec.loader.exec_module(minute_inbox)
 
-POLL_SECONDS = 5
-ACTION_POLL_SECONDS = 2
+POLL_SECONDS = 12  # cuenta Cloudflare en plan gratis: 100.000 requests/día en total
+ACTION_POLL_SECONDS = 8
 USER_AGENT = "DSTA-Hermes-Bridge/1.0"
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
 DEFAULT_DASHBOARD_URL = "https://dsta-web.alvaro-gcl.workers.dev"
