@@ -15,6 +15,8 @@ async function session(user) {
   await page.goto(cfg.base + '/login');
   await page.fill('#email', user.email); await page.fill('#password', user.password); await page.click('#login-form button');
   await page.waitForURL(cfg.base + '/');
+  await page.waitForSelector('#dsta-settings-toggle');
+  await page.click('#dsta-settings-toggle');
   await page.waitForSelector('.granola-connect');
   return page;
 }
@@ -25,6 +27,7 @@ assert.match(await a.textContent('.granola-status'), /sin conectar/); step('A ve
 await a.click('.granola-connect');
 // Browser goes to the (synthetic) provider, which consents and redirects to /oauth/granola/callback.
 await a.waitForURL(url => url.pathname === '/' && url.origin === cfg.base, { timeout: 60000 });
+// After the OAuth round trip the settings panel opens by itself to show the progress.
 await a.waitForFunction(() => /Granola conectado/.test(document.querySelector('.granola-status')?.textContent || ''), null, { timeout: 60000 });
 step('A conecta Granola: autorización, callback e intercambio en la VM');
 const minutesA = await api(a, '/api/minutes');

@@ -136,6 +136,11 @@ const minute = { id: 'm-a-1', titulo: 'Minuta A', detectadaEn: new Date().toISOS
 assert.equal((await bridge('/api/bridge/minute', 'demo-a', { method: 'POST', body: minute, headers: { noOrigin: '1' } })).status, 200);
 assert.equal((await (await call('/api/minutes', { cookie: a })).json()).minutes.length, 1);
 assert.equal((await (await call('/api/minutes', { cookie: b })).json()).minutes.length, 0);
+// Inbox order: newest meeting first, regardless of detection order.
+for (const [id, fecha] of [['m-a-old', '2026-09-01'], ['m-a-new', '2026-10-12'], ['m-a-mid', '2026-10-01']]) {
+  await bridge('/api/bridge/minute', 'demo-a', { method: 'POST', body: { ...minute, id, fecha }, headers: { noOrigin: '1' } });
+}
+assert.deepEqual((await (await call('/api/minutes', { cookie: a })).json()).minutes.slice(0, 3).map(m => m.id), ['m-a-new', 'm-a-mid', 'm-a-old']);
 
 // 8. Browser writes require a same-origin Origin header (CSRF), even with a valid session.
 assert.equal((await call('/api/assistant', { method: 'POST', cookie: b, body: { message: 'x' }, headers: { origin: 'https://attacker.example' } })).status, 403);

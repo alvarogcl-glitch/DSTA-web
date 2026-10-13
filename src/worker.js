@@ -793,8 +793,10 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/minutes/list" && request.method === "GET") {
+      // Newest meeting first (meeting date), then most recently detected.
       const minutes = [...storage.list({ prefix: "minute:" })].map(([, record]) => record)
-        .sort((a, b) => String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, 30);
+        .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) ||
+          String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, 30);
       return json({ minutes });
     }
 
