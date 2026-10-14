@@ -53,6 +53,10 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D35 | decidido | Mismo. | Si Hermes falla, el copiloto usa Claude directo durante 10 minutos, como producción; las respuestas de respaldo van marcadas. | Igual. | Ninguno. | Entrega E07. |
 | D36 | decidido (pospuesto) | Mismo. | Solo el perfil ceo-hermes. Cualquier otro proveedor muestra un mensaje claro y no usa credenciales. | Igual. | Ninguno. | — |
 | D37 | decidido | Telegram 13-10 23:27: «Ok», tras el ejemplo. | Máximo 5 cambios por respuesta, en el orden propuesto. Lo pedido explícitamente se ejecuta solo. Las sugerencias tienen «Aplicar todas», que aplica en orden y se detiene en el primer fallo. Lo que depende de algo recién creado se hace en dos mensajes. | Igual al converger. | Ninguno. | Entrega E07. |
+| D38 | decidido (sin cambios) | Telegram 14-10 00:08: «Si» a D38/D39/D41/D42. | Botones directos de etiquetas iguales en ambos ambientes; cualquier mejora futura va a los dos. | Igual. | Ninguno. | — |
+| D39 | decidido | Mismo. | Catálogo propio por usuario. Un usuario nuevo parte sin etiquetas y sin lista sugerida. | Igual. | Ninguno. | — |
+| D41 | decidido | Mismo. | La primera sincronización trae 90 días (rango `custom` de Granola; el plan gratuito entrega solo lo que guarda). Lo anterior a 30 días va solo al archivo de búsqueda (D31), no a la bandeja ni al análisis por IA. Después rige la ventana normal de 30 días. | Equivalente al converger. | Ninguno. | Entrega E08. |
+| D42 | decidido | Mismo «Si», tras el ejemplo del contrato con Legal y Finanzas. | El analista de minutas recibe el mismo contexto que el copiloto: descripción completa de las abiertas (dependencia, criterio, bitácora), descripción de la línea y las completadas en resumen, con aviso si se recorta (límite de 50.000 caracteres). | Equivalente al MCP de producción. | Ninguno. | Entrega E08. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -194,6 +198,17 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Navegador: 14 de 14. «Aplicar todas» aplica dos sugerencias por la cola y el puente reales; solo se simuló la respuesta del modelo.
 - Versiones: Worker staging ecdfac8a-11c9-4b98-9949-6e9497b9b348; puente reiniciado con 2e0e6d2.
 - Rollback: revertir 2e0e6d2, redeploy de staging y reiniciar el puente.
+
+### Entrega E08 · D41 y D42: historial de Granola y contexto del analista de minutas
+
+- Autorización: Telegram 14-10 00:08, «Si».
+- Estado: verificado en local y activo en el puente del piloto. La carga de 90 días ocurre en la próxima sincronización horaria de cada usuario conectado. Falta la prueba del CEO.
+- Commit base y resultado: b21644b → 18672ef (rama feat/multiusuario). Sin cambios en el Worker, así que no hubo redeploy de staging.
+- Pruebas:
+  - `npm test`: 177 Python OK, más todas las suites JS.
+  - Casos nuevos: la primera sincronización pide el rango `custom` de 90 días; solo lo de los últimos 30 días llega a la bandeja; ambas reuniones quedan en el archivo; la siguiente sincronización usa `last_30_days`.
+  - El analista ve dependencia, bitácora y tareas completadas.
+- Rollback: revertir 18672ef y reiniciar el puente.
 
 ## Plantilla de una decisión
 
