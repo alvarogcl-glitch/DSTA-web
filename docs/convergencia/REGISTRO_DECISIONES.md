@@ -66,6 +66,10 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D57 | decidido | Mismo mensaje: «D57 ok». | Diálogos: el foco parte en el primer campo y archivar enfoca «Cancelar». Escape cierra solo el diálogo; antes cerraba también el inspector, error encontrado por la prueba. Enter guarda y un doble clic no duplica (envío deshabilitado). | Igual. | Ninguno. | Entrega E10. |
 | D58 | decidido | «D58 ok pero luego de unos segundos se desvanece hasta desaparecer». | Un solo aviso para todo cambio. El éxito («✓ Tarea creada», «✓ Configuración guardada»…) se desvanece a los 6 s. Errores y resultados inciertos quedan hasta cerrarlos y nunca se reenvían solos, según la regla previa de seguridad. | Igual. | Ninguno. | Entrega E10. |
 | D59 | decidido | «d59 ol». | Una cuenta sin líneas ve una tarjeta con 3 pasos (crear línea, conectar Granola, preguntar al copiloto). No se crea nada automático y la tarjeta desaparece al haber líneas. | Igual. | Ninguno. | Entrega E10. |
+| D61 | decidido | Telegram 14-10 01:22: «Ok» a D61/D62/D63/D67. | «Actualizar ahora»: el puente publica una lectura real de Vikunja del usuario antes de informar la salud, y la página muestra esos datos. | Igual al converger. | Ninguno. | Entrega E11. |
+| D62 | decidido | Mismo. | Todo cambio enviado (formulario, botón directo o propuesta del copiloto) queda registrado por su ID en la sesión del navegador hasta terminar. Tras recargar, la página sigue su estado y avisa el resultado; nunca lo reenvía. | Igual. | Ninguno. | Entrega E11. |
+| D63 | decidido | Mismo. | La luz de Granola refleja el último contacto real: cada sincronización, y en «Actualizar ahora» una prueba en vivo (initialize del MCP). Si está conectado pero no responde, queda en rojo con un mensaje genérico, sin detalles del proveedor. | Igual. | Ninguno. | Entrega E11. |
+| D67 | decidido | Mismo. | ⚙ › Cuenta › «Cambiar contraseña»: pide la actual, mínimo 14 caracteres y límite de intentos por IP, y cierra las otras sesiones. Para un olvido, `provision_user.py reset --actor X` genera un enlace de un solo uso (24 h) que fija la nueva contraseña y cierra todas las sesiones. Sin correo. Migración aditiva 0002 (`invitations.purpose`). | Igual. | Ninguno. | Entrega E11. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -244,6 +248,23 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
     - aviso «✓ Tarea creada».
 - Versiones: Worker staging bfd8555c-17c3-496a-bc88-c337f2665924; puente reiniciado con 6c6d1aa.
 - Rollback: revertir 6c6d1aa, redeploy de staging y reiniciar el puente.
+
+### Entrega E11 · D61, D62, D63 y D67: actualización real, recuperación, salud y contraseñas
+
+- Autorización: Telegram 14-10 01:22, «Ok».
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: cb6f51b → 3806b63 (rama feat/multiusuario).
+- Migración: 0002_invitation_purpose aplicada a D1 de staging. Es aditiva, con valor por defecto `create`; no se tocaron datos existentes.
+- Pruebas:
+  - `npm test`: 179 Python OK, más todas las suites JS.
+  - Casos nuevos:
+    - cambio de contraseña: 403 con la actual incorrecta, 400 si la nueva es corta, 401 sin sesión, y cierra las otras sesiones;
+    - enlace de restablecimiento: de un solo uso y cierra todas las sesiones;
+    - prueba de Granola en vivo;
+    - publicación al actualizar manualmente.
+  - Navegador: 21 de 21. Incluye recargar con un cambio en curso (se informa una vez, sin duplicar), B cambiando su contraseña desde ⚙ y el enlace de restablecimiento.
+- Versiones: Worker staging c31e37c2-8906-4c39-bdc8-8dc8e95e7856; puente reiniciado con 3806b63.
+- Rollback: revertir 3806b63, redeploy y reiniciar el puente. La columna `purpose` puede quedarse: es inocua.
 
 ## Plantilla de una decisión
 

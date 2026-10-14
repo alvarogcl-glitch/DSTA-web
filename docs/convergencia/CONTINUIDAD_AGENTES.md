@@ -19,7 +19,8 @@ Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) llev
 - D38–D42 decididas (E08, puente 18672ef).
 - D44–D54 decididas (E09, staging ee18087f).
 - D55, D57–D59 decididas (E10, staging bfd8555c).
-- Pendientes: D61–D63, D66–D72 (D69 parcial).
+- D61–D63 y D67 decididas (E11, staging c31e37c2).
+- Pendientes, todas del corte a producción: D66, D68, D69, D70, D71, D72.
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.
