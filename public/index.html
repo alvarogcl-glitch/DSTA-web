@@ -323,7 +323,7 @@ async function manualRefresh(){
    if(!status.ok)throw Error('No se pudo consultar el estado de servicios');
    const {health}=await status.json();
    if(['vikunja','granola'].every(name=>health?.[name]?.requestId===requested.id)){
-    renderHealth(health);return;
+    renderHealth(health);await refresh();return; // D61: show the fresh read the bridge just published
    }
   }
   throw Error('El puente no completó la comprobación a tiempo. Intenta actualizar nuevamente.');

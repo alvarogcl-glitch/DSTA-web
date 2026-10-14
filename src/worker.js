@@ -690,9 +690,21 @@ async function accountsAcceptInvite(request, env) {
   const tokenHash = await sha256Url(token);
   const now = Math.floor(Date.now() / 1000);
   const pending = await env.DB.prepare(
-    "SELECT actor_id, email FROM invitations WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+    "SELECT actor_id, email, purpose FROM invitations WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
   ).bind(tokenHash, now).first();
   if (!pending) return invalid;
+  if (pending.purpose === "reset") {
+    // D67: one-time reset link for an existing account; every session of that account is closed.
+    const user = await env.DB.prepare("SELECT id, email FROM users WHERE id = ? AND disabled_at IS NULL").bind(pending.actor_id).first();
+    if (!user) return invalid;
+    const claimedReset = await env.DB.prepare(
+      "UPDATE invitations SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+    ).bind(now, tokenHash, now).run();
+    if (Number(claimedReset?.meta?.changes || 0) !== 1) return invalid;
+    await env.DB.prepare("UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?").bind(salt, passwordHash, user.id).run();
+    await env.DB.prepare("DELETE FROM sessions WHERE actor_id = ?").bind(user.id).run();
+    return json({ reset: true, email: user.email }, 200);
+  }
   const existing = await env.DB.prepare("SELECT 1 AS found FROM users WHERE id = ? OR lower(email) = lower(?) LIMIT 1")
     .bind(pending.actor_id, pending.email).first();
   // Checked before claiming, so an invitation is never consumed without creating its account.
@@ -710,6 +722,27 @@ async function accountsAcceptInvite(request, env) {
     return json({ error: "La cuenta de esta invitación ya existe." }, 409);
   }
   return json({ created: true, email: invite.email }, 201);
+}
+
+// D67: change your own password (asks for the current one); other sessions are closed.
+async function accountsChangePassword(request, env, session) {
+  if (!(await takeLoginAttempt(request, env))) return json({ error: "Demasiados intentos; vuelve a probar en un minuto." }, 429);
+  const parsed = await readJson(request, 4096);
+  if (parsed.error) return parsed.error;
+  const current = typeof parsed.body?.current === "string" ? parsed.body.current : "";
+  const next = typeof parsed.body?.next === "string" ? parsed.body.next : "";
+  if (next.length < MIN_PASSWORD_LENGTH || next.length > 256) {
+    return json({ error: `La contraseña nueva debe tener entre ${MIN_PASSWORD_LENGTH} y 256 caracteres.` }, 400);
+  }
+  const user = await env.DB.prepare("SELECT id, password_salt, password_hash FROM users WHERE id = ? AND disabled_at IS NULL")
+    .bind(session.actor.id).first();
+  const calculated = await derivePasswordHash(current.slice(0, 256), user?.password_salt || INVALID_SALT);
+  if (!user || !safeEqual(calculated, user.password_hash || INVALID_HASH)) return json({ error: "La contraseña actual no es correcta." }, 403);
+  const salt = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?")
+    .bind(salt, await derivePasswordHash(next, salt), user.id).run();
+  await env.DB.prepare("DELETE FROM sessions WHERE actor_id = ? AND token_hash <> ?").bind(user.id, session.tokenHash).run();
+  return json({ ok: true });
 }
 
 async function accountsLogout(env, session) {
@@ -1625,6 +1658,9 @@ export default {
       }
       if (url.pathname === "/api/auth/logout") {
         return request.method === "POST" ? accountsLogout(env, session) : json({ error: "Método no permitido" }, 405);
+      }
+      if (url.pathname === "/api/auth/password") {
+        return request.method === "POST" ? accountsChangePassword(request, env, session) : json({ error: "Método no permitido" }, 405);
       }
     } else {
       if (!publicPwaAsset && !basicAuthorized(request, env)) return requestAuthentication();

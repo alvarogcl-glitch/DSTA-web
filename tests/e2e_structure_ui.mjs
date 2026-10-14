@@ -39,7 +39,7 @@ await a.waitForFunction(() => document.querySelector('#dsta-title')?.textContent
 assert.doesNotMatch(await a.locator('#dsta-kicker').innerText(), /PMO-DSTA/);
 await a.click('#dsta-settings-toggle');
 await a.fill('.dsta-layout-title input', 'Tablero de prueba');
-await a.click('#dsta-settings-panel button:has-text("Guardar")');
+await a.click('#dsta-settings-panel button:text-is("Guardar")');
 await a.waitForFunction(() => document.querySelector('#dsta-title')?.textContent === 'Tablero de prueba' && document.title === 'Tablero de prueba');
 // D58: the success notice fades out by itself.
 await a.locator('.task-action-toast', { hasText: 'Configuración guardada' }).waitFor({ state: 'visible' });
@@ -213,6 +213,21 @@ assert.match(minuteText, /^Sugeridas - /);
 assert.match(minuteText, /- #\d+ Sugerida dos · Estado: Abierta/);
 assert.doesNotMatch(minuteText, /Sugerida uno/, 'only the selected task');
 step('D51/D53: selección por pulsación larga en sección personalizada y formato común de minuta');
+
+// D62: a change sent just before a reload is followed after it (never resent) and reported.
+const sentBeforeReload = await a.evaluate(async lt => {
+  const requestId = crypto.randomUUID();
+  const response = await fetch('/api/task-actions', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'task.create', requestId, projectId: lt, title: 'Creada antes de recargar', origin: 'form' }) });
+  if (response.status !== 202) throw new Error('queue ' + response.status);
+  window.DstaPending.add({ id: requestId, url: '/api/task-actions', label: 'Tarea creada antes de recargar' });
+  return requestId;
+}, ltA);
+await a.reload();
+await a.locator('.task-action-toast', { hasText: '✓ Tarea creada antes de recargar' }).waitFor({ state: 'visible', timeout: 90000 });
+assert.equal(await a.evaluate(() => tasks.filter(t => t.title === 'Creada antes de recargar').length), 1, 'created once, not resent');
+assert.equal(await a.evaluate(id => (JSON.parse(sessionStorage.getItem('dsta-structure-pending-v1') || '[]')).some(x => x.id === id), sentBeforeReload), false);
+step('D62: tras recargar se retoma el seguimiento del cambio y se informa, sin reenviarlo');
 await openProject(a, 'LT renombrada desde UI');
 await a.click('.structure-more summary');
 await a.click('.structure-more button:has-text("Archivar línea")');
@@ -221,5 +236,24 @@ await submitDialog(a, {});
 const b = await session(cfg.B);
 const seenByB = await b.evaluate(() => [...projects.map(p => p.title), ...tasks.map(t => t.title)].join('|'));
 assert.doesNotMatch(seenByB, /desde UI/); step('B no ve nada de lo que hizo A');
+
+// D67: B changes their own password from ⚙ (asks for the current one).
+await b.click('#dsta-settings-toggle');
+await b.click('.dsta-password summary');
+await b.fill('.dsta-password [name="current"]', 'equivocada-123456789');
+await b.fill('.dsta-password [name="next"]', 'nueva-clave-B-2026-ok');
+await b.fill('.dsta-password [name="repeat"]', 'nueva-clave-B-2026-ok');
+await b.click('.dsta-password button[type="submit"]');
+await b.locator('.dsta-password small', { hasText: 'no es correcta' }).waitFor();
+await b.fill('.dsta-password [name="current"]', cfg.B.password);
+await b.fill('.dsta-password [name="next"]', 'nueva-clave-B-2026-ok');
+await b.fill('.dsta-password [name="repeat"]', 'nueva-clave-B-2026-ok');
+await b.click('.dsta-password button[type="submit"]');
+await b.locator('.task-action-toast', { hasText: 'Contraseña actualizada' }).waitFor({ state: 'visible' });
+const loginWith = password => b.evaluate(async ([email, pw]) => (await fetch('/api/auth/login', { method: 'POST',
+  headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: pw }) })).status, [cfg.B.email, password]);
+assert.equal(await loginWith(cfg.B.password), 401);
+assert.equal(await loginWith('nueva-clave-B-2026-ok'), 200);
+step('D67: B cambia su contraseña desde ⚙; la anterior deja de servir');
 assert.deepEqual(errors, []); step('sin errores de JavaScript');
 await browser.close();

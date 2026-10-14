@@ -39,7 +39,48 @@
     logout.disabled = true;
     try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } finally { window.location.replace('/login'); }
   });
-  account.append(logout);
+  // D67: change your own password (asks for the current one; your other sessions are closed).
+  const change = Object.assign(document.createElement('details'), { className: 'dsta-password' });
+  change.append(Object.assign(document.createElement('summary'), { textContent: 'Cambiar contraseña' }));
+  const form = document.createElement('form');
+  form.style.cssText = 'display:grid;gap:6px;margin-top:8px';
+  const field = (name, label, autocomplete) => {
+    const wrap = Object.assign(document.createElement('label'), { textContent: label });
+    wrap.style.cssText = 'display:grid;gap:3px;font-size:13px';
+    wrap.append(Object.assign(document.createElement('input'), { type: 'password', name, autocomplete, required: true, maxLength: 256 }));
+    form.append(wrap);
+    return wrap.querySelector('input');
+  };
+  const current = field('current', 'Contraseña actual', 'current-password');
+  const next = field('next', 'Contraseña nueva (mínimo 14 caracteres)', 'new-password');
+  const repeat = field('repeat', 'Repite la nueva', 'new-password');
+  const save = Object.assign(document.createElement('button'), { type: 'submit', textContent: 'Guardar contraseña' });
+  const note = Object.assign(document.createElement('small'), { className: 'muted' });
+  note.setAttribute('role', 'status');
+  form.append(save, note);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (next.value !== repeat.value) { note.textContent = 'Las contraseñas nuevas no coinciden.'; return; }
+    if (next.value.length < 14) { note.textContent = 'Usa al menos 14 caracteres.'; return; }
+    save.disabled = true;
+    note.textContent = 'Guardando…';
+    try {
+      const res = await fetch('/api/auth/password', { method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ current: current.value, next: next.value }) });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+      note.textContent = '';
+      change.open = false;
+      window.DstaToast?.show('✓ Contraseña actualizada. Tus otras sesiones se cerraron.', true);
+    } catch (error) {
+      note.textContent = error.message;
+    } finally {
+      save.disabled = false;
+      current.value = next.value = repeat.value = '';
+    }
+  });
+  change.append(form);
+  account.append(logout, change);
   settings.addSection('Cuenta', account, 10);
 
   const granola = Object.assign(document.createElement('button'), { type: 'button', className: 'granola-connect' });

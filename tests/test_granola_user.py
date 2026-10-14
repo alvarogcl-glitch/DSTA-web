@@ -131,6 +131,20 @@ class GranolaUserTest(unittest.TestCase):
             service.sync("ana")
             self.assertEqual(fake.list_args[-1], {"time_range": "last_30_days"}, "afterwards, the regular 30-day window")
 
+    def test_prueba_en_vivo_de_la_conexion(self):
+        """D63: probe() checks the live MCP connection; disconnected users fail."""
+        with FakeGranola() as fake:
+            service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)
+            with self.assertRaises(self.gu.GranolaError):
+                service.probe("ana")
+            started = service.authorize("ana", "req-1")
+            code, state = self.consent(started["authorizationUrl"])
+            service.exchange("ana", "req-1", state, code)
+            service.probe("ana")  # no exception: connected and answering
+            fake.tokens.clear()  # token revoked on Granola's side
+            with self.assertRaises(Exception):
+                service.probe("ana")
+
     def test_state_de_otro_usuario_o_reusado_falla(self):
         with FakeGranola() as fake:
             service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)

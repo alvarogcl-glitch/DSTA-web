@@ -63,6 +63,7 @@ class MultiuserBridge:
         self.check_vikunja = check_vikunja or (lambda user: (True, "sin verificar"))
         self.granola = granola
         self.copilot = copilot
+        self._granola_seen: dict[str, tuple[bool, str]] = {}
         self.fetch_snapshot = fetch_snapshot
         self.chat_pool = chat_pool  # None: answer inline (tests, --once)
         self._ignored: set[str] = set()
@@ -288,9 +289,11 @@ class MultiuserBridge:
                     if analyze:
                         self._run(self.analysis_pool, self.analyze_minute, actor, user, record)
                 self._granola_post(actor, {"status": "synced", "count": len(records)})
+                self._granola_seen[actor] = (True, "Granola conectado · sincronizado " + time.strftime("%H:%M"))
                 imported += len(records)
             except Exception as error:
                 log(f"sync granola de {actor[:20]} falló ({type(error).__name__})")
+                self._granola_seen[actor] = (False, "Granola no respondió en la última sincronización.")
                 if not self.granola.connected(actor):
                     try:
                         self._granola_post(actor, {"status": "error", "error": "La conexión con Granola venció; vuelve a conectar."})
@@ -298,14 +301,30 @@ class MultiuserBridge:
                         pass
         return imported
 
+    def granola_health(self, actor: str, probe: bool) -> tuple[bool, str]:
+        """D63: "connected" is not enough. The light reflects the last real contact (each sync) and,
+        on "Actualizar ahora", a live check of the user's Granola connection."""
+        if not self.granola or not self.granola.connected(actor):
+            return False, "Granola no conectado"
+        if probe:
+            try:
+                self.granola.probe(actor)
+                self._granola_seen[actor] = (True, "Granola conectado y respondiendo")
+            except Exception as error:  # never details: provider errors may carry tokens or URLs
+                log(f"prueba de granola de {actor[:20]} falló ({type(error).__name__})")
+                self._granola_seen[actor] = (False, "Granola no responde o la conexión venció; vuelve a conectar.")
+        return self._granola_seen.get(actor, (True, "Granola conectado (aún sin sincronizar)"))
+
     def report_health(self, actor: str, user: dict, request: dict) -> None:
+        manual = bool(request.get("id"))
+        if manual:
+            self.publish_now(actor, user)  # D61: "Actualizar ahora" reads Vikunja for real, not the last publication
         ok, detail = self.check_vikunja(user)
+        granola_ok, granola_detail = self.granola_health(actor, probe=manual)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.request_json(f"{self.user_base(actor)}/api/bridge/health", token=self.token, method="POST", timeout=20,
                           payload={"vikunja": {"ok": ok, "detail": detail, "checkedAt": now, "requestId": request["id"]},
-                                   "granola": {"ok": bool(self.granola and self.granola.connected(actor)),
-                                               "detail": "Granola conectado" if self.granola and self.granola.connected(actor)
-                                               else "Granola no conectado", "checkedAt": now, "requestId": request["id"]}})
+                                   "granola": {"ok": granola_ok, "detail": granola_detail, "checkedAt": now, "requestId": request["id"]}})
 
     def publish_now(self, actor: str, user: dict) -> None:
         """D46: publish this user's snapshot right after a minute changed their tasks."""

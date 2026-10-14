@@ -307,6 +307,41 @@ class FakeGranolaService:
         self.ready.discard(actor)
 
 
+class HealthBridgeTest(unittest.TestCase):
+    def test_actualizar_ahora_lee_de_verdad_y_prueba_granola(self):
+        """D61: a manual refresh publishes a fresh read first. D63: Granola's light reflects a live check."""
+        posts, published = [], []
+
+        class Granola(FakeGranolaService):
+            healthy = True
+            def probe(self, actor):
+                self.calls.append(("probe", actor))
+                if not self.healthy:
+                    raise RuntimeError("token vencido")
+
+        def request_json(url, *, token, method="GET", payload=None, timeout=30):
+            posts.append(payload)
+            return {"ok": True}
+
+        granola = Granola()
+        granola.ready = {"demo-a"}
+        bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json, process_job=None,
+                                    finish_job=None, users_dir=Path("C:/tmp/x"), granola=granola,
+                                    publish_snapshot=lambda base, token, vk, url: published.append(vk),
+                                    check_vikunja=lambda user: (True, "Vikunja responde"))
+        bridge.report_health("demo-a", USERS["demo-a"], {"id": "h1"})
+        self.assertEqual(published, ["token-de-A"], "the manual refresh publishes a real read")
+        self.assertEqual(posts[-1]["granola"], {**posts[-1]["granola"], "ok": True, "detail": "Granola conectado y respondiendo"})
+        granola.healthy = False
+        bridge.report_health("demo-a", USERS["demo-a"], {"id": "h2"})
+        self.assertFalse(posts[-1]["granola"]["ok"], "connected but not answering is red")
+        self.assertNotIn("token vencido", posts[-1]["granola"]["detail"], "no provider details")
+        bridge.report_health("demo-a", USERS["demo-a"], {"id": ""})
+        self.assertEqual(len(published), 2, "the periodic report does not publish again")
+        self.assertEqual(sum(1 for c in granola.calls if c[0] == "probe"), 2, "the periodic report does not probe")
+        self.assertFalse(posts[-1]["granola"]["ok"], "it keeps the last real result")
+
+
 class GranolaBridgeTest(unittest.TestCase):
     def setUp(self):
         self.posts = []

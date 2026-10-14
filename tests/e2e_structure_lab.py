@@ -48,6 +48,24 @@ try:
     script = Path(NODE_DIR) / "e2e_structure_ui.mjs"
     script.write_text((ROOT / "tests" / "e2e_structure_ui.mjs").read_text(encoding="utf-8"), encoding="utf-8")
     code = subprocess.run(["node", str(script), str(work / "cfg.json")], cwd=NODE_DIR).returncode
+    if code == 0:
+        # D67: the admin reset link (provision_user reset) sets a new password once and the old one stops working.
+        reset_token = secrets.token_urlsafe(32)
+        pu.d1_execute(pu.reset_sql(actors["A"], reset_token, int(time.time())), SCOPE)
+        new_password = "ui-reset-" + secrets.token_urlsafe(18)
+        def post(path, body):
+            req = urllib.request.Request(f"{BASE}{path}", method="POST", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json", "Origin": BASE})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    return response.status, json.loads(response.read() or b"{}")
+            except urllib.error.HTTPError as error:
+                return error.code, {}
+        status, body = post("/api/auth/accept-invite", {"token": reset_token, "password": new_password})
+        assert (status, body.get("reset")) == (200, True), status
+        assert post("/api/auth/login", {"email": cfg["A"]["email"], "password": cfg["A"]["password"]})[0] == 401
+        assert post("/api/auth/login", {"email": cfg["A"]["email"], "password": new_password})[0] == 200
+        print("OK  D67: link de restablecimiento de un solo uso cambia la contraseña")
 finally:
     if bridge:
         bridge.terminate()

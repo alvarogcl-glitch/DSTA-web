@@ -102,6 +102,15 @@ def invitation_sql(actor: str, email: str, name: str, token: str, now: int) -> s
             f"({quote(digest)},{quote(actor)},{quote(email)},{quote(name)},{now + INVITE_HOURS * 3600},{now});\n")
 
 
+def reset_sql(actor: str, token: str, now: int) -> str:
+    """D67: one-time password reset link for an existing account (its email and name come from D1)."""
+    digest = base64.urlsafe_b64encode(hashlib.sha256(token.encode()).digest()).decode().rstrip("=")
+    return (f"UPDATE invitations SET used_at = {now} WHERE actor_id = {quote(actor)} AND used_at IS NULL;\n"
+            "INSERT INTO invitations(token_hash,actor_id,email,display_name,expires_at,created_at,purpose) "
+            f"SELECT {quote(digest)}, id, email, display_name, {now + INVITE_HOURS * 3600}, {now}, 'reset' "
+            f"FROM users WHERE id = {quote(actor)};\n")
+
+
 def removal_sql(actor: str) -> str:
     a = quote(actor)
     return (f"DELETE FROM sessions WHERE actor_id = {a};\nDELETE FROM invitations WHERE actor_id = {a};\n"
@@ -128,7 +137,7 @@ def wipe_box(dashboard_url: str, actor: str) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["provision", "remove"])
+    parser.add_argument("command", choices=["provision", "remove", "reset"])
     parser.add_argument("--actor", required=True)
     parser.add_argument("--email")
     parser.add_argument("--name")
@@ -144,6 +153,13 @@ def main(argv=None) -> int:
         print("Antes de F6 este script solo opera contra staging.")
         return 2
     scope = ("--local", *(("--persist-to", args.persist_to) if args.persist_to else ())) if args.local else ("--remote",)
+
+    if args.command == "reset":
+        token = secrets.token_urlsafe(32)
+        d1_execute(reset_sql(args.actor, token, int(time.time())), scope)
+        print(f"Link de restablecimiento de un solo uso (vence en {INVITE_HOURS} h). Entrégalo solo a su dueño:")
+        print(f"{args.dashboard_url.rstrip('/')}/invite#t={token}")
+        return 0
 
     if args.command == "remove":
         user = user_vault.load(args.actor)

@@ -170,6 +170,34 @@ const rowC = sqlite.prepare("SELECT * FROM users WHERE id='demo-c'").get();
 assert.ok(!Object.values(rowC).some(v => String(v).includes('synthetic-C-password')), 'no plaintext password stored');
 await login({ email: 'c@dsta.test', password: 'synthetic-C-password-2026', id: 'demo-c' });
 
+// 10b. D67: change your own password (needs the current one, closes other sessions) and one-time reset links.
+{
+  const ip = { 'cf-connecting-ip': '203.0.113.67' };
+  const loginC = async password => call('/api/auth/login', { method: 'POST', headers: ip, body: { email: 'c@dsta.test', password } });
+  const cookieOf = response => response.headers.getSetCookie().map(x => x.split(';', 1)[0]).join('; ');
+  const first = cookieOf(await loginC('synthetic-C-password-2026'));
+  const second = cookieOf(await loginC('synthetic-C-password-2026'));
+  const change = body => call('/api/auth/password', { method: 'POST', headers: ip, cookie: first, body });
+  assert.equal((await change({ current: 'equivocada-000000', next: 'synthetic-C-password-2028' })).status, 403);
+  assert.equal((await change({ current: 'synthetic-C-password-2026', next: 'corta' })).status, 400);
+  assert.equal((await call('/api/auth/password', { method: 'POST', headers: ip, body: { current: 'x', next: 'y' } })).status, 401, 'needs a session');
+  assert.equal((await change({ current: 'synthetic-C-password-2026', next: 'synthetic-C-password-2028' })).status, 200);
+  assert.equal((await call('/api/session', { cookie: first })).status, 200, 'the session that changed it stays');
+  assert.equal((await call('/api/session', { cookie: second })).status, 401, 'other sessions are closed');
+  assert.equal((await loginC('synthetic-C-password-2026')).status, 401);
+  assert.equal((await loginC('synthetic-C-password-2028')).status, 200);
+  // Reset link: one use, sets a new password and closes every session.
+  const resetToken = 'reset-token-for-c-0123456789abcdef';
+  sqlite.prepare("INSERT INTO invitations(token_hash,actor_id,email,display_name,expires_at,created_at,purpose) VALUES(?,?,?,?,?,?,'reset')")
+    .run(b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(resetToken))), 'demo-c', 'c@dsta.test', 'Cuenta C', now + 3600, now);
+  const reset = await call('/api/auth/accept-invite', { method: 'POST', headers: ip, body: { token: resetToken, password: 'synthetic-C-password-2026' } });
+  assert.equal(reset.status, 200);
+  assert.equal((await reset.json()).reset, true);
+  assert.equal((await call('/api/session', { cookie: first })).status, 401, 'reset closes every session');
+  assert.equal((await call('/api/auth/accept-invite', { method: 'POST', headers: ip, body: { token: resetToken, password: 'synthetic-C-password-2030' } })).status, 400, 'single use');
+  assert.equal((await loginC('synthetic-C-password-2026')).status, 200);
+}
+
 // 11. Login is rate limited per IP (hashed).
 let status = 0;
 for (let i = 0; i < 12 && status !== 429; i += 1) {

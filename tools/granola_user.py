@@ -123,6 +123,20 @@ class GranolaService:
                 self.store.disconnect(actor)
                 raise
 
+    def probe(self, actor: str) -> None:
+        """D63: a cheap live check (MCP initialize) that the user's Granola connection works now."""
+        self.ensure_fresh(actor)
+        token = (self.store.get_authenticated_secret(actor, "granola") or {}).get("access_token")
+        if not token or not self.connected(actor):
+            raise GranolaError("Connector is disconnected")
+        with self.client._session() as http:
+            body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "dsta-multiuser", "version": "1"}}}
+            headers = {"Authorization": "Bearer " + token, "Accept": "application/json, text/event-stream",
+                       "Content-Type": "application/json", "MCP-Protocol-Version": "2025-03-26"}
+            raw, response_headers = self.client._request(http, "POST", self.client._mcp, headers=headers, body=body)
+            self.client._rpc_result(raw, response_headers, 1)
+
     def sync(self, actor: str) -> list[dict]:
         self.ensure_fresh(actor)
         secret = self.store.get_authenticated_secret(actor, "granola") or {}

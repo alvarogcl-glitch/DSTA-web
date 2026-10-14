@@ -25,6 +25,12 @@ form.addEventListener('submit', async event => {
     });
     let payload = {};
     try { payload = await response.json(); } catch { /* sin cuerpo */ }
+    if (response.status === 200 && payload.reset) {  // D67: one-time reset link
+      form.hidden = true;
+      show(`Contraseña de ${payload.email} actualizada. Inicia sesión con la nueva.`, 'success');
+      message.after(Object.assign(document.createElement('a'), { href: '/login', className: 'button', textContent: 'Ir a iniciar sesión' }));
+      return;
+    }
     if (response.status === 201) {
       form.hidden = true;
       show(`Cuenta ${payload.email} activada. Ya puedes iniciar sesión.`, 'success');

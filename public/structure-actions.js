@@ -85,6 +85,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         job = await response.json();
       } catch { continue; }
       if (job.status === 'completed') {
+        window.DstaPending.done(requestId);
         status.textContent = 'Listo. Actualizando el dashboard…';
         await refreshUntil(job.snapshotTimestamp || '');
         dialog.close();
@@ -92,6 +93,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         return;
       }
       if (job.status === 'error') {
+        window.DstaPending.done(requestId);
         status.textContent = job.error || 'No se pudo aplicar el cambio.';
         status.className = 'status error';
         return;
@@ -135,6 +137,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
           headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
+        window.DstaPending.add({ id: body.requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
         await track(body.requestId, status, dialog);
       } catch (error) {
         status.textContent = error.message;
@@ -161,6 +164,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, requestId, ...fields }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
+      window.DstaPending.add({ id: requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
       await track(requestId, status, { close() {} });
     } catch (error) {
       status.textContent = error.message;
@@ -252,6 +256,42 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     minute.before(button);
   }
 
+  // D62: every change sent from a form, a direct button or a copilot proposal is remembered by its
+  // request id until it ends. After a reload the page keeps following it and reports the result;
+  // it is never sent again.
+  const PENDING_KEY = 'dsta-structure-pending-v1';
+  const pendingList = () => { try { return JSON.parse(sessionStorage.getItem(PENDING_KEY) || '[]'); } catch { return []; } };
+  const savePending = list => { try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-20))); } catch { /* private mode */ } };
+  window.DstaPending = {
+    add(entry) { savePending([...pendingList().filter(item => item.id !== entry.id), { ...entry, at: Date.now() }]); },
+    done(id) { savePending(pendingList().filter(item => item.id !== id)); },
+  };
+  async function resumePending() {
+    for (const item of pendingList()) {
+      if (Date.now() - item.at > 86_400_000) { window.DstaPending.done(item.id); continue; }
+      void (async () => {
+        for (let i = 0; i < 80; i += 1) {
+          let job = {};
+          try { job = await (await fetch(`${item.url}?id=${encodeURIComponent(item.id)}`, { cache: 'no-store', credentials: 'same-origin' })).json(); }
+          catch { /* network: try again */ }
+          if (job.status === 'completed') {
+            window.DstaPending.done(item.id);
+            await refreshUntil(job.snapshotTimestamp || '');
+            window.DstaToast?.show(`✓ ${item.label}`, true);
+            return;
+          }
+          if (job.status === 'error' || ['Acción no encontrada.', 'Solicitud no encontrada'].includes(job.error)) {
+            window.DstaPending.done(item.id);
+            window.DstaToast?.show(`${item.label}: ${job.error || 'no se pudo aplicar'}`);
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+        window.DstaToast?.show(`No pudimos confirmar «${item.label}» todavía. Revisa antes de reintentar.`);
+      })();
+    }
+  }
+
   // D27: archived lines live in ⚙ Configuración, each with "Restaurar" (same verified queue).
   function addArchivedSection() {
     if (!window.DstaSettings || document.querySelector('.structure-archived')) return;
@@ -305,7 +345,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
   fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then(response => {
     if (!response.ok) return;
     enabled = true;
-    const start = () => { addNewLineButton(); addArchivedSection(); renderWelcome(); };
+    const start = () => { addNewLineButton(); addArchivedSection(); renderWelcome(); void resumePending(); };
     window.addEventListener('dsta-rendered', renderWelcome);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();

@@ -208,11 +208,14 @@
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const queued = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
+      window.DstaPending?.add({ id: requestId, url: queueUrl(proposal), label: describeProposal(proposal) });  // D62
       await watchAction(requestId, note, queueUrl(proposal));
+      window.DstaPending?.done(requestId);
       button.hidden = true;
       return true;
     } catch (error) {
       note.textContent = error.message;
+      if (/no se pudo|error/i.test(error.message)) window.DstaPending?.done(requestId);
       button.disabled = false;
       return false;
     }
@@ -235,7 +238,9 @@
       if (proposal.requestId) {
         button.hidden = true;
         note.textContent = 'Ejecutando…';
-        watchAction(proposal.requestId, note, queueUrl(proposal)).catch(error => {
+        window.DstaPending?.add({ id: proposal.requestId, url: queueUrl(proposal), label: describeProposal(proposal) });  // D62
+        watchAction(proposal.requestId, note, queueUrl(proposal)).then(() => window.DstaPending?.done(proposal.requestId)).catch(error => {
+          window.DstaPending?.done(proposal.requestId);
           note.textContent = `${error.message} Puedes reintentar.`;
           button.textContent = 'Reintentar';
           button.hidden = false;
