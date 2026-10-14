@@ -105,3 +105,30 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - Vault en `dsta-multiuser-prod`.
   - Invitación de un solo uso (24 h), entregada al CEO para que la reenvíe.
   - Aislamiento verificado: su token ve solo «Inbox» y «DSTA · Paula» y recibe 403 sobre la raíz 2 (PMO-DSTA).
+
+## 7. Minutas manuales en producción (14-10-2026 09:55)
+
+- Rama `feature/minutas-manuales-dashboard` (37c5734, de otro agente) revisada y validada:
+  - 202 pruebas Python y 18 suites JS;
+  - E2E de navegador del recorrido completo;
+  - empaquetado en seco con la configuración de producción;
+  - revisión de seguridad, de impacto sobre Granola y del puente del dueño.
+
+  Autorización del CEO: Telegram 14-10 12:54 UTC, «OK».
+- Respaldo previo en `Documents/DSTA-respaldos/2026-10-14-pre-minutas-manuales/`: bandeja del dueño `dsta-minute-inbox.json`, versión anterior **56f2c896-63b7-463f-bc54-4c2d4dae1c0d** y tag `pre-minutas-manuales-2026-10-14` (= e14bd52) en el repositorio de producción.
+- Integración por fast-forward en `feat/multiusuario`, más `CODE_VERSION = "minutas-manuales-2026-10-14"` (541e402).
+- Procedimiento:
+  1. Se detuvieron Hermes Bridge, Cloud Sync y Multiusuario Bridge.
+  2. Se avanzó el código de la VM.
+  3. Deploy de la versión **94c4320b-f049-467f-99c6-8942da27d757**.
+  4. `/api/bridge/runtime`: `ownerBox == worker` de inmediato.
+  5. `manual-next` del dueño responde `{"job":null}`.
+  6. Se reanudaron los servicios; el puente del dueño quedó sin errores.
+- Esperado y conocido: el puente multiusuario registra «snapshot de paula falló (HTTPError)» hasta que Paula acepte su invitación (404 mientras su cuenta no exista en D1).
+- Vuelta atrás:
+  1. `npx wrangler rollback 56f2c896-63b7-463f-bc54-4c2d4dae1c0d --name dsta-web`.
+  2. En el repositorio de producción, `git reset --hard pre-minutas-manuales-2026-10-14`.
+  3. Reponer `dsta-minute-inbox.json` desde el respaldo si hiciera falta.
+  4. Reiniciar las 3 tareas.
+
+  Los borradores manuales quedan en el DO y no molestan al código anterior.
