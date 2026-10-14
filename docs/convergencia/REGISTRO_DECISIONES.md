@@ -62,6 +62,10 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D47 | decidido (sin cambios) | Mismo. | Las notas privadas solo se procesan en la VM y por la IA; nunca llegan al navegador. | Igual. | Ninguno. | — |
 | D51 | decidido | Mismo. | Las secciones personalizadas permiten seleccionar con pulsación larga, con el mismo aviso y botón «Quitar selección». Sin selección se incluyen todas. | Igual al converger. | Ninguno. | Entrega E09. |
 | D53 | decidido | Mismo. | Un solo formato de línea para todas las minutas generadas: #id título · Responsable · Fecha · Dependencia · Estado (Abierta/Vencida/Completada), más el resumen IA si la sección lo tiene. Los campos desconocidos se omiten. Cata conserva su cierre «Otros temas tratados». | Igual al converger. | Ninguno. | Entrega E09. |
+| D55 | decidido | Telegram 14-10 01:09: «D55 si pero que cada usuario puede definir el título». | Cada usuario define el título en ⚙ › Secciones › «Título del dashboard» (máximo 80 caracteres; también cambia el título de la pestaña). Sin título se muestra «Dashboard de <nombre>». La marca PMO-DSTA (encabezado, copiloto y minutas) solo aparece en el perfil del dueño (caja legada), que conserva «Dashboard Gestión DSTA». | Igual. | Ninguno. | Entrega E10. |
+| D57 | decidido | Mismo mensaje: «D57 ok». | Diálogos: el foco parte en el primer campo y archivar enfoca «Cancelar». Escape cierra solo el diálogo; antes cerraba también el inspector, error encontrado por la prueba. Enter guarda y un doble clic no duplica (envío deshabilitado). | Igual. | Ninguno. | Entrega E10. |
+| D58 | decidido | «D58 ok pero luego de unos segundos se desvanece hasta desaparecer». | Un solo aviso para todo cambio. El éxito («✓ Tarea creada», «✓ Configuración guardada»…) se desvanece a los 6 s. Errores y resultados inciertos quedan hasta cerrarlos y nunca se reenvían solos, según la regla previa de seguridad. | Igual. | Ninguno. | Entrega E10. |
+| D59 | decidido | «d59 ol». | Una cuenta sin líneas ve una tarjeta con 3 pasos (crear línea, conectar Granola, preguntar al copiloto). No se crea nada automático y la tarjeta desaparece al haber líneas. | Igual. | Ninguno. | Entrega E10. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -225,6 +229,21 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Navegador: 15 de 15. Incluye una sección personalizada con pulsación larga, «Generar minuta (1 seleccionada)» y el texto con «Estado: Abierta».
 - Versiones: Worker staging ee18087f-14fd-43e9-9b21-0f7f4e15a538; puente reiniciado con 92e43b2.
 - Rollback: revertir 92e43b2, redeploy de staging y reiniciar el puente.
+
+### Entrega E10 · D55, D57, D58 y D59: identidad, diálogos, avisos y primer ingreso
+
+- Autorización: Telegram 14-10 01:09.
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: f9e44d9 → 6c6d1aa (rama feat/multiusuario).
+- Pruebas:
+  - `npm test`: 177 Python OK, más todas las suites JS, incluido el layout con título y marca.
+  - Navegador: 18 de 18. Casos nuevos:
+    - título por defecto «Dashboard de UI A» sin PMO-DSTA, título propio guardado y aviso que se desvanece;
+    - tarjeta de bienvenida;
+    - foco y Escape;
+    - aviso «✓ Tarea creada».
+- Versiones: Worker staging bfd8555c-17c3-496a-bc88-c337f2665924; puente reiniciado con 6c6d1aa.
+- Rollback: revertir 6c6d1aa, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 
