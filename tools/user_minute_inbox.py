@@ -113,6 +113,21 @@ def analysis_prompt(minute: dict, snapshot: dict | None) -> str:
             f"## Tareas abiertas por línea\n{_tasks_block(snapshot)}\n\n## {_minute_block(minute)}\n\n{rules}")
 
 
+def analysis_prompt_with_tools(minute: dict, snapshot: dict | None) -> str:
+    """Owner (Hermes with read-only Vikunja tools): the analyst queries the tasks it needs instead of
+    receiving the whole portfolio in the prompt, so the meeting notes get almost all the room
+    (Hermes takes the prompt as a command-line argument, ~30k characters in total)."""
+    rules = mi.analysis_prompt("x", "x", "x")
+    rules = rules[rules.index("Extrae hechos"):]
+    return ("Eres el analista PMO-DSTA que reconcilia una minuta con Vikunja. Responde en español. Tienes "
+            "herramientas de SOLO LECTURA: usa pmo_open_tasks para ver las líneas y tareas abiertas (con el inicio "
+            "de su descripción) y pmo_list_tasks(project_id) para leer la descripción completa de las tareas de una "
+            "línea: bitácora, dependencia, criterio de cierre y también las completadas, para no proponer algo ya "
+            "hecho. Consulta lo necesario antes de proponer. Vikunja es la fuente oficial y la minuta es evidencia "
+            "de cambios; no intentes modificar nada.\n\n"
+            f"## {_minute_block(minute)}\n\n{rules}")
+
+
 def scope_actions(actions: list[dict], snapshot: dict | None) -> None:
     """Minutes often cite task numbers of other portfolios (e.g. "#63"). Only the user's own tasks
     and lines are valid targets; anything else becomes a proposal asking for the right target."""
@@ -171,8 +186,9 @@ def public_record(record: dict) -> dict:
 class UserMinuteInbox:
     def __init__(self, users_dir: Path, *, vk_factory: Callable[[dict], Any] = user_vk,
                  apply: Callable[[dict, dict, Any], None] = mi.apply_action,
-                 store_path: Path | None = None, store_engine=mi):
+                 store_path: Path | None = None, store_engine=mi, prompt_builder: Callable = None):
         self.users_dir, self.vk_factory, self.apply = Path(users_dir), vk_factory, apply
+        self.prompt_builder = prompt_builder or analysis_prompt
         self.store_path, self.store_engine = store_path, store_engine
 
     def _store(self, actor: str) -> Path:
@@ -211,7 +227,7 @@ class UserMinuteInbox:
         previous = self._get(actor, base["id"])
         if previous and (previous.get("descartadaEn") or previous.get("digest") == base["digest"]):
             return None
-        prompt = analysis_prompt(minute, snapshot)
+        prompt = self.prompt_builder(minute, snapshot)
         try:
             plan = mi.parse_plan(ask(prompt))
         except ValueError:

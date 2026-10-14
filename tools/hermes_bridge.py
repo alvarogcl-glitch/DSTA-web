@@ -485,9 +485,11 @@ def inbox_store(hermes_home: Path) -> Path:
 
 
 def owner_manual_inbox(hermes_home: Path):
-    from user_minute_inbox import UserMinuteInbox
+    from user_minute_inbox import UserMinuteInbox, analysis_prompt_with_tools
+    # The owner's analyst has read-only Vikunja tools: it looks tasks up instead of getting them all.
     return UserMinuteInbox(hermes_home / 'cache', store_path=inbox_store(hermes_home),
-                           store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja())
+                           store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja(),
+                           prompt_builder=analysis_prompt_with_tools)
 
 
 def process_manual(job: dict, base_url: str, token: str, hermes_home: Path,
