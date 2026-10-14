@@ -132,3 +132,16 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   4. Reiniciar las 3 tareas.
 
   Los borradores manuales quedan en el DO y no molestan al código anterior.
+
+## 8. Ajustes del 14-10 (mañana) tras la prueba del CEO
+
+- **Todos los «Generar minuta» con el flujo manual** (a007408, versión a2567b99 y siguientes). Antes solo funcionaba la primera minuta de la página, porque el contenedor del panel quedaba marcado. Ahora se usa una marca por campo y hay un E2E por botón (`tests/e2e_manual_minutes_buttons.mjs`).
+- **Sin «Vista previa»**, por decisión del CEO (Telegram 14-10 13:28: «es redundante y no aporta»).
+- **Granola del dueño.**
+  - La exportación horaria de Hermes fallaba con `OAuthNonInteractiveError` (token vencido). `hermes mcp test granola` lo renovó, y una exportación manual trajo 1 minuta nueva.
+  - En ⚙, la cuenta del dueño mostraba el flujo OAuth por usuario, que nadie atiende para el dueño, y quedaba «pegado». `/api/session` ahora devuelve `owner`, y para el dueño ⚙ muestra «se administra en la VM (Hermes)» con su estado real (1eaf414).
+- **Minuta manual del dueño fallaba con `FileNotFoundError`.**
+  - Causa: Hermes solo recibe el prompt como argumento, Windows limita la línea de comandos a 32.767 caracteres (WinError 206) y el prompt medía unos 53.000.
+  - Arreglo (3d6ab74): los prompts de más de 30.000 caracteres van a Claude por stdin, sin pausar Hermes. Además se acotaron los contextos (analista: 20.000; copiloto multiusuario: 26.000).
+  - Validado con el modelo real sobre una copia de la bandeja: prompt de 22.520 caracteres, Hermes respondió en 15 s.
+  - Puentes reiniciados; el Worker no cambió.
