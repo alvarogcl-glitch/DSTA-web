@@ -53,6 +53,7 @@ try{
  // «Minutas»: every stored minute with its origin, filters, detail and jump to the inbox.
  const kv=boxes.get('u:qa-a').ctx.storage.kv;
  kv.put('minute:g-1',{id:'g-1',source:'Granola',sourceId:'g1',digest:'v',titulo:'Comité de dirección',fecha:'2026-10-10',detectadaEn:'2026-10-10T12:00:00Z',resumen:'Se revisó el avance del proyecto y se acordó cerrar la entrega.',acciones:[{id:'a1',tipo:'completar',estado:'propuesta',auto:false,task_id:63,nota:'Entrega cerrada',evidencia:'cerrar la entrega'}],antecedentes:['Contexto del comité'],estado:'procesada',vista:false});
+ kv.put('minute-text:g-1','Texto textual de la reunión según Granola.\nAcuerdos: cerrar la entrega.');
  kv.put('minute:g-2',{id:'g-2',source:'Granola',sourceId:'g2',digest:'v',titulo:'Revisión semanal',fecha:'2026-09-28',detectadaEn:'2026-09-28T12:00:00Z',resumen:'Sin acuerdos nuevos.',acciones:[],antecedentes:[],estado:'procesada',vista:true});
  await a.reload();await a.waitForFunction(()=>document.querySelector('#manual-minutes-open'));
  assert.equal(await a.locator('#manual-minutes-open').innerText(),'Minutas');
@@ -66,6 +67,8 @@ try{
  assert.equal(await a.locator('.mm-item').count(),2);
  await a.locator('.mm-item',{hasText:'Comité de dirección'}).click();
  await a.locator('.mm-detail',{hasText:'Se revisó el avance'}).waitFor();
+ await a.locator('.mm-original',{hasText:'Texto textual de la reunión según Granola'}).waitFor();
+ results['texto original de Granola en el detalle']=true;
  if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/minutas-detalle.png'});
  await a.locator('.mm-actions button',{hasText:'Revisar 1 propuesta'}).click();
  await a.locator('#dsta-inbox').waitFor({state:'visible'});

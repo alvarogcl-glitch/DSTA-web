@@ -511,8 +511,20 @@ def process_manual(job: dict, base_url: str, token: str, hermes_home: Path,
     request_json(f"{base_url}/api/bridge/manual-done", token=token, method='POST', payload=payload, timeout=40)
 
 
+def minute_original(record: dict) -> str:
+    """Granola's own text of an exported minute (the file in «Minutas 2026»), for the «Minutas» window."""
+    try:
+        path = minutas.minute_files().get(str(record.get("minuta") or ""))
+        return minutas.read_text(path)[:60_000] if path else ""
+    except OSError:
+        return ""
+
+
 def push_minute(base_url: str, token: str, record: dict) -> None:
     public = {key: value for key, value in record.items() if key != 'texto'}
+    original = minute_original(record)
+    if original:
+        public["contenido"] = original  # stored apart by the Worker; the inbox list stays light
     request_json(f"{base_url}/api/bridge/minute", token=token, method="POST", payload=public, timeout=40)
 
 

@@ -256,11 +256,21 @@
     pane.innerHTML=`<button type="button" class="mm-back" data-back>← Minutas</button>
       <div class="mm-row1"><span class="mm-badge ${o.cls}">${esc(o.label)}</span><span class="mm-pill ${tone}">${esc(label)}</span></div>
       <h3 class="mm-title">${esc(item.title||'Reunión sin título')}</h3><p class="mm-meta">${esc(niceDate(item.date))}</p>
-      ${r?.resumen?`<h4>Resumen</h4><p class="mm-text">${esc(r.resumen)}</p>`:''}
+      <h4>Minuta · texto original${item.source==='Manual-Dashboard'?'':` (${esc(o.label)})`}</h4>
+      <div class="mm-original" data-original><p class="mm-note">Cargando…</p></div>
+      ${r?`<div class="mm-analysis"><h4>Análisis del asistente</h4>${r.resumen?`<p class="mm-text">${esc(r.resumen)}</p>`:''}`:''}
       ${(r?.antecedentes||[]).length?`<h4>Antecedentes</h4><ul>${r.antecedentes.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
-      ${r?`<h4>Acciones</h4><p class="mm-text">${appliedOf(r)} aplicadas · ${left} por revisar · ${(r.acciones||[]).length} en total</p>`:''}
+      ${r?`<h4>Acciones</h4><p class="mm-text">${appliedOf(r)} aplicadas · ${left} por revisar · ${(r.acciones||[]).length} en total</p></div>`:''}
       <div class="mm-actions"></div><p class="mm-note" role="status"></p>`;
     pane.querySelector('[data-back]').onclick=()=>{selected=null;renderList();renderDetail(null);};
+    // The meeting's own text: the manual draft, or Granola's text kept apart in the account.
+    const original=pane.querySelector('[data-original]');
+    const showOriginal=text=>{original.replaceChildren(text?Object.assign(document.createElement('div'),{className:'mm-text mm-original-text',textContent:text})
+      :Object.assign(document.createElement('p'),{className:'mm-note',textContent:'El texto original de esta minuta aún no está disponible. Llegará en la próxima sincronización con Granola.'}));};
+    if(d?.content)showOriginal(d.content);
+    else if(r)fetch('/api/minutes/text?id='+encodeURIComponent(r.id),{cache:'no-store',credentials:'same-origin'})
+      .then(res=>res.ok?res.json():{}).then(p=>{if(selected===item.key||!selected)showOriginal(p.contenido||'');}).catch(()=>showOriginal(''));
+    else showOriginal('');
     const actions=pane.querySelector('.mm-actions'),note=pane.querySelector('.mm-note');
     const add=(text,cls,fn)=>{const b=Object.assign(document.createElement('button'),{type:'button',className:cls,textContent:text});b.onclick=fn;actions.append(b);return b;};
     if(r)add(left?`Revisar ${left} ${left===1?"propuesta":"propuestas"} en 🔔`:'Abrir en la bandeja 🔔',left?'mm-primary':'',()=>{dialog.close();window.DstaInbox?.open(r.id);});

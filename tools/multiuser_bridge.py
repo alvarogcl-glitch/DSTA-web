@@ -315,7 +315,7 @@ class MultiuserBridge:
                     if analyze and self.minute_inbox.is_current(actor, record):
                         continue  # already analysed (or discarded): never overwrite it with the raw import
                     self.request_json(f"{self.user_base(actor)}/api/bridge/minute", token=self.token, method="POST",
-                                      payload=granola_user.inbox_record(record), timeout=20)
+                                      payload={**granola_user.inbox_record(record), "contenido": str(record.get("summary") or "")[:60_000]}, timeout=20)
                     if analyze:
                         self._run(self.analysis_pool, self.analyze_minute, actor, user, record)
                 self._granola_post(actor, {"status": "synced", "count": len(records)})

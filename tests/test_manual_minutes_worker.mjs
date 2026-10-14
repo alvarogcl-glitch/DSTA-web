@@ -49,6 +49,15 @@ assert.ok(!(await (await minutesCall('list')).json()).minutes.some(m=>m.id==='m-
 assert.equal(data.get('manual:'+id),undefined,'its manual entry is removed');
 await minutesCall('upsert',{id:'m-test2',source:'Manual-Dashboard',sourceId:'x',digest:'2',acciones:[]});
 assert.ok(!(await (await minutesCall('list')).json()).minutes.some(m=>m.id==='m-test2'),'a later upload never resurrects it');
+// Granola's own text: stored apart, served on demand, kept across uploads without it, gone on delete.
+await minutesCall('upsert',{id:'g-txt',sourceId:'s',digest:'1',acciones:[],titulo:'Comité',contenido:'Texto original de Granola'});
+assert.ok(!JSON.stringify((await (await minutesCall('list')).json()).minutes).includes('Texto original'),'the inbox list stays light');
+const textOf=async id=>(await (await box.fetch(new Request('https://internal/minutes/text?id='+id))).json()).contenido;
+assert.equal(await textOf('g-txt'),'Texto original de Granola');
+await minutesCall('upsert',{id:'g-txt',sourceId:'s',digest:'1',acciones:[],titulo:'Comité'});
+assert.equal(await textOf('g-txt'),'Texto original de Granola','an analysis upload without text keeps it');
+await minutesCall('decide',{minuteId:'g-txt',decision:'eliminar',digest:'1'});
+assert.equal(data.get('minute-text:g-txt'),undefined,'deleting the minute deletes its text');
 // A draft that was never sent is deleted directly; a sent one is not.
 const draftId=crypto.randomUUID();
 await call('save',{...draft,id:draftId,operationId:crypto.randomUUID(),revision:0});

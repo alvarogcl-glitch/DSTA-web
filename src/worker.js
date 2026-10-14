@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "minutas-eliminar-2026-10-14";
+const CODE_VERSION = "minutas-texto-2026-10-14";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -991,6 +991,12 @@ export class DashboardChatQueue extends DurableObject {
         return json({ error: "Minuta inválida." }, 400);
       }
       const previous = storage.get(`minute:${record.id}`);
+      // The meeting's own text (Granola) is kept apart so the inbox list stays light; the «Minutas»
+      // window asks for it only when a minute is opened. A later upload without text keeps it.
+      if (typeof record.contenido === "string") {
+        if (record.contenido.trim()) storage.put(`minute-text:${record.id}`, record.contenido.slice(0, 60_000));
+      }
+      delete record.contenido;
       // A source dismissed or deleted by the user stays out even when its content changes.
       if (previous?.eliminadaEn) record.eliminadaEn = previous.eliminadaEn;
       if (previous?.descartadaEn) {
@@ -1016,6 +1022,12 @@ export class DashboardChatQueue extends DurableObject {
       return json({ minutes });
     }
 
+    if (url.pathname === "/minutes/text" && request.method === "GET") {
+      const id = url.searchParams.get("id") || "";
+      if (!MINUTE_ID.test(id) || !storage.get(`minute:${id}`)) return json({ error: "Minuta no encontrada." }, 404);
+      return json({ contenido: storage.get(`minute-text:${id}`) || "" });
+    }
+
     if (url.pathname === "/minutes/seen" && request.method === "POST") {
       const { id } = await request.json();
       const record = storage.get(`minute:${id}`);
@@ -1037,6 +1049,7 @@ export class DashboardChatQueue extends DurableObject {
       if (decision.decision === "eliminar") {
         // Hidden right away; the VM records the tombstone so the source is never imported again.
         record.eliminadaEn = new Date().toISOString();
+        storage.delete(`minute-text:${record.id}`);
         for (const [key, manual] of [...storage.list({ prefix: "manual:" })]) if (manual.minuteId === record.id) storage.delete(key);
       }
       const id = crypto.randomUUID();
@@ -1839,6 +1852,10 @@ export default {
       return new Response(null, { status: 302, headers: { location: "/?granola=conectando", "cache-control": "no-store" } });
     }
 
+    if (url.pathname === "/api/minutes/text") {
+      if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
+      return chatStub(env, box).fetch("https://chat.internal/minutes/text?id=" + encodeURIComponent(url.searchParams.get("id") || ""));
+    }
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
       return chatStub(env, box).fetch("https://chat.internal/minutes/list" + (url.searchParams.get("all") === "1" ? "?all=1" : ""));

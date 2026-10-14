@@ -66,3 +66,6 @@
 .mm-editor-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .mm-editor-top button{border-radius:10px;padding:6px 12px;background:#18222e;border:1px solid #3a4859;color:#eef3f8;cursor:pointer}
 .mm-editor-top .mm-back{background:transparent;border:0;padding:0}
+.mm-original{background:#0d1117;border:1px solid #2b3745;border-radius:12px;padding:14px 16px;max-height:46vh;overflow:auto}
+.mm-original-text{font-size:14.5px;line-height:1.6}
+.mm-analysis{margin-top:6px;padding-top:4px;border-top:1px dashed #2b3745}
