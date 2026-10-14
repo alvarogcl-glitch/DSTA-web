@@ -280,7 +280,7 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - El copiloto y el analista ven «#N (id X)» y usan el id en las acciones.
   - El perfil del dueño en producción no se numera (vault `ownNumbering: false`, a fijar en el corte). En el piloto, la cuenta alvaro de laboratorio sí se numera.
 - Pruebas:
-  - `npm test`: 181 Python OK, más todas las suites JS.
+  - `npm test`: 182 Python OK, más todas las suites JS.
   - Navegador: 23 de 23. A y B parten en #1 con distintos IDs reales.
 - Versiones: Worker staging 46396af7-8840-4d0f-9c08-2840271b256f; puente reiniciado con a3fba2f.
 - Rollback: revertir a3fba2f, redeploy y reiniciar el puente. El archivo de números puede quedarse.
