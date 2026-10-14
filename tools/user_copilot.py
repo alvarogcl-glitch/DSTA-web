@@ -33,7 +33,8 @@ HERMES_TIMEOUT = 180
 CLAUDE_TIMEOUT = 150
 HERMES_COOLDOWN = 600  # D35: seconds on Claude after a Hermes failure, as in production
 MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
-MAX_CONTEXT_CHARS = 60_000
+MAX_CONTEXT_CHARS = 26_000  # keeps most prompts within Hermes' command-line limit
+HERMES_QUERY_LIMIT = 30_000
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
@@ -284,7 +285,9 @@ class UserCopilot:
         cwd = self.work_dir / actor
         cwd.mkdir(parents=True, exist_ok=True)
         # D35: like production, after a Hermes failure go straight to Claude for 10 minutes.
-        if self.clock() >= self.hermes_down_until:
+        # Hermes takes the prompt as a command-line argument (Windows limit ~32k): a longer prompt goes
+        # to Claude via stdin without marking Hermes as down for everyone else.
+        if len(prompt) <= HERMES_QUERY_LIMIT and self.clock() >= self.hermes_down_until:
             reply = self._hermes(actor, prompt, cwd)
             if reply:
                 return reply

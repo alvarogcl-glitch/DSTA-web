@@ -63,7 +63,7 @@ def user_vk(user: dict):
     return module
 
 
-TASKS_BLOCK_CHARS = 50_000
+TASKS_BLOCK_CHARS = 20_000  # the prompt must fit Hermes' command line; the analyst can query Vikunja
 
 
 def _tasks_block(snapshot: dict | None) -> str:

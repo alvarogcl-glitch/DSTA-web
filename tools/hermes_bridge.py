@@ -105,6 +105,13 @@ HERMES_TIMEOUT_SECONDS = 180
 CLAUDE_TIMEOUT_SECONDS = 150
 CODEX_RETRY_SECONDS = 600
 ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
+# Hermes only takes the prompt as a command-line argument; Windows caps a command line at 32,767
+# characters (WinError 206, raised as FileNotFoundError). Longer prompts go to Claude via stdin.
+HERMES_QUERY_LIMIT = 30_000
+
+
+class PromptTooLong(Exception):
+    pass
 ANALYSIS_TIMEOUT_SECONDS = 420
 GRANOLA_FIRST_CHECK_SECONDS = 60
 VIKUNJA_CHECK_SECONDS = 60
@@ -341,6 +348,8 @@ def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
 
 def ask_hermes(prompt: str, hermes_cli: str, hermes_home: Path, provider: str, model: str,
                toolsets: str, max_turns: int = 12, timeout: int = 0) -> str:
+    if len(prompt) > HERMES_QUERY_LIMIT:
+        raise PromptTooLong()
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     child_env["PYTHONIOENCODING"] = "utf-8"
@@ -417,6 +426,11 @@ def codex_or_claude(with_codex: Callable[[], str], with_claude: Callable[[], str
     if time.monotonic() >= _codex_retry_at:
         try:
             return with_codex()
+        except PromptTooLong:
+            # Not an outage: this one prompt goes to Claude (stdin), Hermes stays first for the rest.
+            if not claude_cli:
+                raise RuntimeError("La consulta es demasiado larga para Hermes y no hay respaldo Claude.")
+            return with_claude()
         except CodexUnavailable as error:
             if not claude_cli:
                 raise RuntimeError(str(error)) from error
