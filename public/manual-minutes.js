@@ -74,11 +74,10 @@
     meta.innerHTML=`<label>Título de la minuta<input maxlength="200" data-title value="${esc(draft.title)}"></label><label>Fecha y hora (hora local)<input type="datetime-local" data-date value="${dateInput(draft.date)}"></label><div class="manual-context">Contexto: ${esc(contextText(draft.context))}</div>`;
     container.insertBefore(meta,field);const title=meta.querySelector('[data-title]'),date=meta.querySelector('[data-date]');
     const buttons=container.querySelector('.minute-actions')||document.createElement('div');buttons.classList.add('manual-buttons');
-    buttons.insertAdjacentHTML('beforeend','<button type="button" data-save>Guardar borrador</button><button type="button" data-submit>Guardar y procesar minuta</button><button type="button" data-preview>Vista previa</button>');
+    buttons.insertAdjacentHTML('beforeend','<button type="button" data-save>Guardar borrador</button><button type="button" data-submit>Guardar y procesar minuta</button>');
     if(copyButton&&!buttons.contains(copyButton))buttons.prepend(copyButton);
     const status=document.createElement('span');status.className='manual-status';status.setAttribute('role','status');
-    const preview=document.createElement('div');preview.className='manual-preview';preview.hidden=true;
-    container.append(buttons,status,preview);
+    container.append(buttons,status);
     let timer=null,busy=false,pendingSave=null;
     const message=(text,error=false)=>{status.textContent=text;status.classList.toggle('manual-error',error);};
     const renderStatus=()=>{
@@ -122,11 +121,6 @@
       catch(e){message(e.message+' · el borrador se conserva.',true);}finally{busy=false;renderControls();}
     });
     function renderControls(){buttons.querySelector('[data-submit]').disabled=busy||!['draft','error'].includes(draft.status);buttons.querySelector('[data-save]').disabled=busy||draft.status!=='draft';}
-    buttons.querySelector('[data-preview]').addEventListener('click',()=>{
-      preview.hidden=!preview.hidden;
-      // Escape first: pasted HTML, links and scripts remain inert text. Small Markdown subset.
-      preview.innerHTML=esc(field.value).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
-    });
     if(copyButton && copyButton.id!=='copy-minute')copyButton.addEventListener('click',()=>navigator.clipboard.writeText(field.value).then(()=>message('✓ Texto copiado')).catch(()=>message('Selecciona el texto y cópialo manualmente.',true)));
     renderStatus();
     if(draft.dirty)changed();
@@ -164,7 +158,7 @@
     if(!dialog.open)dialog.showModal();
   }
   function openEditor(draft){
-    dialog.innerHTML='<header><h2>Registrar minuta</h2><button type="button" data-close>Cerrar ×</button></header><div data-editor><p class="muted">Usa los botones de formato y Vista previa. El análisis crea propuestas para tu aprobación.</p><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000"></textarea><button type="button" data-copy>Copiar texto</button></div>';
+    dialog.innerHTML='<header><h2>Registrar minuta</h2><button type="button" data-close>Cerrar ×</button></header><div data-editor><p class="muted">Usa los botones de formato. El análisis crea propuestas para tu aprobación.</p><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000"></textarea><button type="button" data-copy>Copiar texto</button></div>';
     dialog.querySelector('[data-close]').onclick=()=>dialog.close();
     const field=dialog.querySelector('textarea');field.value=draft.content;
     editor(dialog.querySelector('[data-editor]'),draft,field,dialog.querySelector('[data-copy]'));field.focus();

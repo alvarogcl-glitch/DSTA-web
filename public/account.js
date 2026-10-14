@@ -9,13 +9,16 @@
   try { response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }); } catch { return; }
   if (response.status === 401) { window.location.replace('/login'); return; }
   const accounts = response.ok;
+  const session = accounts ? await response.json() : {};
   const minutes = document.createElement('div');
   const granolaStatus = Object.assign(document.createElement('p'), { className: 'granola-status' });
   granolaStatus.setAttribute('role', 'status');
   minutes.append(granolaStatus);
 
-  if (!accounts) {
-    // Single-user dashboard: the bridge on the VM reports Granola's state (status light).
+  if (accounts) renderAccount(session.actor);
+  if (!accounts || session.owner) {
+    // Single-user dashboard and the owner's account: Granola lives on the VM (Hermes) and the
+    // bridge reports its state; the per-user OAuth flow below is for the other accounts.
     const note = Object.assign(document.createElement('p'), { textContent: 'La conexión con Granola se administra en la VM (Hermes).' });
     minutes.append(note);
     settings.addSection('Conexión de minutas', minutes, 20);
@@ -30,7 +33,7 @@
     return show();
   }
 
-  const { actor } = await response.json();
+  function renderAccount(actor) {
   const account = document.createElement('div');
   account.append(Object.assign(document.createElement('p'), {
     textContent: actor.displayName ? `${actor.displayName} · ${actor.email}` : actor.email }));
@@ -82,6 +85,7 @@
   change.append(form);
   account.append(logout, change);
   settings.addSection('Cuenta', account, 10);
+  }
 
   const granola = Object.assign(document.createElement('button'), { type: 'button', className: 'granola-connect' });
   minutes.append(granola);

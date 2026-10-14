@@ -406,6 +406,10 @@ assert.equal((await call('/api/task-actions', { method: 'POST', body: watchCompl
 assert.equal((await call('/api/preferences/layout', { headers: watch })).status, 401, 'nothing else is reachable with it');
 delete env.DASHBOARD_USER; delete env.DASHBOARD_PASSWORD;
 
+// 17b. The owner's session says so: its Granola is managed on the VM, not by the per-user OAuth flow.
+assert.equal((await (await call('/api/session', { cookie: ceoCookie })).json()).owner, true);
+assert.equal((await (await call('/api/session', { cookie: b })).json()).owner, false);
+
 // 18. Cutover check: the owner box reports the same code version as the Worker.
 assert.equal((await call('/api/bridge/runtime')).status, 401);
 const runtime = await (await call('/api/bridge/runtime', { headers: { authorization: 'Bearer bridge-test' } })).json();

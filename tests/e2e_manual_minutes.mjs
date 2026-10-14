@@ -40,7 +40,7 @@ try{
  await a.locator('[data-title]').fill('Minuta QA');
  await a.locator('#minute-text').fill('Portafolio\nAcuerdo: entrega completada.\nCrear seguimiento QA.');
  await a.locator('.manual-tools button').filter({hasText:'Negrita'}).click();
- await a.locator('[data-preview]').click();assert.equal(await a.locator('.manual-preview strong').count(),1);
+ assert.equal(await a.locator('[data-preview]').count(),0,'sin Vista previa (decisión del CEO 14-10)');
  await a.locator('[data-save]').click();await a.locator('.manual-status').filter({hasText:'guardado en tu cuenta'}).waitFor();
  const encrypted=await a.evaluate(()=>Object.values(localStorage).join(''));assert.ok(!encrypted.includes('Acuerdo:')&&!encrypted.includes('Minuta QA'),'local recovery is encrypted');
  await a.locator('#copy-minute').click();assert.ok((await a.evaluate(()=>navigator.clipboard.readText())).includes('Acuerdo:'));

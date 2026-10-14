@@ -1758,7 +1758,8 @@ export default {
       }
       if (session) box = session.box;
       if (url.pathname === "/api/session") {
-        return request.method === "GET" ? json({ actor: session.actor }) : json({ error: "Método no permitido" }, 405);
+        // owner: the legacy box keeps Granola on the VM (Hermes), not the per-user OAuth flow.
+        return request.method === "GET" ? json({ actor: session.actor, owner: session.box === LEGACY_BOX }) : json({ error: "Método no permitido" }, 405);
       }
       if (url.pathname === "/api/auth/logout") {
         return request.method === "POST" ? accountsLogout(env, session) : json({ error: "Método no permitido" }, 405);
