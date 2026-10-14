@@ -145,3 +145,18 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - Arreglo (3d6ab74): los prompts de más de 30.000 caracteres van a Claude por stdin, sin pausar Hermes. Además se acotaron los contextos (analista: 20.000; copiloto multiusuario: 26.000).
   - Validado con el modelo real sobre una copia de la bandeja: prompt de 22.520 caracteres, Hermes respondió en 15 s.
   - Puentes reiniciados; el Worker no cambió.
+
+## 9. Minutas: opción 1 y ventana nueva (14-10-2026, ~10:55)
+
+- **Opción 1, aprobada por el CEO.** El analista de minutas manuales del dueño ya no recibe el portafolio en el prompt: consulta Vikunja con herramientas de solo lectura (`pmo_open_tasks`, `pmo_list_tasks`). El prompt bajó de unos 53.000 a unos 2.700 caracteres (28e5367).
+  - Causa del reclamo del CEO: la versión intermedia, que recortaba a 20.000 caracteres, dejó fuera las LT mencionadas; el analista solo vio LT1 y LT2.
+  - Validado con el modelo real: encontró la tarea citada.
+- **Ventana «Minutas»** (4e17e50, versión 1684ccdf):
+  - el botón se llama «Minutas»;
+  - lista todas las minutas guardadas (`/api/minutes?all=1`) junto con los borradores manuales, con etiqueta de origen (Granola, Manual u otro), estado, búsqueda, filtros con contadores (Todas, Granola, Manual, Por revisar) y agrupación por mes;
+  - detalle con resumen, antecedentes y acciones, y «Revisar en 🔔», que abre esa minuta en la bandeja;
+  - editor integrado y «Volver a procesar» para minutas manuales sin decisiones aplicadas. El Worker lo rechaza si ya hay acciones aplicadas o si la minuta fue descartada.
+  - Pantalla completa en móvil.
+  - E2E con capturas en `tests/e2e_manual_minutes_buttons.mjs`.
+- **Granola del dueño en ⚙:** «✓ Granola conectado · tus minutas llegan solas cada hora a través de la VM; no necesitas hacer nada aquí».
+- **Deploy:** el cajón del dueño volvió a quedar con el código anterior por el tráfico. Se pausaron el puente y el publicador, el cajón tomó `CODE_VERSION = minutas-ventana-2026-10-14` en unos 10 s y se reanudaron ambos.
