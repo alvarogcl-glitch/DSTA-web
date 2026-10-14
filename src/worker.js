@@ -1634,6 +1634,25 @@ export default {
 
     let box = LEGACY_BOX;
     let session = null;
+    // D71: device access for the owner's Pixel Watch, which sends the dashboard's Basic credential.
+    // Only reading the dashboard and completing tasks, always on the owner's box; a browser
+    // cross-site request (it carries a foreign Origin) is refused. Revoke by rotating DASHBOARD_PASSWORD.
+    if (accounts && (request.headers.get("authorization") || "").startsWith("Basic ") &&
+        ["/api/dashboard", "/api/task-actions"].includes(url.pathname)) {
+      if (!env.DASHBOARD_USER || !env.DASHBOARD_PASSWORD || !basicAuthorized(request, env)) return json({ error: "No autenticado." }, 401);
+      const origin = request.headers.get("origin");
+      if (origin && origin !== url.origin) return json({ error: "Origen de solicitud no permitido." }, 403);
+      if (url.pathname === "/api/dashboard") {
+        return request.method === "GET" ? serveSnapshot(env, LEGACY_BOX) : json({ error: "Método no permitido" }, 405);
+      }
+      if (request.method === "POST") {
+        const body = await request.clone().json().catch(() => null);
+        if (body?.action !== "complete") return json({ error: "Este dispositivo solo puede completar tareas." }, 403);
+      } else if (request.method !== "GET") {
+        return json({ error: "Método no permitido" }, 405);
+      }
+      return taskActionRoute(request, url, env, LEGACY_BOX);
+    }
     if (accounts) {
       // Every browser write carries a same-origin Origin; the session cookie is the
       // ambient authority, so a missing Origin is rejected too (CSRF).

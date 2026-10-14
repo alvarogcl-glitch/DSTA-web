@@ -368,4 +368,22 @@ assert.ok(boxes.has('pmo-dsta'), 'writes land in the production box');
 assert.equal((await (await call('/api/dashboard', { cookie: b })).json()).tasks?.some?.(t => t.title === 'Tarea real del CEO') ?? false, false,
   'other users never see the CEO box');
 
+// 17. D71: the owner's Pixel Watch keeps working with its Basic device credential — read and
+// complete only, always on the owner's box, never from a foreign Origin.
+env.DASHBOARD_USER = 'reloj';
+env.DASHBOARD_PASSWORD = 'clave-del-reloj-2026';
+const watch = { authorization: 'Basic ' + btoa('reloj:clave-del-reloj-2026'), noOrigin: '1' };
+const watchDash = await call('/api/dashboard', { headers: watch });
+assert.equal(watchDash.status, 200);
+assert.equal((await watchDash.json()).tasks[0].title, 'Tarea real del CEO', 'the watch reads the owner box');
+assert.equal((await call('/api/dashboard', { headers: { authorization: 'Basic ' + btoa('reloj:otra'), noOrigin: '1' } })).status, 401);
+const watchComplete = { action: 'complete', requestId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', taskId: 999 };
+assert.notEqual((await call('/api/task-actions', { method: 'POST', body: watchComplete, headers: watch })).status, 401);
+assert.equal((await call('/api/task-actions', { method: 'POST', headers: watch,
+  body: { action: 'task.create', requestId: '0b1c2d3e-4f50-4617-8899-aabbccddee00', projectId: 2, title: 'x' } })).status, 403, 'only completing');
+assert.equal((await call('/api/task-actions', { method: 'POST', body: watchComplete,
+  headers: { ...watch, noOrigin: undefined, origin: 'https://attacker.example' } })).status, 403, 'no cross-site use of a cached Basic credential');
+assert.equal((await call('/api/preferences/layout', { headers: watch })).status, 401, 'nothing else is reachable with it');
+delete env.DASHBOARD_USER; delete env.DASHBOARD_PASSWORD;
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');
