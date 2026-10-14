@@ -160,3 +160,14 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - E2E con capturas en `tests/e2e_manual_minutes_buttons.mjs`.
 - **Granola del dueño en ⚙:** «✓ Granola conectado · tus minutas llegan solas cada hora a través de la VM; no necesitas hacer nada aquí».
 - **Deploy:** el cajón del dueño volvió a quedar con el código anterior por el tráfico. Se pausaron el puente y el publicador, el cajón tomó `CODE_VERSION = minutas-ventana-2026-10-14` en unos 10 s y se reanudaron ambos.
+
+## 10. Minutas: eliminar, actualización inmediata y espaciado (14-10-2026, ~11:20)
+
+- **Eliminar en «Minutas»**, con confirmación en la misma pantalla:
+  - un borrador se borra (de la cuenta y del dispositivo);
+  - una minuta procesada, de Granola o manual, se oculta de la lista y de la bandeja mediante la decisión `eliminar`.
+  - La VM la marca con `eliminadaEn` (además de `descartadaEn`), así que no se reimporta ni se reanaliza. Una nueva subida del puente tampoco la hace reaparecer.
+  - Los cambios ya aplicados en Vikunja se mantienen.
+- **Actualización inmediata:** al terminar una decisión de la bandeja, el dashboard se refresca en ese momento y no tras 30 s. El puente ya publica el snapshot antes de cerrar la decisión. Esta era la causa de que el CEO no viera la nota aplicada a la tarea #164.
+- El botón «Minutas» quedó separado del resto, como los demás botones del encabezado.
+- Deploy: versión 4559f255, `CODE_VERSION = minutas-eliminar-2026-10-14`. El cajón del dueño se actualizó con los servicios pausados y luego se reanudaron los 3. Código en 8fa74b1. 206 pruebas Python, más las suites JS y los 2 E2E.
