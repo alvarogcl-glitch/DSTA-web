@@ -137,31 +137,117 @@
     const title=document.querySelector('#detail-title').textContent;
     editor(field.parentElement,newDraft(title,field.value),field,document.querySelector('#copy-minute'));
   }
-  const dialog=document.createElement('dialog');dialog.className='manual-dialog';dialog.setAttribute('aria-label','Minutas manuales');document.body.append(dialog);
-  let opener=null;
+  // ── «Minutas»: every stored minute (Granola, manual, future sources) in one window. ──
+  const dialog=document.createElement('dialog');dialog.className='manual-dialog mm';dialog.setAttribute('aria-label','Minutas');document.body.append(dialog);
+  let opener=null,records=[],filter='all',query='',selected=null;
   dialog.addEventListener('close',()=>{active=null;opener?.focus();});
-  async function openList(){
-    opener=document.activeElement;await load();
-    dialog.innerHTML='<header><h2>Minutas manuales</h2><button type="button" data-close>Cerrar ×</button></header><p>Generar minuta prepara temas para Granola. Aquí puedes registrar la reunión y recuperar tus borradores.</p><button type="button" data-new>Registrar minuta nueva</button><div class="manual-list"></div>';
-    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
-    dialog.querySelector('[data-new]').onclick=()=>openEditor(newDraft());
-    for(const d of Object.values(cache).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))){
-      const button=Object.assign(document.createElement('button'),{type:'button',textContent:`${d.title} · ${states[d.status]}${d.dirty?' · cambios locales':''}`});button.onclick=()=>openEditor(d);dialog.querySelector('.manual-list').append(button);
-      if(d.dirty&&server[d.id]){
-        const saved=Object.assign(document.createElement('button'),{type:'button',textContent:'Recuperar versión guardada · conservar cambios locales como copia'});
-        saved.onclick=async()=>{
-          const copy={...d,id:crypto.randomUUID(),revision:0,pendingRequest:null,title:(d.title+' · recuperada').slice(0,200),dirty:true};cache[copy.id]=copy;await persistLocal(copy);
-          cache[d.id]={...server[d.id],dirty:false};await persistLocal(cache[d.id]);openEditor(cache[d.id]);
-        };dialog.querySelector('.manual-list').append(saved);
-      }
+  const ORIGINS={'Granola':{label:'Granola',cls:'granola'},'Manual-Dashboard':{label:'Manual',cls:'manual'}};
+  const origin=source=>ORIGINS[source||'Granola']||{label:String(source),cls:'other'};
+  const months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const pendingOf=r=>r&&!r.descartadaEn?(r.acciones||[]).filter(a=>!a.auto&&['propuesta','error'].includes(a.estado)).length:0;
+  const appliedOf=r=>(r?.acciones||[]).filter(a=>a.estado==='aplicada').length;
+  const niceDate=value=>{
+    const text=String(value||'');if(!/^\d{4}-\d{2}-\d{2}/.test(text))return 'Sin fecha';
+    const date=new Date(text.length>10?text:text+'T12:00:00');
+    const day=`${date.getDate()} de ${months[date.getMonth()]} ${date.getFullYear()}`;
+    return text.length>10?`${day} · ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`:day;
+  };
+  function status(item){
+    const d=item.draft,r=item.record;
+    if(d&&d.status!=='processed')return {draft:['Borrador','muted'],queued:['En cola de análisis','busy'],running:['Analizando con IA…','busy'],error:['Error · reintentar','error']}[d.status]||[d.status,'muted'];
+    if(r?.descartadaEn)return ['Descartada','muted'];
+    const left=pendingOf(r);
+    return left?[`${left} por revisar`,'attention']:[appliedOf(r)?`${appliedOf(r)} aplicadas`:'Sin cambios propuestos','ok'];
+  }
+  function items(){
+    const byMinute=new Map(records.map(r=>[r.id,{key:'r:'+r.id,record:r,title:r.titulo,date:r.fecha,source:r.source||'Granola'}]));
+    for(const d of Object.values(cache)){
+      const linked=d.minuteId&&byMinute.get(d.minuteId);
+      if(linked){linked.draft=d;linked.date=d.date||linked.date;continue;}
+      byMinute.set('d:'+d.id,{key:'d:'+d.id,draft:d,title:d.title,date:d.date,source:'Manual-Dashboard'});
     }
+    return [...byMinute.values()].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  }
+  function visible(list){
+    const q=query.trim().toLowerCase();
+    return list.filter(i=>(filter==='all'||(filter==='pending'?pendingOf(i.record)>0:origin(i.source).cls===filter))&&
+      (!q||[i.title,i.record?.resumen,i.draft?.content].some(t=>String(t||'').toLowerCase().includes(q))));
+  }
+  async function refreshRecords(){
+    const response=await fetch('/api/minutes?all=1',{cache:'no-store',credentials:'same-origin'});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(payload.error||'No se pudieron leer las minutas.');
+    records=payload.minutes||[];
+  }
+  async function openList(){
+    opener=document.activeElement;
+    await Promise.all([load(),refreshRecords()]);
+    dialog.innerHTML=`<header class="mm-head"><div><span class="kicker">MINUTAS</span><h2>Minutas</h2></div>
+      <div class="mm-head-actions"><button type="button" class="mm-primary" data-new>+ Nueva minuta</button><button type="button" class="mm-close" data-close aria-label="Cerrar">×</button></div></header>
+      <div class="mm-toolbar"><input type="search" class="mm-search" placeholder="Buscar por título o contenido…" aria-label="Buscar minutas"><div class="mm-chips" role="group" aria-label="Filtrar por origen"></div></div>
+      <div class="mm-body"><div class="mm-list" role="list"></div><section class="mm-detail" aria-live="polite"></section></div>`;
+    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+    dialog.querySelector('[data-new]').onclick=()=>{selected=null;showEditor(newDraft());};
+    const search=dialog.querySelector('.mm-search');search.value=query;search.oninput=()=>{query=search.value;renderList();};
+    renderList();
+    if(selected)renderDetail(items().find(i=>i.key===selected));else renderDetail(null);
     if(!dialog.open)dialog.showModal();
   }
-  function openEditor(draft){
-    dialog.innerHTML='<header><h2>Registrar minuta</h2><button type="button" data-close>Cerrar ×</button></header><div data-editor><p class="muted">Usa los botones de formato. El análisis crea propuestas para tu aprobación.</p><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000"></textarea><button type="button" data-copy>Copiar texto</button></div>';
-    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
-    const field=dialog.querySelector('textarea');field.value=draft.content;
-    editor(dialog.querySelector('[data-editor]'),draft,field,dialog.querySelector('[data-copy]'));field.focus();
+  function renderList(){
+    const all=items(),list=visible(all);
+    const count=key=>key==='all'?all.length:key==='pending'?all.filter(i=>pendingOf(i.record)>0).length:all.filter(i=>origin(i.source).cls===key).length;
+    const chips=dialog.querySelector('.mm-chips');chips.replaceChildren();
+    for(const [key,label] of [['all','Todas'],['granola','Granola'],['manual','Manual'],['pending','Por revisar']]){
+      const chip=Object.assign(document.createElement('button'),{type:'button',className:'mm-chip'+(filter===key?' on':''),textContent:`${label} · ${count(key)}`});
+      chip.setAttribute('aria-pressed',String(filter===key));chip.onclick=()=>{filter=key;renderList();};chips.append(chip);
+    }
+    const box=dialog.querySelector('.mm-list');box.replaceChildren();
+    if(!list.length){box.innerHTML=`<p class="mm-empty">${all.length?'Ninguna minuta coincide con el filtro.':'Aún no hay minutas. Las de Granola llegan solas cada hora; las manuales se crean con «+ Nueva minuta» o desde «Generar minuta».'}</p>`;return;}
+    let month='';
+    for(const item of list){
+      const text=String(item.date||'');const head=/^\d{4}-\d{2}/.test(text)?`${months[Number(text.slice(5,7))-1]} ${text.slice(0,4)}`:'Sin fecha';
+      if(head!==month){month=head;box.append(Object.assign(document.createElement('h3'),{className:'mm-month',textContent:head}));}
+      const [label,tone]=status(item),o=origin(item.source);
+      const row=Object.assign(document.createElement('button'),{type:'button',className:'mm-item'+(selected===item.key?' on':'')});
+      row.setAttribute('role','listitem');
+      row.innerHTML=`<span class="mm-row1"><span class="mm-badge ${o.cls}">${esc(o.label)}</span><span class="mm-pill ${tone}">${esc(label)}</span></span>
+        <strong>${esc(item.title||'Reunión sin título')}</strong><small>${esc(niceDate(item.date))}</small>
+        ${item.record?.resumen?`<span class="mm-snippet">${esc(item.record.resumen)}</span>`:''}`;
+      row.onclick=()=>{selected=item.key;renderList();renderDetail(item);};
+      box.append(row);
+    }
+  }
+  function renderDetail(item){
+    const pane=dialog.querySelector('.mm-detail');dialog.classList.toggle('mm-showing',Boolean(item));
+    if(!item){pane.innerHTML='<p class="mm-empty">Selecciona una minuta para ver su resumen, sus propuestas y su estado.</p>';return;}
+    if(item.draft&&['draft','error','queued','running'].includes(item.draft.status)&&!item.record){showEditor(item.draft);return;}
+    const r=item.record,d=item.draft,o=origin(item.source),[label,tone]=status(item),left=pendingOf(r);
+    pane.innerHTML=`<button type="button" class="mm-back" data-back>← Minutas</button>
+      <div class="mm-row1"><span class="mm-badge ${o.cls}">${esc(o.label)}</span><span class="mm-pill ${tone}">${esc(label)}</span></div>
+      <h3 class="mm-title">${esc(item.title||'Reunión sin título')}</h3><p class="mm-meta">${esc(niceDate(item.date))}</p>
+      ${r?.resumen?`<h4>Resumen</h4><p class="mm-text">${esc(r.resumen)}</p>`:''}
+      ${(r?.antecedentes||[]).length?`<h4>Antecedentes</h4><ul>${r.antecedentes.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
+      ${r?`<h4>Acciones</h4><p class="mm-text">${appliedOf(r)} aplicadas · ${left} por revisar · ${(r.acciones||[]).length} en total</p>`:''}
+      <div class="mm-actions"></div><p class="mm-note" role="status"></p>`;
+    pane.querySelector('[data-back]').onclick=()=>{selected=null;renderList();renderDetail(null);};
+    const actions=pane.querySelector('.mm-actions'),note=pane.querySelector('.mm-note');
+    const add=(text,cls,fn)=>{const b=Object.assign(document.createElement('button'),{type:'button',className:cls,textContent:text});b.onclick=fn;actions.append(b);return b;};
+    if(r)add(left?`Revisar ${left} ${left===1?"propuesta":"propuestas"} en 🔔`:'Abrir en la bandeja 🔔',left?'mm-primary':'',()=>{dialog.close();window.DstaInbox?.open(r.id);});
+    if(d){
+      add('Ver texto','',()=>showEditor(d));
+      if(d.status==='processed'&&!appliedOf(r)&&!r?.descartadaEn)add('Volver a procesar','',async e=>{
+        e.target.disabled=true;note.textContent='Enviando a análisis…';
+        try{const result=await api('/submit',{id:d.id,revision:d.revision,reprocess:true});Object.assign(d,result,{dirty:false});note.textContent='En cola de análisis. Las nuevas propuestas llegarán a la 🔔 en unos minutos.';}
+        catch(error){note.textContent=error.message;e.target.disabled=false;}
+      });
+    }
+  }
+  function showEditor(draft){
+    const pane=dialog.querySelector('.mm-detail');dialog.classList.add('mm-showing');
+    pane.innerHTML=`<button type="button" class="mm-back" data-back>← Minutas</button><div data-editor class="mm-editor"><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000" placeholder="Escribe aquí las notas de la reunión: acuerdos, avances, responsables y fechas."></textarea><button type="button" data-copy>Copiar texto</button></div>`;
+    pane.querySelector('[data-back]').onclick=()=>{openList().catch(e=>window.DstaToast?.show(e.message,false));};
+    const field=pane.querySelector('textarea');field.value=draft.content;
+    editor(pane.querySelector('[data-editor]'),draft,field,pane.querySelector('[data-copy]'));field.focus();
   }
   window.addEventListener('beforeunload',e=>{if(unsaved||Object.values(cache).some(d=>d.dirty)){e.preventDefault();e.returnValue='';}});
   window.addEventListener('online',()=>{if(ready)load().then(()=>active?.update?.()).catch(()=>{});});
@@ -170,14 +256,14 @@
     actor=(await response.json()).actor;
     await load();ready=true;
     const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/manual-minutes.css'});document.head.append(style);
-    const button=Object.assign(document.createElement('button'),{type:'button',id:'manual-minutes-open',textContent:'Minutas manuales'});
+    const button=Object.assign(document.createElement('button'),{type:'button',id:'manual-minutes-open',textContent:'Minutas'});
     document.querySelector('#refresh').before(button);
-    button.onclick=()=>openList().catch(e=>window.DstaToast?.show(e.message,false));
+    button.onclick=()=>{selected=null;openList().catch(e=>window.DstaToast?.show(e.message,false));};
     new MutationObserver(attach).observe(document.querySelector('#detail-body'),{childList:true});attach();
     setInterval(()=>{
       if(!Object.values(cache).some(d=>['queued','running'].includes(d.status)))return;
       load().then(()=>{active?.update?.();window.dispatchEvent(new Event('dsta-minutes-changed'));}).catch(()=>{});
     },10000);
   }
-  start().catch(()=>{const button=Object.assign(document.createElement('button'),{type:'button',textContent:'Reintentar minutas manuales'});button.onclick=()=>{button.remove();start().catch(()=>window.DstaToast?.show('No se pudieron cargar los borradores. Recarga para reintentar.',false));};document.querySelector('#refresh')?.before(button);});
+  start().catch(()=>{const button=Object.assign(document.createElement('button'),{type:'button',textContent:'Reintentar minutas'});button.onclick=()=>{button.remove();start().catch(()=>window.DstaToast?.show('No se pudieron cargar los borradores. Recarga para reintentar.',false));};document.querySelector('#refresh')?.before(button);});
 })();

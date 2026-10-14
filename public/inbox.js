@@ -298,5 +298,6 @@
   });
 
   load();
-  window.DstaInbox = { open: () => openPanel(true), reload: load };
+  // open(id): opens the panel with that minute expanded (used by the «Minutas» window).
+  window.DstaInbox = { open: id => { if (id) openId = id; openPanel(true); }, reload: load };
 })();

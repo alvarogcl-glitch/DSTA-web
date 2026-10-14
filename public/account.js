@@ -19,14 +19,16 @@
   if (!accounts || session.owner) {
     // Single-user dashboard and the owner's account: Granola lives on the VM (Hermes) and the
     // bridge reports its state; the per-user OAuth flow below is for the other accounts.
-    const note = Object.assign(document.createElement('p'), { textContent: 'La conexión con Granola se administra en la VM (Hermes).' });
+    const note = Object.assign(document.createElement('p'), { className: 'muted',
+      textContent: session.owner ? 'Tus minutas de Granola llegan solas cada hora a través de la VM (Hermes). No necesitas hacer nada aquí.'
+        : 'La conexión con Granola se administra en la VM (Hermes).' });
     minutes.append(note);
     settings.addSection('Conexión de minutas', minutes, 20);
     const show = async () => {
       try {
         const { health } = await (await fetch('/api/health/refresh', { cache: 'no-store' })).json();
         const granola = health?.granola;
-        granolaStatus.textContent = granola ? (granola.ok ? 'Granola conectado' : `Granola: ${granola.detail || 'sin conexión'}`) : 'Granola: sin reporte del puente';
+        granolaStatus.textContent = granola ? (granola.ok ? '✓ Granola conectado' : `⚠ Granola: ${granola.detail || 'sin conexión'}. Hay que reconectarlo en la VM (Hermes).`) : 'Granola: sin reporte del puente';
       } catch { granolaStatus.textContent = 'Granola: estado no disponible'; }
     };
     window.addEventListener('dsta-settings-open', show);

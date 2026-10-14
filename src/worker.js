@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "minutas-manuales-2026-10-14";
+const CODE_VERSION = "minutas-ventana-2026-10-14";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -1010,7 +1010,7 @@ export class DashboardChatQueue extends DurableObject {
       // Newest meeting first (meeting date), then most recently detected.
       const minutes = [...storage.list({ prefix: "minute:" })].map(([, record]) => record)
         .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) ||
-          String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, 30);
+          String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, url.searchParams.get("all") === "1" ? 500 : 30);
       return json({ minutes });
     }
 
@@ -1123,6 +1123,14 @@ export class DashboardChatQueue extends DurableObject {
       if (!old.content.trim()) return json({error:'Escribe el contenido de la reunión antes de procesar.'},400);
       if (['draft','error'].includes(old.status)) {
         Object.assign(old,{status:'queued',error:'',updatedAt:new Date(now).toISOString()}); storage.put('manual:'+old.id,old);
+      } else if (body.reprocess===true && old.status==='processed') {
+        // "Volver a procesar": a new revision of the same notes. Refused once a proposal was applied or
+        // the minute was discarded, so a new analysis never replaces decisions already made.
+        const record=old.minuteId && storage.get('minute:'+old.minuteId);
+        if (record?.descartadaEn || (record?.acciones||[]).some(a=>a.estado==='aplicada')) {
+          return json({error:'Esta minuta ya tiene decisiones aplicadas o fue descartada. Registra una minuta nueva.'},409);
+        }
+        Object.assign(old,{revision:old.revision+1,status:'queued',error:'',updatedAt:new Date(now).toISOString()}); storage.put('manual:'+old.id,old);
       }
       return json(view(old),202);
     }
@@ -1821,7 +1829,7 @@ export default {
 
     if (url.pathname === "/api/minutes") {
       if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
-      return chatStub(env, box).fetch("https://chat.internal/minutes/list");
+      return chatStub(env, box).fetch("https://chat.internal/minutes/list" + (url.searchParams.get("all") === "1" ? "?all=1" : ""));
     }
     if (url.pathname === "/api/minutes/seen" || url.pathname === "/api/minutes/decide") {
       if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);

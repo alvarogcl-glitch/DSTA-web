@@ -45,20 +45,20 @@ try{
  const encrypted=await a.evaluate(()=>Object.values(localStorage).join(''));assert.ok(!encrypted.includes('Acuerdo:')&&!encrypted.includes('Minuta QA'),'local recovery is encrypted');
  await a.locator('#copy-minute').click();assert.ok((await a.evaluate(()=>navigator.clipboard.readText())).includes('Acuerdo:'));
  await a.screenshot({path:join(screenshots,'editor-desktop.png')});
- await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.manual-list button').filter({hasText:'Minuta QA'}).first().click();
+ await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').filter({hasText:'Minuta QA'}).first().click();
  assert.ok((await a.locator('dialog textarea').inputValue()).includes('Acuerdo:'),'recovered draft after reload');
  // Recover an unsent edit after an HTTP failure and a reload.
  let offline=true;await a.route('**/api/manual-minutes',route=>route.request().method()==='POST'&&offline?route.abort():route.continue());
  await a.locator('dialog textarea').fill('Portafolio\nAcuerdo: entrega completada.\nRecuperación sin conexión QA.');
  await a.locator('[data-save]').click();await a.waitForTimeout(200);offline=false;
- await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.manual-list button').filter({hasText:'Minuta QA'}).first().click();
+ await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').filter({hasText:'Minuta QA'}).first().click();
  assert.match(await a.locator('dialog textarea').inputValue(),/Recuperación sin conexión QA/);
  await a.locator('[data-save]').click();await a.locator('.manual-status').filter({hasText:'guardado en tu cuenta'}).waitFor();
  await a.setViewportSize({width:390,height:844});await a.locator('.manual-dialog').evaluate(e=>e.scrollTop=0);await a.screenshot({path:join(screenshots,'editor-mobile.png')});
  assert.ok(await a.locator('.manual-dialog').evaluate(e=>e.getBoundingClientRect().width<=390));
  await a.locator('.manual-buttons [data-submit]').click();await a.locator('.manual-status').filter({hasText:/En cola|Procesando|Procesada/}).waitFor();await a.locator('.manual-dialog [data-close]').click();
  await a.waitForFunction(async()=>{const d=await(await fetch('/api/minutes')).json();return d.minutes.length===1;},null,{timeout:20000});await a.locator('#dsta-inbox-toggle').click();await a.locator('#dsta-inbox').getByText('Minuta QA',{exact:false}).first().waitFor({timeout:20000});
- await b.locator('#manual-minutes-open').click();assert.equal(await b.locator('.manual-list button').count(),0);
+ await b.locator('#manual-minutes-open').click();assert.equal(await b.locator('.mm-item').count(),0);
  assert.equal(snapshots['qa-a'].tasks[0].done,false);
  const records=[...boxes.get('u:qa-a').ctx.storage.kv.list({prefix:'minute:'}).values()];assert.equal(records.length,1);assert.ok(records[0].acciones.every(x=>x.estado==='propuesta'&&!x.auto));
  const state=JSON.parse(readFileSync(join(work,'vikunja.json')));assert.equal(state['qa-a'].tasks[0].done,false,'no automatic changes');assert.equal(state['qa-a'].tasks.length,1);

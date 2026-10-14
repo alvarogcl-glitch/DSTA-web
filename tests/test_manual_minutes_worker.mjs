@@ -33,4 +33,11 @@ assert.equal((await call('done',{id,attempt:retry.attempt,minuteId:'m-test'})).s
 assert.equal((await (await call('list')).json()).drafts[0].status,'processed');
 assert.equal((await call('submit',{id,revision:1})).status,202);
 assert.equal((await (await call('next')).json()).job,null,'completed submit never queues twice');
+// "Volver a procesar": a processed minute with no applied decision gets a new revision and is queued once.
+assert.equal((await call('submit',{id,revision:1,reprocess:true})).status,202);
+const again=(await (await call('next')).json()).job;
+assert.equal(again.revision,2,'new revision so the inbox analyses it again');
+data.set('minute:m-test2',{id:'m-test2',source:'Manual-Dashboard',sourceId:'manual-'+id,digest:'2',acciones:[{estado:'aplicada'}]});
+assert.equal((await call('done',{id,attempt:again.attempt,minuteId:'m-test2'})).status,200);
+assert.equal((await call('submit',{id,revision:2,reprocess:true})).status,409,'never re-analyse over applied decisions');
 console.log('Manual drafts: durable recovery, optimistic concurrency, scope, submit deduplication, lease fencing, errors and inbox proof passed');
