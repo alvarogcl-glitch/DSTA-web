@@ -63,6 +63,36 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
 4. Código de la VM: en el repositorio de producción, `git checkout pre-multiusuario-2026-10-14` (o `git reset --hard pre-multiusuario-2026-10-14` en `main`). Reiniciar las dos tareas.
 5. Detener la tarea «DSTA Multiusuario Bridge». D1 queda inerte.
 
-## 5. Registro de ejecución
+## 5. Registro de ejecución (13-10 23:30 → 14-10 00:10, hora de Chile)
 
-(Se completa durante el corte.)
+| Hora | Paso | Resultado |
+|---|---|---|
+| 23:3x | Respaldo completo (sección 0) | OK. Producción en la versión e5b15c54 |
+| 23:4x | D72: merge de `main` 40128b6 en `feat/multiusuario` (b4e5747) | Sin conflictos; 194 pruebas OK |
+| 23:4x | D71: acceso de dispositivo para el reloj (eca855d) | Pruebas OK |
+| 23:5x | Ensayo en staging, partes 1 y 2, y rollback (sección 1) | OK, más el hallazgo del Durable Object con código anterior |
+| 23:53 | D1 `dsta-web-accounts` (ccc417d3…) creada y migraciones 0001 y 0002 | OK |
+| 23:54 | Repositorio de producción avanzado por fast-forward al código integrado; tareas de la VM detenidas | OK |
+| 23:55 | Deploy del Worker en modo cuentas: versión **f6c2bda9-4270-4545-abfc-3218a56416ca** | `/` redirige a `/login`; `ownerBox == worker` de inmediato |
+| 23:56 | D68: token del puente rotado (secreto y `hermes/.env`) y `DSTA_DASHBOARD_URL=…/u/ceo` en `.env` y en la tarea Cloud Sync | El primer `secret put` desde PowerShell agregó bytes al valor y el puente recibió 401. Se volvió a subir desde bash con el valor exacto y quedó OK |
+| 23:57 | Cuenta `ceo` (alvaro.gcl@gmail.com) con `do_name='pmo-dsta'` | OK |
+| 23:58 | Tareas «DSTA Hermes Bridge» y «DSTA Dashboard Cloud Sync» reanudadas | OK |
+| 00:00 | Verificación por navegador como dueño | Ver detalle abajo |
+| 00:03 | Tarea programada nueva «DSTA Multiusuario Bridge», con vault `%LOCALAPPDATA%\dsta-multiuser-prod\vault` | OK; ignora a `ceo`, que no tiene vault, como corresponde |
+| 00:05 | Puente de staging apagado (cuota) y código subido a GitHub (`main` = 14dbcc3) | OK |
+| 00:07 | Enlace de restablecimiento de un solo uso (24 h) para el CEO | Entregado solo por Telegram; cerró la sesión temporal |
+
+**Detalle de la verificación por navegador como dueño:**
+- 164 tareas y 8 líneas iguales a la lectura directa de Vikunja: mismos IDs y estado.
+- Perfil «Dashboard Gestión DSTA» / PMO-DSTA y Cata 1-1.
+- Semáforos de Vikunja y Granola en verde.
+- Una acción de prueba sin efecto (completar una tarea ya completada) fue procesada y confirmada por el puente.
+- Publicador por `/u/ceo`: «publicado: 8 proyectos, 164 tareas».
+- PWA: `manifest` y `sw.js` responden 200.
+- Sin errores de JavaScript.
+
+**Pendiente para el CEO:**
+- Fijar su contraseña con el enlace.
+- Reinstalar o volver a entrar en la PWA del teléfono con correo y contraseña.
+- El reloj sigue con su clave actual, sin cambios.
+- Dar el correo de Paula para darla de alta: `provision_user.py provision --produccion --vikunja-url http://127.0.0.1:3456 …`.

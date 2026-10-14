@@ -285,6 +285,13 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 - Versiones: Worker staging 46396af7-8840-4d0f-9c08-2840271b256f; puente reiniciado con a3fba2f.
 - Rollback: revertir a3fba2f, redeploy y reiniciar el puente. El archivo de números puede quedarse.
 
+### Corte a producción · 14-10-2026
+
+- Autorización: Telegram 14-10 02:34, «ejecuta todo el plan los pasos 1, 2 y 3 de forma autónoma… documentar todo y tener un respaldo».
+- Resultado: producción en modo cuentas, versión f6c2bda9-4270-4545-abfc-3218a56416ca, código `main` 14dbcc3. El dueño quedó en su cajón `pmo-dsta` sin migrar datos. Verificación completa OK.
+- Respaldo y vuelta atrás: ver [CORTE_PRODUCCION.md](CORTE_PRODUCCION.md).
+- D66, D68, D69, D70, D71 y D72 pasan a **verificado producción**, salvo D70: falta que el CEO reinstale la PWA y la pruebe en su teléfono.
+
 ## Plantilla de una decisión
 
 ### Decisión DNN

@@ -21,7 +21,8 @@ Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) llev
 - D55, D57–D59 decididas (E10, staging bfd8555c).
 - D61–D63 y D67 decididas (E11, staging c31e37c2).
 - D66–D72 aprobadas para el corte (sin fecha). E12 (numeración propia por usuario) publicada en staging 46396af7.
-- Siguiente: plan de corte y ensayo en staging; luego pedir fecha y hora al CEO para producción.
+- **Corte a producción ejecutado el 14-10-2026.** Ver CORTE_PRODUCCION.md: respaldo, registro y vuelta atrás.
+- Siguiente: que el CEO fije su contraseña, que entregue el correo de Paula para darla de alta en producción, y monitorear 48 h (cuota de Cloudflare y logs de `%LOCALAPPDATA%/hermes/logs/dsta-bridge.log` y `dsta-multiuser-prod/bridge.log`).
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.

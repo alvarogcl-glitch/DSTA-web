@@ -72,7 +72,7 @@ Historial del avance de fases técnicas. Se actualiza al cerrar cada tarea. Se m
 ### F6 · Paso a producción (REQUIERE APROBACIÓN DEL CEO)
 - [~] F6.1 **Preparado y ensayado, no ejecutado.** `users.do_name='pmo-dsta'`; el bloque 16 del test prueba que el CEO ve sus datos sin migración y que el puente actual funciona sin cambios de código apuntando a `/u/ceo`. El runbook está en `docs/F6_CUTOVER.md`.
 - [~] F6.2 Rollback documentado en `docs/F6_CUTOVER.md` (menos de 5 minutos, sin datos que revertir). **No ensayado contra producción**, por regla.
-- [ ] F6.3 Pendiente: requiere la aprobación del CEO, Workers Paid, los usuarios piloto y la decisión sobre Granola real.
+- [x] F6.3 Ejecutado el 14-10-2026 (plan gratuito; consumo reducido). Detalle en `convergencia/CORTE_PRODUCCION.md`. Falta dar de alta a Paula (correo pendiente).
 
 ## Bitácora
 - 2026-10-12 23:15 (Chile): plan creado; worktree y rama creados. Inicio de ejecución autónoma hasta 06:00, con reporte cada hora por Telegram.

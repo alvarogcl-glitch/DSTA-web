@@ -5,7 +5,7 @@ Antes de usar este runbook, cerrar la equivalencia acordada en
 las herramientas del copiloto y la migración. Revisar todos los pasos contra el resultado final
 y ensayar corte/rollback; este archivo no autoriza ejecutarlos.
 
-> **Requiere aprobación explícita del CEO para cada paso que toque `dsta-web`.** Nada de esto se ejecutó.
+> **EJECUTADO el 14-10-2026** con autorización del CEO (Telegram 14-10 02:34). Registro, respaldo y rollback vigentes: [convergencia/CORTE_PRODUCCION.md](convergencia/CORTE_PRODUCCION.md).
 > Ensayo probado: bloque 16 de `tests/test_multiuser_worker.mjs`. El CEO mapeado a `pmo-dsta` ve sus datos sin migración, y el puente actual funciona sin cambios de código si su URL apunta a `/u/ceo`.
 
 ## Antes de decidir
