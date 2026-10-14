@@ -61,10 +61,29 @@ def scoped_permissions(routes: dict) -> dict:
     return {group: sorted(routes[group]) for group in TOKEN_GROUPS if isinstance(routes.get(group), dict)}
 
 
+def register_vikunja(vikunja_url: str, username: str, email: str, password: str) -> None:
+    """Self-registration (lab). Production has it disabled (registration_enabled=false): then the
+    local Vikunja CLI creates the user directly, without opening registration or restarting Vikunja."""
+    try:
+        vikunja(vikunja_url, "POST", "/register", {"username": username, "email": email, "password": password})
+        return
+    except urllib.error.HTTPError as error:
+        if error.code != 404 or not vikunja_url.startswith("http://127.0.0.1"):
+            raise
+    folder = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Vikunja"
+    cli = os.environ.get("DSTA_VIKUNJA_CLI") or next(iter(sorted(folder.glob("vikunja-*.exe"))), None)
+    if not cli:
+        raise RuntimeError("El registro de Vikunja está cerrado y no se encontró su CLI")
+    result = subprocess.run([str(cli), "user", "create", "-u", username, "-e", email, "-p", password], cwd=str(Path(cli).parent),
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False)
+    if result.returncode:
+        raise RuntimeError("La CLI de Vikunja no pudo crear el usuario")
+
+
 def provision_vikunja(vikunja_url: str, actor: str, email: str, name: str) -> dict:
     username = f"dsta-{actor}"
     password = secrets.token_urlsafe(24)
-    vikunja(vikunja_url, "POST", "/register", {"username": username, "email": email, "password": password})
+    register_vikunja(vikunja_url, username, email, password)
     jwt = vikunja(vikunja_url, "POST", "/login", {"username": username, "password": password})["token"]
     root = vikunja(vikunja_url, "PUT", "/projects", {"title": f"DSTA · {name}"}, token=jwt)
     routes = vikunja(vikunja_url, "GET", "/routes", token=jwt)

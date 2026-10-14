@@ -96,3 +96,12 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
 - Reinstalar o volver a entrar en la PWA del teléfono con correo y contraseña.
 - El reloj sigue con su clave actual, sin cambios.
 - Dar el correo de Paula para darla de alta: `provision_user.py provision --produccion --vikunja-url http://127.0.0.1:3456 …`.
+
+## 6. Después del corte
+
+- 14-10 ~06:15: el CEO confirmó los pasos 1 (contraseña) y 2 (app del teléfono) y entregó el correo de Paula.
+- Alta de Paula (`paula`, pschuler@inacap.cl):
+  - Espacio propio en el Vikunja de producción (usuario `dsta-paula`, raíz 13), creado con la CLI de Vikunja porque el registro público está cerrado (`registration_enabled=false`). No se abrió el registro ni se reinició Vikunja.
+  - Vault en `dsta-multiuser-prod`.
+  - Invitación de un solo uso (24 h), entregada al CEO para que la reenvíe.
+  - Aislamiento verificado: su token ve solo «Inbox» y «DSTA · Paula» y recibe 403 sobre la raíz 2 (PMO-DSTA).
