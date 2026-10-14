@@ -156,6 +156,31 @@ assert.ok(await a.locator('.dsta-proposals button:has-text("Aplicar todas")').is
 await a.unroute('**/api/assistant**');
 await a.click('#dsta-assistant-close');
 step('D37: «Aplicar todas» aplica las sugerencias en orden por la cola verificada');
+
+// D51/D53: a custom section supports long-press selection and uses the common minute format.
+await a.evaluate(async () => {
+  const current = (await (await fetch('/api/preferences/layout')).json()).layout;
+  current.sections.push({ id: 'c-e2e', kind: 'custom', title: 'Sugeridas', enabled: true,
+    filters: { keywords: ['Sugerida'], fields: ['title'], status: 'open' } });
+  const saved = await fetch('/api/preferences/layout', { method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ layout: current }) });
+  if (!saved.ok) throw new Error('layout ' + saved.status);
+});
+await a.reload();
+await a.waitForFunction(() => document.querySelectorAll('[data-custom-section="c-e2e"] .priority-card').length === 2, null, { timeout: 30000 });
+const card = a.locator('[data-custom-section="c-e2e"] .priority-card', { hasText: 'Sugerida dos' });
+await card.scrollIntoViewIfNeeded();
+const cardBox = await card.boundingBox();
+await a.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+await a.mouse.down();
+await a.waitForTimeout(900);
+await a.mouse.up();
+await a.locator('[data-custom-section="c-e2e"] .dsta-custom-minute', { hasText: '1 seleccionada' }).click();
+const minuteText = await a.locator('#minute-text').inputValue();
+assert.match(minuteText, /^Sugeridas - /);
+assert.match(minuteText, /- #\d+ Sugerida dos · Estado: Abierta/);
+assert.doesNotMatch(minuteText, /Sugerida uno/, 'only the selected task');
+step('D51/D53: selección por pulsación larga en sección personalizada y formato común de minuta');
 await openProject(a, 'LT renombrada desde UI');
 await a.click('.structure-more summary');
 await a.click('.structure-more button:has-text("Archivar línea")');

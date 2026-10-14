@@ -247,6 +247,8 @@ class MultiuserBridge:
                                                lambda prompt: self.copilot.ask(actor, user, prompt))
             if record:
                 self._push_minute(actor, record)
+                if any(a.get("auto") and a.get("estado") == "aplicada" for a in record["acciones"]):
+                    self.publish_now(actor, user)  # D46
                 log(f"minuta analizada para {actor[:20]}: {sum(1 for a in record['acciones'] if a.get('auto'))} automáticas, "
                     f"{sum(1 for a in record['acciones'] if not a.get('auto'))} por revisar")
         except Exception as error:
@@ -258,6 +260,7 @@ class MultiuserBridge:
             record = self.minute_inbox.decide(actor, user, decision, self._snapshot(user),
                                               lambda prompt: self.copilot.ask(actor, user, prompt))
             self._push_minute(actor, record)
+            self.publish_now(actor, user)  # D46: approved/undone changes show up without waiting 5 minutes
         except Exception as failure:
             error = str(failure)[:200] if isinstance(failure, (KeyError, ValueError)) else "No se pudieron aplicar las decisiones."
             log(f"decisión de minuta de {actor[:20]} falló ({type(failure).__name__})")
@@ -303,6 +306,17 @@ class MultiuserBridge:
                                    "granola": {"ok": bool(self.granola and self.granola.connected(actor)),
                                                "detail": "Granola conectado" if self.granola and self.granola.connected(actor)
                                                else "Granola no conectado", "checkedAt": now, "requestId": request["id"]}})
+
+    def publish_now(self, actor: str, user: dict) -> None:
+        """D46: publish this user's snapshot right after a minute changed their tasks."""
+        if not self.publish_snapshot:
+            return
+        try:
+            with using_root(user["rootProjectId"]):
+                self.publish_snapshot(self.user_base(actor), self.token, user["vikunjaToken"],
+                                      user.get("vikunjaUrl", "http://127.0.0.1:3456"))
+        except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
+            log(f"publicación inmediata de {actor[:20]} falló ({type(error).__name__}); queda para el ciclo normal")
 
     def publish_all(self, actors: list[str]) -> int:
         published = 0

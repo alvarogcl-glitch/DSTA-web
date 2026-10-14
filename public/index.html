@@ -61,7 +61,10 @@ const selections={portfolio:new Set(),upcoming:new Set(),cata:new Set()},selecte
 const selectionPanels={portfolio:'#projects',upcoming:'#upcoming',cata:'#cata'};
 let selectMode=null;
 const selectedLabel=count=>`${count} ${count===1?'seleccionada':'seleccionadas'}`;
+const customGroup=group=>/^custom-/.test(group);
+const groupSet=group=>(selections[group]??=new Set());
 function selectableIds(group){
+ if(customGroup(group))return (panelSets[group+'-open']||[]).map(t=>String(t.id));
  if(group==='portfolio')return projects.map(p=>String(p.id));
  if(group==='cata')return (panelSets['cata-open']||[]).map(t=>String(t.id));
  return [...(panelSets.upcoming||[]),...(panelSets.overdue||[])].map(t=>String(t.id));
@@ -75,7 +78,9 @@ function updateSelection(){
    item.classList.toggle('selected',selected);
    item.setAttribute(item.tagName==='BUTTON'?'aria-pressed':'aria-selected',String(selected));
   });
-  $(selectionPanels[group]).closest('.panel').classList.toggle('selecting',selectMode===group);
+  const panel=selectionPanels[group]?$(selectionPanels[group]):document.querySelector('[data-custom-section="'+group.slice(7)+'"]');
+  panel?.closest('.panel').classList.toggle('selecting',selectMode===group);
+  if(customGroup(group)){const button=panel?.querySelector('.dsta-custom-minute');if(button)button.textContent=chosen.size?`Generar minuta (${selectedLabel(chosen.size)})`:'Generar minuta'}
  }
  const portfolio=$('#portfolio-minute'),upcoming=$('#upcoming-minute'),cata=$('#cata-minute');
  portfolio.disabled=selections.portfolio.size===0;
@@ -87,7 +92,7 @@ function updateSelection(){
 function toggleSelection(group,id){
  id=String(id);
  if(!selectableIds(group).includes(id))return;
- const chosen=selections[group];
+ const chosen=groupSet(group);
  if(chosen.has(id))chosen.delete(id);else chosen.add(id);
  updateSelection();
 }
@@ -157,24 +162,36 @@ function portfolioMinute(){
  if(!chosen.length)return;
  exitSelectMode();
  const blocks=chosen.map(p=>{
-  const lines=openTasks(tasks.filter(t=>String(t.project_id)===String(p.id))).map(t=>'- #'+t.id+' '+t.title);
+  const lines=openTasks(tasks.filter(t=>String(t.project_id)===String(p.id))).map(t=>minuteLine(t));
   return '###### #'+p.title+'\n\n'+(lines.join('\n')||'-');
  });
  minuteView('Minuta · Portafolio','Portafolio PMO-DSTA - '+minuteDate()+'\n\n'+blocks.join('\n\n'));
 }
-const chosenOrAll=(group,list)=>selections[group].size?list.filter(t=>selections[group].has(String(t.id))):list;
+const chosenOrAll=(group,list)=>{const chosen=selections[group]??=new Set();return chosen.size?list.filter(t=>chosen.has(String(t.id))):list};
+// D53: one line format for every generated minute (owner, date, dependency, status and, when the
+// section has it on, the AI summary). Unknown fields are left out instead of printing "Por confirmar".
+function minuteLine(t,ai=false){
+ const parts=['#'+t.id+' '+t.title];
+ if(!missing(t.owner))parts.push('Responsable: '+t.owner);
+ if(!missing(t.date))parts.push('Fecha: '+displayDate(t.date));
+ if(!missing(t.dependency))parts.push('Dependencia: '+t.dependency);
+ parts.push('Estado: '+(t.done?'Completada':(dayOffset(t.date)??0)<0?'Vencida':'Abierta'));
+ const summary=ai&&(window.__dstaAiSummaries||{})[String(t.id)]?.summary;
+ return '- '+parts.join(' · ')+(summary?'\n  Resumen IA: '+summary:'');
+}
+window.DstaMinute={line:minuteLine,chosenOrAll,exitSelectMode:()=>exitSelectMode()};
 function upcomingMinute(){
  const soon=chosenOrAll('upcoming',panelSets.upcoming||[]),overdue=chosenOrAll('upcoming',panelSets.overdue||[]);
  if(!soon.length&&!overdue.length)return;
  exitSelectMode();
- const line=t=>'- #'+t.id+' '+t.title+' · '+displayDate(t.date)+' · '+t.owner,blocks=[];
+ const line=t=>minuteLine(t),blocks=[];
  if(soon.length)blocks.push('###### Por vencer\n\n'+soon.map(line).join('\n'));
  if(overdue.length)blocks.push('###### Vencidas\n\n'+overdue.map(line).join('\n'));
  minuteView('Minuta · Fechas próximas','Fechas próximas PMO-DSTA - '+minuteDate()+'\n\n'+blocks.join('\n\n'));
 }
 function cataMinute(){
  exitSelectMode();
- const items=chosenOrAll('cata',openTasks(tasks.filter(t=>cataReason(t)))),body=taskLines(items);
+ const items=chosenOrAll('cata',openTasks(tasks.filter(t=>cataReason(t)))),body=items.map(t=>minuteLine(t,true)).join('\n');
  minuteView('Minuta · Cata 1-1','Cata 1-1 - '+minuteDate()+'\n\n'+(body?body+'\n\n':'')+'Otros temas tratados:\n\n- ');
 }
 async function copyMinute(){
@@ -183,7 +200,7 @@ async function copyMinute(){
  try{await navigator.clipboard.writeText(field.value);status.textContent='Texto copiado'}
  catch{field.select();document.execCommand('copy');status.textContent='Texto copiado'}
 }
-const selectGroupFor=context=>({'cata-open':'cata',upcoming:'upcoming',overdue:'upcoming'})[context]||'';
+const selectGroupFor=context=>({'cata-open':'cata',upcoming:'upcoming',overdue:'upcoming'})[context]||(/^custom-.+-open$/.test(context)?context.slice(0,-5):'');
 function priorityCard(t,context,note,overdue=false){const review=context==='cata-open'?'<span class="review-note"><b>Para revisar con Cata:</b> '+esc(cataReview(t))+'</span>':'',group=selectGroupFor(context),selectable=group?' data-select-group="'+group+'" data-select-id="'+esc(t.id)+'"':'';return '<button type="button" class="priority-card" data-task="'+esc(t.id)+'" data-context="'+esc(context)+'"'+selectable+'><span class="due '+(overdue?'overdue':'')+'">#'+esc(t.id)+' · '+esc(note)+'</span><strong>'+esc(t.title)+'</strong>'+review+'<small>'+esc(t.project)+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>'}
 function renderPriority(){
  const dated=tasks.filter(t=>!t.done).map(t=>({task:t,days:dayOffset(t.date)})).filter(x=>x.days!==null).sort((a,b)=>a.days-b.days||a.task.id-b.task.id);
@@ -336,7 +353,7 @@ document.addEventListener('click',e=>{
  const selectable=e.target.closest('[data-select-group]'),clear=e.target.closest('[data-select-clear]');
  // El clic que cierra una mantención larga no debe alternar ni salir del modo.
  if(suppressLongPressClick){suppressLongPressClick=false;return}
- if(clear){selections[clear.dataset.selectClear].clear();updateSelection();return}
+ if(clear){groupSet(clear.dataset.selectClear).clear();updateSelection();return}
  if(selectMode){
   if(selectable?.dataset.selectGroup===selectMode)return toggleSelection(selectMode,selectable.dataset.selectId);
   // Un clic fuera de controles (espacio vacío, otra sección) cierra el modo selección.

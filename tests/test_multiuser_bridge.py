@@ -136,7 +136,7 @@ class MinuteInboxBridgeTest(unittest.TestCase):
                 return minute["source_id"] == "ya-analizada"
             def process(self, actor, user, minute, snapshot, ask):
                 analysed.append((actor, minute["source_id"], ask("p")))
-                return {"id": "g-1", "acciones": [{"auto": True}, {"auto": False}], "texto": "privado"}
+                return {"id": "g-1", "acciones": [{"auto": True, "estado": "aplicada"}, {"auto": False}], "texto": "privado"}
             def decide(self, actor, user, decision, snapshot, ask):
                 decided.append((actor, decision["minuteId"]))
                 return {"id": "g-1", "acciones": [], "texto": "privado"}
@@ -160,19 +160,22 @@ class MinuteInboxBridgeTest(unittest.TestCase):
 
         granola = Granola()
         granola.ready = {"demo-a"}
+        published = []
         bridge = mb.MultiuserBridge(BASE, "bridge-token", load_user=USERS.get, request_json=request_json, process_job=None,
                                     finish_job=None, users_dir=Path("C:/tmp/x"), granola=granola, copilot=FakeCopilot(),
-                                    minute_inbox=FakeInbox())
+                                    minute_inbox=FakeInbox(), publish_snapshot=lambda base, token, vk, url: published.append(vk))
         bridge.sync_granola(["demo-a"])
         self.assertEqual(analysed, [("demo-a", "nueva", "respuesta-demo-a")], "solo la nueva, con el copiloto del usuario")
         minute_posts = [p for u, p in posts if u.endswith("/api/bridge/minute")]
         self.assertEqual(len(minute_posts), 2, "importación inicial + resultado del análisis (la ya analizada no se pisa)")
         self.assertNotIn("texto", minute_posts[-1], "el texto de la minuta no sale de la VM")
+        self.assertEqual(published, ["token-de-A"], "D46: an automatic change is published right away")
         posts.clear()
         bridge.dispatch_once()
         self.assertEqual(decided, [("demo-a", "g-1")])
         done = [p for u, p in posts if u.endswith("/api/bridge/decision-done")]
         self.assertEqual(done, [{"id": "d1"}])
+        self.assertEqual(published, ["token-de-A", "token-de-A"], "D46: a decision is published right away too")
 
 
 class SummaryBridgeTest(unittest.TestCase):

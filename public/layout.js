@@ -71,7 +71,14 @@
     minute.addEventListener('click', () => customMinute(section.id));
     heading.append(title, minute);
     const list = Object.assign(document.createElement('div'), { className: 'priority-list dsta-custom-list' });
-    element.append(heading, list);
+    // D51: same selection hint as the original panels (shown while the section is in selection mode).
+    const hint = Object.assign(document.createElement('div'), { className: 'select-hint' });
+    hint.setAttribute('role', 'status');
+    const clear = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Quitar selección' });
+    clear.dataset.selectClear = `custom-${section.id}`;
+    hint.append(Object.assign(document.createElement('span'), {
+      textContent: 'Modo selección para minuta · toca tareas para sumarlas o quitarlas · toca un espacio vacío para salir' }), clear);
+    element.append(heading, hint, list);
     return element;
   }
 
@@ -117,9 +124,11 @@
   function customMinute(id) {
     const section = layout?.sections.find(s => s.id === id);
     if (!section || typeof minuteView !== 'function') return;
-    const open = (panelSets[`custom-${id}-open`] || []);
-    const summaries = window.__dstaAiSummaries || {};
-    const lines = open.map(t => `- #${t.id} ${t.title}` + (section.ai && summaries[String(t.id)]?.summary ? `\n  ${summaries[String(t.id)].summary}` : ''));
+    // D51: long-press selection like the original panels (none selected = all); D53: common line format.
+    const minute = window.DstaMinute;
+    const open = minute.chosenOrAll(`custom-${id}`, panelSets[`custom-${id}-open`] || []);
+    minute.exitSelectMode();
+    const lines = open.map(t => minute.line(t, Boolean(section.ai)));
     minuteView(`Minuta · ${section.title}`, `${section.title} - ${typeof minuteDate === 'function' ? minuteDate() : ''}\n\n${lines.join('\n') || '-'}`);
   }
 

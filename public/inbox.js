@@ -125,7 +125,7 @@
         ${minute.antecedentes?.length ? `<details><summary>Antecedentes · ${minute.antecedentes.length}</summary><ul>${minute.antecedentes.map(item => `<li>${esc(item)}</li>`).join('')}</ul></details>` : ''}
         ${minute.errorDecision ? `<p class="dsta-inbox-error">${esc(minute.errorDecision)}</p>` : ''}
         ${decidable(minute).length ? `<div class="dsta-inbox-submit"><button type="button" data-submit="${esc(minute.id)}"${chosen && !minute.aplicando ? '' : ' disabled'}>${minute.aplicando ? 'Aplicando en Vikunja… (las instrucciones pueden tardar 1-2 min)' : `Enviar (${chosen})`}</button></div>` : ''}
-        ${discarded(minute) ? '<p class="muted">Descartada por tu instrucción. No se realizarán nuevas acciones con esta minuta.</p>' : `<div class="dsta-inbox-discard"><button type="button" data-discard="${esc(minute.id)}"${minute.aplicando ? ' disabled' : ''}>No hacer nada · descartar minuta</button><p class="muted">Quita la minuta de las pendientes y descarta sus propuestas. Lo ya aplicado se conserva.</p></div>`}
+        ${discarded(minute) ? '<p class="muted">Descartada por tu instrucción. No se realizarán nuevas acciones con esta minuta.</p>' : `<div class="dsta-inbox-discard"><button type="button" data-discard="${esc(minute.id)}"${minute.aplicando ? ' disabled' : ''}>No hacer nada · descartar minuta</button><p class="muted">Quita la minuta de las pendientes y descarta sus propuestas. <b>No revierte lo ya aplicado automáticamente</b>: para deshacer uno de esos cambios, usa «Modificar» en ese cambio antes de descartar (por ejemplo: «elimina esta tarea»).</p></div>`}
         <p class="muted dsta-inbox-source">Copia guardada: ${esc(minute.minuta)}</p>
       </div>`;
     }

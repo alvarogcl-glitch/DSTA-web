@@ -17,6 +17,7 @@ const context = {
   minuteDate: () => '25-09-2026',
   minuteView: (...args) => views.push(args),
   exitSelectMode: () => {},
+  minuteLine: task => `- #${task.id} ${task.title}`,
 };
 const section = script.slice(script.indexOf('function portfolioMinute(){'), script.indexOf('const chosenOrAll='));
 vm.runInNewContext(`${section}\nportfolioMinute()`, context);
@@ -45,6 +46,9 @@ const minuteContext = {
   openTasks: list => list.filter(task => !task.done),
   taskLines: list => list.map(task => `#${task.id} ${task.title}`).join('\n\n'),
   displayDate: value => value,
+  missing: value => !value,
+  dayOffset: value => (value === '2026-09-01' ? -5 : 3),
+  window: {},
   minuteDate: () => '28-09-2026',
   exitSelectMode: () => {},
   minuteView: (...args) => views.push(args),
@@ -56,13 +60,14 @@ const runMinute = name => {
 };
 let text = runMinute('cataMinute');
 assert.match(text, /#5 Revisar con Cata/);
+assert.match(text, /- #5 Revisar con Cata · Responsable: Álvaro · Fecha: 2026-10-01 · Estado: Abierta/, 'D53: common minute line');
 assert.doesNotMatch(text, /#6|#7/);
 minuteContext.selections.cata.clear();
 assert.match(runMinute('cataMinute'), /#5 [\s\S]*#6 /, 'without selection the Cata minute keeps every open topic');
 
 minuteContext.selections.upcoming.add('6');
 text = runMinute('upcomingMinute');
-assert.match(text, /Vencidas[\s\S]*#6 Otro tema Cata/);
+assert.match(text, /Vencidas[\s\S]*#6 Otro tema Cata · Responsable: Álvaro · Fecha: 2026-09-01 · Estado: Vencida/);
 assert.doesNotMatch(text, /#5|Por vencer/);
 minuteContext.selections.upcoming.clear();
 assert.match(runMinute('upcomingMinute'), /Por vencer[\s\S]*#5[\s\S]*Vencidas[\s\S]*#6/);
