@@ -134,7 +134,12 @@
   }
   function attach(){
     if(!ready)return;
-    const field=document.querySelector('#minute-text');if(!field||field.closest('.manual-editor'))return;
+    // Every "Generar minuta" re-renders #detail-body with a new #minute-text: attach once per field.
+    // (#detail-body itself keeps no marker, or only the first minute of the page got the editor.)
+    const body=document.querySelector('#detail-body'),field=document.querySelector('#minute-text');
+    if(!field){body?.classList.remove('manual-editor');return;}
+    if(field.dataset.manualAttached)return;
+    field.dataset.manualAttached='1';
     const title=document.querySelector('#detail-title').textContent;
     editor(field.parentElement,newDraft(title,field.value),field,document.querySelector('#copy-minute'));
   }
