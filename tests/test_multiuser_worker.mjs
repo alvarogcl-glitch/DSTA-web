@@ -386,4 +386,9 @@ assert.equal((await call('/api/task-actions', { method: 'POST', body: watchCompl
 assert.equal((await call('/api/preferences/layout', { headers: watch })).status, 401, 'nothing else is reachable with it');
 delete env.DASHBOARD_USER; delete env.DASHBOARD_PASSWORD;
 
+// 18. Cutover check: the owner box reports the same code version as the Worker.
+assert.equal((await call('/api/bridge/runtime')).status, 401);
+const runtime = await (await call('/api/bridge/runtime', { headers: { authorization: 'Bearer bridge-test' } })).json();
+assert.equal(runtime.ownerBox, runtime.worker);
+
 console.log('Multiuser accounts mode: login, per-user boxes, bridge actor routing, copilot/actions/minutes isolation, CSRF, logout, invitations and rate limit passed');

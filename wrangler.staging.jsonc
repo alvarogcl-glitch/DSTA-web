@@ -15,6 +15,10 @@
   "vars": {
     "AUTH_MODE": "accounts"
   },
+  // Ensayo F6: KV con copia del snapshot de producción para el cajón del dueño (pmo-dsta).
+  "kv_namespaces": [
+    { "binding": "DASHBOARD_DATA", "id": "1cb6b0e992ef4e7880e87213b27937c4" }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

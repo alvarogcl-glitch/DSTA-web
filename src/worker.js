@@ -20,6 +20,9 @@ function json(value, status = 200) {
 
 // "pmo-dsta" is the single-user (legacy/production) box; in accounts mode each user has its own.
 const LEGACY_BOX = "pmo-dsta";
+// Code marker. A Durable Object under constant traffic can keep running the previous code for a
+// while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
+const CODE_VERSION = "multiusuario-2026-10-14";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -1354,6 +1357,8 @@ export class DashboardChatQueue extends DurableObject {
     return storage.get("data:summaries");
   }
 
+  codeVersion() { return CODE_VERSION; }
+
   async dashboard() {
     const snapshot = await this.snapshot();
     if (!snapshot) return null;
@@ -1632,6 +1637,12 @@ export default {
       "/icons/dsta-192.png", "/icons/dsta-512.png", "/icons/dsta-maskable-512.png",
     ]).has(url.pathname) && ["GET", "HEAD"].includes(request.method);
 
+    if (url.pathname === "/api/bridge/runtime" && request.method === "GET") {
+      if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
+      let box = null;
+      try { box = await chatStub(env, LEGACY_BOX).codeVersion(); } catch { box = "anterior"; }
+      return json({ worker: CODE_VERSION, ownerBox: box });
+    }
     let box = LEGACY_BOX;
     let session = null;
     // D71: device access for the owner's Pixel Watch, which sends the dashboard's Basic credential.
