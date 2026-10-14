@@ -27,11 +27,12 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 import minute_inbox as mi  # noqa: E402
-from granola_user import inbox_record  # noqa: E402
+from minute_sources import inbox_record  # noqa: E402
 
 ACTOR_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _module_lock = threading.Lock()
 _store_lock = threading.Lock()
+_analysis_locks: dict[tuple[str, str], threading.Lock] = {}
 
 
 def user_vk(user: dict):
@@ -97,6 +98,7 @@ def _tasks_block(snapshot: dict | None) -> str:
 
 def _minute_block(minute: dict) -> str:
     return (f"Minuta «{minute.get('title') or minute.get('titulo', '')}» ({minute.get('date') or minute.get('fecha', '')})\n"
+            f"Origen: {minute.get('source') or 'Granola'}\nContexto seleccionado: {json.dumps(minute.get('context') or {}, ensure_ascii=False)}\n"
             f"Resumen:\n{minute.get('summary', '')}\n\nNotas:\n{minute.get('private_notes', '')}")
 
 
@@ -105,7 +107,7 @@ def analysis_prompt(minute: dict, snapshot: dict | None) -> str:
     rules = rules[rules.index("Extrae hechos"):]
     rules = (rules.replace("Si la reunión no tiene relación con PMO-DSTA", "Si la reunión no tiene relación con sus líneas de trabajo")
              .replace("Álvaro", "la persona"))
-    return ("Eres el analista que reconcilia las minutas de Granola de UNA persona con sus líneas de trabajo y tareas "
+    return ("Eres el analista que reconcilia las minutas de UNA persona con sus líneas de trabajo y tareas "
             "en Vikunja. Responde en español. No tienes herramientas: usa SOLO el contexto de abajo; Vikunja es la fuente "
             "oficial y la minuta es evidencia de cambios.\n\n"
             f"## Tareas abiertas por línea\n{_tasks_block(snapshot)}\n\n## {_minute_block(minute)}\n\n{rules}")
@@ -168,29 +170,42 @@ def public_record(record: dict) -> dict:
 
 class UserMinuteInbox:
     def __init__(self, users_dir: Path, *, vk_factory: Callable[[dict], Any] = user_vk,
-                 apply: Callable[[dict, dict, Any], None] = mi.apply_action):
+                 apply: Callable[[dict, dict, Any], None] = mi.apply_action,
+                 store_path: Path | None = None, store_engine=mi):
         self.users_dir, self.vk_factory, self.apply = Path(users_dir), vk_factory, apply
+        self.store_path, self.store_engine = store_path, store_engine
 
     def _store(self, actor: str) -> Path:
         if not ACTOR_ID.match(actor or ""):
             raise ValueError("Identificador de usuario inválido")
-        path = self.users_dir / actor / "minute-inbox.json"
+        path = self.store_path or self.users_dir / actor / "minute-inbox.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
     def _get(self, actor: str, record_id: str) -> dict | None:
         with _store_lock:
-            return mi.get_record(self._store(actor), record_id)
+            return self.store_engine.get_record(self._store(actor), record_id)
 
     def _save(self, actor: str, record: dict) -> None:
         with _store_lock:
-            mi.save_record(self._store(actor), record)
+            self.store_engine.save_record(self._store(actor), record)
 
     def is_current(self, actor: str, minute: dict) -> bool:
         record = self._get(actor, inbox_record(minute)["id"])
         return bool(record and (record.get("descartadaEn") or record.get("digest") == str(minute["version"])[:64]))
 
+    def current_record(self, actor: str, minute: dict) -> dict | None:
+        return self._get(actor, inbox_record(minute)["id"])
+
     def process(self, actor: str, user: dict, minute: dict, snapshot: dict | None, ask: Callable[[str], str]) -> dict | None:
+        # The lease can expire while a provider is slow. Serialise by actor+source so the
+        # second delivery observes the saved analysis rather than replacing user decisions.
+        with _store_lock:
+            lock = _analysis_locks.setdefault((actor, inbox_record(minute)['id']), threading.Lock())
+        with lock:
+            return self._process(actor, user, minute, snapshot, ask)
+
+    def _process(self, actor: str, user: dict, minute: dict, snapshot: dict | None, ask: Callable[[str], str]) -> dict | None:
         """Analyse one imported Granola minute like production; None if already current or discarded."""
         base = inbox_record(minute)
         previous = self._get(actor, base["id"])
@@ -205,9 +220,10 @@ class UserMinuteInbox:
                   "antecedentes": plan["antecedentes"], "acciones": plan["acciones"], "vista": False,
                   "texto": _minute_block(minute)}
         scope_actions(record["acciones"], snapshot)
-        vk = self.vk_factory(user) if any(mi.is_evident(a) for a in record["acciones"]) else None
+        auto_allowed = base["source"] == "Granola"
+        vk = self.vk_factory(user) if auto_allowed and any(mi.is_evident(a) for a in record["acciones"]) else None
         for action in record["acciones"]:
-            if mi.is_evident(action):
+            if auto_allowed and mi.is_evident(action):
                 action["auto"] = True
                 self.apply(action, record, vk)
                 if action["estado"] == "error":
@@ -240,6 +256,8 @@ class UserMinuteInbox:
             action = by_id.get(str(choice.get("actionId", "")))
             instruction = mi.text_field(choice.get("instruccion"), 1500)
             if action and choice.get("decision") == "instruccion" and instruction and ask:
+                if record.get('source') == 'Manual-Dashboard':
+                    action['instruccionId'] = str(decision.get('id') or uuid.uuid5(uuid.NAMESPACE_URL, instruction))
                 vk = vk or self.vk_factory(user)
                 context = (f"Contexto (no tienes herramientas, usa solo esto):\n## Tareas abiertas por línea\n"
                            f"{_tasks_block(snapshot)}\n\n## {record.get('texto', '')}\n\n")
@@ -260,7 +278,12 @@ class UserMinuteInbox:
             if action["fecha_objetivo"] and not mi.DATE_RE.match(action["fecha_objetivo"]):
                 action["fecha_objetivo"] = ""
             vk = vk or self.vk_factory(user)
-            self.apply(action, record, vk)
+            if record.get('source') == 'Manual-Dashboard' and self.apply is mi.apply_action:
+                self.apply(action, record, vk, checkpoint=lambda: self._save(actor, record))
+            else:
+                self.apply(action, record, vk)
+            # Save each approved action, so failure of a later action cannot lose its outcome.
+            self._save(actor, record)
         record["estado"] = mi.record_status(record)
         record["actualizadaEn"] = mi.now()
         self._save(actor, record)

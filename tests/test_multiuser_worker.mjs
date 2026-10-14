@@ -146,6 +146,26 @@ assert.deepEqual((await (await call('/api/minutes', { cookie: a })).json()).minu
 assert.equal((await call('/api/assistant', { method: 'POST', cookie: b, body: { message: 'x' }, headers: { origin: 'https://attacker.example' } })).status, 403);
 assert.equal((await call('/api/assistant', { method: 'POST', cookie: b, body: { message: 'x' }, headers: { noOrigin: '1' } })).status, 403);
 
+// Manual minutes share account authentication, origin checks and actor routing.
+const manualId=crypto.randomUUID();
+const manualDraft={id:manualId,revision:0,operationId:crypto.randomUUID(),title:'Manual A',date:'2026-10-14T12:00:00Z',content:'Acuerdo QA',context:{projectIds:[3],taskIds:[30],sections:['QA']}};
+const manual=(cookie,actor,path='',body,headers={})=>call('/api/manual-minutes'+path,{cookie,method:body?'POST':'GET',body,headers:{'x-dsta-actor':actor,...headers}});
+assert.equal((await manual(undefined,'demo-a')).status,401);
+assert.equal((await manual(a,'demo-b','',manualDraft)).status,409,'stale tab actor rejected');
+assert.equal((await manual(a,'demo-a','',manualDraft,{origin:'https://foreign.example'})).status,403);
+assert.equal((await manual(a,'demo-a','',{...manualDraft,content:'x'.repeat(60001)})).status,400);
+assert.equal((await manual(a,'demo-a','',manualDraft)).status,200);
+assert.equal((await (await manual(a,'demo-a')).json()).drafts[0].content,'Acuerdo QA');
+assert.equal((await (await manual(b,'demo-b')).json()).drafts.length,0);
+assert.notEqual((await (await manual(a,'demo-a')).json()).recoveryKey,(await (await manual(b,'demo-b')).json()).recoveryKey);
+assert.equal((await manual(b,'demo-b','/submit',{id:manualId,revision:1})).status,404);
+assert.equal((await manual(a,'demo-a','/submit',{id:manualId,revision:1})).status,202);
+assert.ok((await (await bridge('/api/bridge/dispatch')).json()).pending['demo-a'].manual);
+assert.equal((await (await bridge('/api/bridge/manual-next','demo-b')).json()).job,null);
+const manualJob=(await (await bridge('/api/bridge/manual-next','demo-a')).json()).job;
+assert.equal(manualJob.id,manualId);
+assert.equal((await call('/api/bridge/manual-done',{method:'POST',body:{id:manualId,attempt:manualJob.attempt}})).status,401);
+
 // 9. Logout revokes only that session.
 assert.equal((await call('/api/auth/logout', { method: 'POST', cookie: a })).status, 204);
 assert.equal((await call('/api/dashboard', { cookie: a })).status, 401);

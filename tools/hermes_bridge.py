@@ -470,8 +470,34 @@ def inbox_store(hermes_home: Path) -> Path:
     return hermes_home / "cache" / "dsta-minute-inbox.json"
 
 
+def owner_manual_inbox(hermes_home: Path):
+    from user_minute_inbox import UserMinuteInbox
+    return UserMinuteInbox(hermes_home / 'cache', store_path=inbox_store(hermes_home),
+                           store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja())
+
+
+def process_manual(job: dict, base_url: str, token: str, hermes_home: Path,
+                   vikunja_token: str, vikunja_url: str, ask: Callable[[str], str]) -> None:
+    """The owner retains the existing inbox store and read-only model provider/backup."""
+    inbox = owner_manual_inbox(hermes_home)
+    minute = {"source": "Manual-Dashboard", "source_id": "manual-" + job['id'],
+              "version": str(job['revision']), "title": job['title'], "date": job['date'],
+              "private_notes": job['content'], "context": job['context']}
+    payload = {'id': job['id'], 'attempt': job['attempt']}
+    try:
+        record = inbox.process('ceo', {}, minute, fetch_dashboard(vikunja_url, vikunja_token), ask)
+        record = record or inbox.current_record('ceo', minute)
+        push_minute(base_url, token, record)
+        payload['minuteId'] = record['id']
+    except Exception as failure:
+        print(f"Minuta manual no procesada ({type(failure).__name__})", flush=True)
+        payload['error'] = True
+    request_json(f"{base_url}/api/bridge/manual-done", token=token, method='POST', payload=payload, timeout=40)
+
+
 def push_minute(base_url: str, token: str, record: dict) -> None:
-    request_json(f"{base_url}/api/bridge/minute", token=token, method="POST", payload=record, timeout=40)
+    public = {key: value for key, value in record.items() if key != 'texto'}
+    request_json(f"{base_url}/api/bridge/minute", token=token, method="POST", payload=public, timeout=40)
 
 
 _snapshot_lock = threading.Lock()
@@ -514,8 +540,13 @@ def process_decision(decision: dict, base_url: str, token: str, hermes_home: Pat
     error = ""
     try:
         discard = decision.get("decision") == "descartar"
-        record = minute_inbox.apply_decision(inbox_store(hermes_home), decision,
-                                             None if discard else minute_inbox.load_vikunja(), ask)
+        saved = minute_inbox.get_record(inbox_store(hermes_home), str(decision.get('minuteId', '')))
+        if saved and saved.get('source') == 'Manual-Dashboard':
+            record = owner_manual_inbox(hermes_home).decide('ceo', {}, decision,
+                      None if discard else fetch_dashboard(vikunja_url, vikunja_token), ask)
+        else:
+            record = minute_inbox.apply_decision(inbox_store(hermes_home), decision,
+                                                 None if discard else minute_inbox.load_vikunja(), ask)
         push_minute(base_url, token, record)
         if not discard:
             publish_snapshot(base_url, token, vikunja_token, vikunja_url)
@@ -824,8 +855,10 @@ def run(*, once: bool, env_file: Path | None) -> int:
             action_polling(not once, dashboard_url, bridge_token, hermes_cli, hermes_home,
                            hermes_provider, hermes_model, vikunja_token, vikunja_url, claude_cli, claude_model,
                            poll_kind="label"), ThreadPoolExecutor(max_workers=1) as summaries, ThreadPoolExecutor(max_workers=1) as granola, \
-            ThreadPoolExecutor(max_workers=1) as checks, ThreadPoolExecutor(max_workers=1) as chats:
+            ThreadPoolExecutor(max_workers=1) as checks, ThreadPoolExecutor(max_workers=1) as chats, \
+            ThreadPoolExecutor(max_workers=1) as manuals:
         chat_future: Future | None = None
+        manual_future: Future | None = None
         summary_future: Future | None = None
         granola_future: Future | None = None
         next_granola = time.monotonic() + GRANOLA_FIRST_CHECK_SECONDS
@@ -872,7 +905,16 @@ def run(*, once: bool, env_file: Path | None) -> int:
                         return 0
                 chat_busy = chat_future is not None and not chat_future.done()
                 chat_query = "chat&chatBusy=1" if chat_busy else "chat"
+                if manual_future is not None and not manual_future.done():
+                    chat_query += '&manualBusy=1'
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind={chat_query}", token=bridge_token)
+                if result.get('manual'):
+                    args = (result['manual'], dashboard_url, bridge_token, hermes_home, vikunja_token, vikunja_url,
+                            analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model, claude_cli, claude_model))
+                    if once:
+                        process_manual(*args)
+                        return 0
+                    manual_future = manuals.submit(process_manual, *args)
                 if result.get("decision"):
                     # Instructions call the model, so decisions run beside the hourly Granola work.
                     granola.submit(process_decision, result["decision"], dashboard_url, bridge_token, hermes_home,

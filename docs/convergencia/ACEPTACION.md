@@ -68,3 +68,18 @@ Guardar por entrega: comandos/resultados, fixture y ambiente, capturas, timestam
 - Autorización explícita de publicar el resultado concreto y ejecutar el corte.
 
 La aprobación de un flujo no sustituye la autorización del corte. Cuando exista autorización suficiente de la entrega en la sesión, no volver a pedirla.
+
+
+## A18 · Minutas manuales (E13, 14-10-2026)
+
+Autorizado para implementar/probar localmente, sin despliegue. Evidencia en `evidencia/minutas-manuales/` y contrato en [MINUTAS_MANUALES.md](../MINUTAS_MANUALES.md).
+
+- Generar la plantilla de la selección original, editar/copiar y conservar su texto para Granola.
+- Crear minuta vacía o desde plantilla; editar título/fecha/hora; conservar el contexto; negrita, cursiva, viñetas y numeración en Markdown con vista previa.
+- Guardar sin IA, recargar/recuperar, perder red y recuperar cambios locales cifrados. Bloquear sobrescritura de versiones concurrentes y permitir conservar la versión local como copia.
+- Enviar dos veces/reintentar resultado incierto: una revisión/una bandeja, publicación confirmada; fallo IA visible sin cambios en Vikunja. Puente caído deja trabajo recuperable.
+- Manual→analista existente→propuestas; incluso confianza alta no escribe antes de aprobar. Aprobar desde la bandeja refleja un snapshot nuevo con fuente propia. Escrituras antes de una confirmación perdida no duplican notas/creaciones.
+- A/B: separación de drafts, claves, trabajos y propuestas; actor de otra pestaña rechazado; raíz/token propios; cuenta del dueño usa su inbox existente.
+- Desktop/móvil revisados localmente. Pendientes: aceptación visual del usuario, IA real, PWA/dispositivo real, verificación remota QA y copia entre dispositivos.
+
+No registrar E13 como verificado en piloto/producción ni como aceptado por el usuario hasta ejecutar esos recorridos autorizados.

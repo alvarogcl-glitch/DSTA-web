@@ -259,18 +259,4 @@ def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_d
         return records
 
 
-def inbox_record(record: dict) -> dict:
-    """Minute for the user's dashboard inbox: title, date and summary only (no private notes)."""
-    source = str(record["source_id"])
-    return {
-        "id": "g-" + hashlib.sha256(source.encode()).hexdigest()[:32],
-        "sourceId": source[:200],
-        "digest": str(record["version"])[:64],
-        "titulo": str(record.get("title") or "Reunión sin título")[:200],
-        "fecha": str(record.get("date") or "")[:10],
-        "detectadaEn": datetime.now(timezone.utc).isoformat(),
-        "resumen": str(record.get("summary") or "")[:800],
-        "acciones": [],
-        "estado": "procesada",
-        "vista": False,
-    }
+from minute_sources import inbox_record  # compatible import for existing callers

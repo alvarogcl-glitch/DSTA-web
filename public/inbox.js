@@ -21,9 +21,9 @@
 
   const panel = document.createElement('aside');
   panel.id = 'dsta-inbox';
-  panel.setAttribute('aria-label', 'Minutas Granola');
+  panel.setAttribute('aria-label', 'Minutas');
   panel.hidden = true;
-  panel.innerHTML = '<header><div><span class="kicker">GRANOLA · REVISIÓN CADA HORA</span><strong>Minutas nuevas</strong></div>' +
+  panel.innerHTML = '<header><div><span class="kicker">MINUTAS · REVISIÓN DE PROPUESTAS</span><strong>Minutas nuevas</strong></div>' +
     '<button type="button" id="dsta-inbox-close" aria-label="Cerrar notificaciones">×</button></header>' +
     '<div id="dsta-inbox-body" aria-live="polite"><p class="muted">Cargando…</p></div>';
   document.body.append(panel);
@@ -132,7 +132,7 @@
     return `<section class="dsta-inbox-minute${attention(minute) ? ' attention' : ''}">
       <button type="button" class="dsta-inbox-minute-head" data-open="${esc(minute.id)}" aria-expanded="${open}">
         <span>${chip}${minute.vista ? '' : '<span class="dsta-inbox-dot" aria-label="No vista"></span>'}</span>
-        <strong>${esc(minute.titulo)}</strong>
+        <strong>${esc(minute.titulo)} <small>${esc(minute.source || "Granola")}</small></strong>
         <small>${esc(minute.fecha || '')} · ${automatic.length} aplicadas · ${proposals.length} por revisar</small>
       </button>${detail}</section>`;
   }
@@ -257,6 +257,7 @@
   }
 
   bell.addEventListener('click', () => openPanel(panel.hidden));
+  window.addEventListener('dsta-minutes-changed', load);
   panel.querySelector('#dsta-inbox-close').addEventListener('click', () => openPanel(false));
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) openPanel(false); });
   body.addEventListener('click', event => {

@@ -373,4 +373,4 @@ document.addEventListener('keydown',e=>{
  if(e.target.matches('[data-project],[data-metric],tr[data-task]')){e.preventDefault();e.target.click()}
 });
 $('#back').addEventListener('click',back);$('#close').addEventListener('click',close);$('#backdrop').addEventListener('click',close);$('#refresh').addEventListener('click',manualRefresh);$('#portfolio-minute').addEventListener('click',portfolioMinute);$('#upcoming-minute').addEventListener('click',upcomingMinute);$('#cata-minute').addEventListener('click',cataMinute);$('#print').addEventListener('click',()=>window.print());['#q','#a','#s','#sort'].forEach(id=>$(id).addEventListener('input',renderRows));refresh();setInterval(refresh,30000);
-</script></body></html>
+</script><script src="/manual-minutes.js" defer></script></body></html>

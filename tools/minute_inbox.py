@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import threading
+import tempfile
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,7 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from task_mutation_lock import task_lock
+from minute_sources import source_label, action_prefix
 
 
 def mutation_scope(vk):
@@ -80,7 +82,18 @@ def save_record(path: Path, record: dict[str, Any]) -> None:
         store = load_store(path)
         store["minutes"][record["id"]] = record
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+        # A power/process failure must leave the last complete inbox available for retry.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as output:
+                temporary = output.name
+                output.write(json.dumps(store, ensure_ascii=False, indent=2))
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 def get_record(path: Path, record_id: str) -> dict[str, Any] | None:
@@ -278,24 +291,33 @@ def with_entry(description: str, heading: str, date: str, note: str, source: str
     return f"{description.rstrip()}\n\n{entry}" if description.strip() else entry
 
 
-def execute(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
+def execute(action: dict[str, Any], minute: dict[str, Any], vk, checkpoint=None) -> str:
     """Lock existing tasks before reading source fields, never while awaiting AI."""
     task_id = action.get("task_id") if action.get("tipo") != "crear" else None
-    with task_lock(mutation_scope(vk), task_id) if task_id else nullcontext():
-        return _execute_locked(action, minute, vk)
+    # Concurrent manual approvals creating the same title share a project transaction.
+    lock_id = task_id or (-action['project_id'] if source_label(minute) == 'Manual-Dashboard' and action.get('project_id') else None)
+    with task_lock(mutation_scope(vk), lock_id) if lock_id else nullcontext():
+        return _execute_locked(action, minute, vk, checkpoint)
 
 
-def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
+def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk, checkpoint=None) -> str:
     """Apply one action in Vikunja, read it back and return a short confirmation."""
     date = minute.get("fecha") or datetime.now().strftime("%Y-%m-%d")
-    source = f"Granola {minute['sourceId']} · {minute['titulo']}"
+    source = f"{source_label(minute)} {minute['sourceId']} · {minute['titulo']}"
+    manual = source_label(minute) == 'Manual-Dashboard'
+    if manual:
+        source += f" · acción {action['id']}"
     operation = action["tipo"]
     if operation == "crear":
         projects = vk.pmo_projects()
         if not any(int(project.get("id") or 0) == action["project_id"] and vk.is_pmo_line(project) for project in projects):
             raise ValueError("La línea indicada no es una línea activa de PMO-DSTA.")
         wanted = slug(action["titulo"])
+        action_key = f"{action_prefix(minute)}-{minute['sourceId']}-{action['id'] if manual else wanted}"
         for task in vk.project_tasks(action["project_id"]):
+            if manual and f'ACTION_KEY: {action_key}' in str(task.get('description') or '').splitlines():
+                action['creada_id'] = task['id']
+                return f"Creada #{task['id']} · {task.get('title', '')}"
             if not task.get("done") and slug(task.get("title", "")) == wanted:
                 raise ValueError(f"Ya existe una tarea abierta con ese título (#{task['id']}).")
         created = vk.pmo_create_task(
@@ -303,8 +325,8 @@ def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
             description=f"Registro inicial {date}: {action['nota']}" if action["nota"] else "",
             owner=action["responsable"], target_date=action["fecha_objetivo"],
             dependency=action["dependencia"], closure_criterion=action["criterio_cierre"],
-            source=f"Granola {minute['sourceId']}",
-            action_key=f"granola-{minute['sourceId']}-{wanted}",
+            source=f"{source_label(minute)} {minute['sourceId']}",
+            action_key=action_key,
         )
         action["creada_id"] = created["task"]["id"]
         return f"Creada #{created['task']['id']} · {action['titulo']}"
@@ -316,10 +338,17 @@ def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
     if operation == "mover":
         if not action["project_id"]:
             raise ValueError("Falta la línea de destino.")
+        if manual and current.get('project_id') == action['project_id']:
+            return f"Movida #{task_id} a la línea {action['project_id']}"
         vk.pmo_move_task(task_id, action["project_id"])
         return f"Movida #{task_id} a la línea {action['project_id']}"
 
     description = str(current.get("description") or "")
+    if manual and f'(Fuente: {source})' in description:
+        # The approved action reached Vikunja before the VM could save its result.
+        # Preserve the checkpoint's original fields for undo; do not append or overwrite again.
+        verb = {'completar': 'Completada', 'comentar': 'Nota registrada en'}.get(operation, 'Actualizada')
+        return f"{verb} #{task_id} · {current.get('title', '')}"
     # What this action changes is remembered so an instruction can undo it later.
     action["antes"] = {"campos": {}, "done": bool(current.get("done")), "title": current.get("title", "")}
     for name, key in (("Responsable", "responsable"), ("Fecha objetivo", "fecha_objetivo"),
@@ -329,13 +358,15 @@ def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
             description = set_field(description, name, action[key])
     # Notes go to the description log (not Vikunja comments) so the dashboard shows them.
     heading = {"completar": "Cierre", "comentar": "Nota"}.get(operation, "Actualización")
-    if action["nota"]:
-        description = with_entry(description, heading, date, action["nota"], source)
+    if action["nota"] or manual:
+        description = with_entry(description, heading, date, action["nota"] or 'Cambio aprobado desde la minuta', source)
     changes: dict[str, Any] = {"description": description}
     if action["titulo"] and operation == "actualizar":
         changes["title"] = action["titulo"]
     if operation == "completar":
         changes["done"] = True
+    if checkpoint:
+        checkpoint()
     vk.update_task_fields(task_id, changes, current=current)
     verified = vk.request("GET", f"/api/v1/tasks/{task_id}")
     if str(verified.get("description") or "") != description or (operation == "completar" and not verified.get("done")):
@@ -344,9 +375,9 @@ def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
     return f"{verb} #{task_id} · {verified.get('title', '')}"
 
 
-def apply_action(action: dict[str, Any], minute: dict[str, Any], vk) -> None:
+def apply_action(action: dict[str, Any], minute: dict[str, Any], vk, checkpoint=None) -> None:
     try:
-        action["resultado"] = execute(action, minute, vk)
+        action["resultado"] = execute(action, minute, vk, checkpoint)
         action["estado"] = "aplicada"
     except Exception as error:  # the error is shown to the user next to the action
         action["resultado"] = f"No se aplicó: {error}"[:400]
@@ -364,14 +395,22 @@ def undo(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
 def _undo_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
     """Revert what this minute's action did: delete the task it created, or remove its log
     entries and restore the fields, title and state it changed."""
-    source = f"Granola {minute['sourceId']}"
+    source = f"{source_label(minute)} {minute['sourceId']}"
+    if source_label(minute) == 'Manual-Dashboard':
+        source += f" · {minute['titulo']} · acción {action['id']}"
     created = re.match(r"Creada #(\d+)", action.get("resultado") or "")
     if action.get("tipo") == "crear" and not action.get("creada_id") and created:
         action["creada_id"] = int(created.group(1))  # records made before creada_id was stored
     if action.get("creada_id"):
         task_id = action["creada_id"]
         task = vk.request("GET", f"/api/v1/tasks/{task_id}")
-        if f"granola-{minute['sourceId']}" not in str(task.get("description") or ""):
+        description = str(task.get('description') or '')
+        if source_label(minute) == 'Manual-Dashboard':
+            prefix = f"ACTION_KEY: {action_prefix(minute)}-{minute['sourceId']}-{action['id']}"
+            owned = any(line == prefix or line.startswith(prefix + '/') for line in description.splitlines())
+        else:
+            owned = f"{action_prefix(minute)}-{minute['sourceId']}" in description
+        if not owned:
             raise ValueError(f"#{task_id} no fue creada por esta minuta; no se elimina.")
         vk.request("DELETE", f"/api/v1/tasks/{task_id}")
         action["creada_id"] = None
@@ -383,7 +422,10 @@ def _undo_locked(action: dict[str, Any], minute: dict[str, Any], vk) -> str:
         raise ValueError("Para revertir un movimiento, indica a qué línea volver.")
     current = vk.request("GET", f"/api/v1/tasks/{task_id}")
     lines = str(current.get("description") or "").replace("\r", "").split("\n")
-    description = "\n".join(line for line in lines if f"(Fuente: {source}" not in line).rstrip()
+    if source_label(minute) == 'Manual-Dashboard':
+        description = '\n'.join(line for line in lines if f'(Fuente: {source})' not in line and f'(Fuente: {source}/' not in line).rstrip()
+    else:
+        description = "\n".join(line for line in lines if f"(Fuente: {source}" not in line).rstrip()
     before = action.get("antes") or {}
     for name, value in (before.get("campos") or {}).items():
         description = set_field(description, name, value) if value is not None else without_line(description, name)
@@ -436,7 +478,12 @@ def apply_instruction(action: dict[str, Any], minute: dict[str, Any], instructio
             operation = normalize_action(raw, index + 1)
             if not operation:
                 continue
+            if source_label(minute) == 'Manual-Dashboard':
+                # Instruction operations must not collide with a1/a2 from the original plan.
+                operation['id'] = f"{action['id']}/{action.get('instruccionId') or slug(instruction)}/{index + 1}"
             results.append(execute(operation, minute, vk))
+            if source_label(minute) == 'Manual-Dashboard' and operation.get('antes') and not action.get('antes'):
+                action['antes'] = operation['antes']
             if operation.get("creada_id") and not action.get("creada_id"):
                 action["creada_id"] = operation["creada_id"]  # later instructions can undo it too
         except Exception as error:

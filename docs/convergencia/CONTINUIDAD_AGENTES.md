@@ -137,3 +137,12 @@ Para implementación visible, mostrar el recorrido del incremento y dejar estado
 ## Mensaje para retomar en otro agente
 
 “Continúa el plan de convergencia DSTA. Lee C:/Users/admin/Documents/DSTA-multiuser/dsta-web-mu/docs/convergencia/PLAN.md y CONTINUIDAD_AGENTES.md, el registro de decisiones y las instrucciones del workspace. Comprueba Git y estado actual. Retoma la primera decisión o entrega pendiente; respeta decisiones previas y conserva producción hasta la autorización correspondiente. Actualiza documentación y evidencia al cerrar cada incremento.”
+
+
+## Incremento posterior: minutas manuales (Codex, 14-10-2026)
+
+Implementación local E13 en `feature/minutas-manuales-dashboard`, desde origin/main 1bd8846, en `C:/Users/admin/Documents/DSTA-multiuser/minutas-manuales-dashboard`. No confundir con la copia operativa main ni cambiar los servicios que la ejecutan. Leer [MINUTAS_MANUALES.md](../MINUTAS_MANUALES.md), registro E13 y evidencia/resultados.json. El usuario prohibió expresamente merge y despliegues en esta entrega.
+
+El código del dueño usa Hermes Bridge sin vault; su ingestión manual viaja en el poll de chat y conserva `hermes/cache/dsta-minute-inbox.json`. Otras cuentas usan el dispatcher y `UserMinuteInbox`. Ambas rutas comparten motor, esquema y revisión humana. Granola mantiene automatismos; Manual-Dashboard siempre propone. Los borradores están en el DO propio y su recuperación local es ciphertext con clave solo disponible tras autenticar esa cuenta.
+
+Estado: verificado local, pendiente revisión/aceptación humana y ensayo de modelo real en QA separado. Próximo paso autorizado no implica publicar: revisar el commit local de esta rama y los escenarios A18. La publicación posterior requiere coordinar Worker/assets y ambos Python, sin nueva migración/secretos; no ejecutar ese paso automáticamente. Nunca usar staging/alvaro o tareas productivas como fixtures.

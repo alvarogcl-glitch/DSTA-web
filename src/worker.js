@@ -452,7 +452,16 @@ async function takeBridgeJob(request, env, box = LEGACY_BOX) {
   if (requestedKind === "action") return chatStub(env, box).fetch("https://chat.internal/actions/next");
   if (requestedKind === "granola") return chatStub(env, box).fetch("https://chat.internal/granola/next");
   const kind = requestedKind === "summary" ? "summary" : "chat";
-  if (kind === "chat") return chatStub(env, box).fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
+  if (kind === "chat") {
+    const stub=chatStub(env,box);
+    const response=await stub.fetch("https://chat.internal/next" + (new URL(request.url).searchParams.get("chatBusy") === "1" ? "?chatBusy=1" : ""));
+    // The owner's bridge has no multiuser vault/dispatcher. Ride on its existing chat poll.
+    if (accountsMode(env) && box===LEGACY_BOX && new URL(request.url).searchParams.get('manualBusy')!=='1') {
+      const manual=await (await stub.fetch('https://chat.internal/manual/next')).json();
+      return json({...await response.json(),manual:manual.job});
+    }
+    return response;
+  }
   return json({ job: await chatStub(env, box).takeSummaryJob() });
 }
 
@@ -773,7 +782,7 @@ async function bridgeBox(request, env, bridgePath, pathActor = null) {
 // F1 dispatcher: a single box remembers which users have pending work, so the bridge makes
 // one poll for N users and only then polls the queues of those users.
 const DISPATCH_BOX = "dispatch";
-const DISPATCH_KINDS = new Set(["chat", "action", "label", "health", "granola"]);
+const DISPATCH_KINDS = new Set(["chat", "action", "label", "health", "granola", "manual"]);
 async function markPending(env, actorId, kind) {
   await chatStub(env, DISPATCH_BOX).fetch(new Request("https://chat.internal/dispatch/mark", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actor: actorId, kind }),
@@ -922,6 +931,7 @@ export class DashboardChatQueue extends DurableObject {
     if (url.pathname.startsWith("/labels/")) return this.labelRequest(request, url);
 
     if (url.pathname.startsWith("/actions/")) return this.actionRequest(request, url);
+    if (url.pathname.startsWith("/manual/")) return this.manualRequest(request, url);
 
     if (url.pathname === "/create" && request.method === "POST") {
       const job = await request.json();
@@ -1064,6 +1074,66 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     return json({ error: "Ruta interna no encontrada." }, 404);
+  }
+
+  async manualRequest(request, url) {
+    // No awaits after the body: synchronous per-user compare/write, including queue state.
+    const body = request.method === 'POST' ? await request.json() : null;
+    const storage = this.ctx.storage.kv, now = Date.now();
+    const entries = () => [...storage.list({prefix:'manual:'})].map(([,v])=>v);
+    const view = d => { const {attempt,leaseUntil,operationId,lastRequest,...visible}=d; return visible; };
+    if (url.pathname === '/manual/list') {
+      let recoveryKey=storage.get('manual-recovery-key');
+      if (!recoveryKey) { recoveryKey=toBase64Url(crypto.getRandomValues(new Uint8Array(32))); storage.put('manual-recovery-key',recoveryKey); }
+      return json({drafts:entries().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(view),recoveryKey});
+    }
+    if (url.pathname === '/manual/next') {
+      const active=entries().find(d=>d.status==='running' && d.leaseUntil>now);
+      if (active) return json({job:null});
+      const d=entries().find(d=>d.status==='queued' || (d.status==='running' && d.leaseUntil<=now));
+      if (!d) return json({job:null});
+      Object.assign(d,{status:'running',attempt:crypto.randomUUID(),leaseUntil:now+900_000});
+      storage.put('manual:'+d.id,d); return json({job:d});
+    }
+    if (!body || !ACTION_UUID.test(body.id || '')) return json({error:'Identificador inválido.'},400);
+    const old=storage.get('manual:'+body.id);
+    if (url.pathname === '/manual/save') {
+      if (Object.keys(body).some(k=>!['id','revision','operationId','title','date','content','context'].includes(k)) ||
+          !ACTION_UUID.test(body.operationId || '') || !Number.isSafeInteger(body.revision) || body.revision<0 ||
+          typeof body.title!=='string' || !body.title.trim() || body.title.length>200 ||
+          typeof body.content!=='string' || body.content.length>60_000 ||
+          typeof body.date!=='string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(body.date) ||
+          !Number.isFinite(Date.parse(body.date)) || new Date(body.date.slice(0,10)).toISOString().slice(0,10)!==body.date.slice(0,10)) return json({error:'Borrador inválido (título, fecha o texto demasiado largo).'},400);
+      const c=body.context;
+      if (!c || Object.keys(c).some(k=>!['taskIds','projectIds','sections'].includes(k)) ||
+          !['taskIds','projectIds'].every(k=>Array.isArray(c[k]) && c[k].length<=500 && c[k].every(id=>Number.isSafeInteger(id)&&id>0)) ||
+          !Array.isArray(c.sections) || c.sections.length>20 || c.sections.some(s=>typeof s!=='string'||s.length>200)) return json({error:'Contexto inválido.'},400);
+      if (old?.operationId===body.operationId) return JSON.stringify(old.lastRequest)===JSON.stringify(body) ? json(view(old)) : json({error:'Identificador reutilizado.'},409);
+      if (old && old.status!=='draft') return json({error:'Esta minuta ya fue enviada. Puedes consultar su estado y sus propuestas.'},409);
+      if ((old?.revision || 0)!==body.revision) return json({error:'El borrador cambió en otra ventana. Recupera la versión guardada antes de editar.'},409);
+      const snapshot=storage.get('data:snapshot');
+      if (c.taskIds.some(id=>!snapshot?.tasks?.some(t=>t.id===id)) || c.projectIds.some(id=>!snapshot?.projects?.some(p=>p.id===id))) return json({error:'Contexto fuera de tu espacio o desactualizado.'},403);
+      if (!old && entries().length>=100) return json({error:'Límite de 100 minutas manuales alcanzado.'},429);
+      const d={...body,revision:body.revision+1,status:'draft',source:'Manual-Dashboard',updatedAt:new Date(now).toISOString(),lastRequest:body};
+      storage.put('manual:'+d.id,d); return json(view(d));
+    }
+    if (!old) return json({error:'Minuta no encontrada.'},404);
+    if (url.pathname === '/manual/submit') {
+      if (body.revision!==old.revision) return json({error:'La versión enviada ya no está vigente.'},409);
+      if (!old.content.trim()) return json({error:'Escribe el contenido de la reunión antes de procesar.'},400);
+      if (['draft','error'].includes(old.status)) {
+        Object.assign(old,{status:'queued',error:'',updatedAt:new Date(now).toISOString()}); storage.put('manual:'+old.id,old);
+      }
+      return json(view(old),202);
+    }
+    if (url.pathname === '/manual/done') {
+      if (old.status!=='running' || old.attempt!==body.attempt || old.leaseUntil<=now) return json({error:'Intento no activo.'},409);
+      const record=body.minuteId && storage.get('minute:'+body.minuteId);
+      if (!body.error && (!record || record.source!=='Manual-Dashboard' || record.sourceId!=='manual-'+old.id || record.digest!==String(old.revision))) return json({error:'Falta la minuta confirmada en la bandeja.'},409);
+      Object.assign(old,{status:body.error?'error':'processed',error:body.error?'No se pudo analizar la minuta. Reintenta con el mismo borrador.':'',minuteId:body.error?'':body.minuteId,updatedAt:new Date(now).toISOString()});
+      storage.put('manual:'+old.id,old); return json({ok:true});
+    }
+    return json({error:'Ruta interna no encontrada.'},404);
   }
 
   async granolaRequest(request, url) {
@@ -1604,6 +1674,8 @@ export default {
       "/api/bridge/minute": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/upsert", box)],
       "/api/bridge/decision-done": ["POST", (req, box) => bridgeMinuteRoute(req, env, "/minutes/decision-done", box)],
       "/api/bridge/granola": ["POST", (req, box) => granolaBridgeUpdate(req, env, box)],
+      "/api/bridge/manual-next": ["GET", (_req, box) => chatStub(env, box).fetch('https://chat.internal/manual/next')],
+      "/api/bridge/manual-done": ["POST", (req, box) => bridgeMinuteRoute(req, env, '/manual/done', box)],
     };
     // Accounts mode: the bridge may name the actor in the path (/u/<actor>/api/bridge/...).
     const prefixed = accounts ? /^\/u\/([a-z0-9][a-z0-9-]{0,62})(\/api\/(?:bridge\/[a-z-]+|ingest))$/.exec(url.pathname) : null;
@@ -1624,6 +1696,7 @@ export default {
     const bridgeRoute = bridgeRoutes[bridgePath];
     if (bridgeRoute) {
       if (request.method !== bridgeRoute[0]) return json({ error: "Método no permitido" }, 405);
+      if (!accounts && bridgePath.startsWith('/api/bridge/manual-')) return json({error:'Requiere modo cuentas.'},404);
       if (!accounts) return bridgeRoute[1](request, LEGACY_BOX);
       const resolved = await bridgeBox(request, env, bridgePath, prefixed ? prefixed[1] : null);
       return resolved.error || bridgeRoute[1](request, resolved.box);
@@ -1718,6 +1791,16 @@ export default {
       return response;
     };
 
+    if (url.pathname === '/api/manual-minutes' || url.pathname === '/api/manual-minutes/submit') {
+      if (!accounts) return json({error:'Requiere modo cuentas.'},404);
+      // A tab opened as A must not send A's notes after another tab logs in as B.
+      if (request.headers.get('x-dsta-actor')!==session.actor.id) return json({error:'La cuenta cambió. Recarga el dashboard para continuar.'},409);
+      if (request.method==='GET' && url.pathname==='/api/manual-minutes') return chatStub(env,box).fetch('https://chat.internal/manual/list');
+      if (request.method!=='POST') return json({error:'Método no permitido.'},405);
+      const parsed=await readJson(request,260_000); if (parsed.error) return parsed.error;
+      const submit=url.pathname.endsWith('/submit');
+      return announce(forwardToChatObject(env,submit?'/manual/submit':'/manual/save',parsed.body,box),submit?'manual':null);
+    }
     if (accounts && url.pathname === "/api/granola/status") {
       return request.method === "GET" ? chatStub(env, box).fetch("https://chat.internal/granola/status") : json({ error: "Método no permitido" }, 405);
     }

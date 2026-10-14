@@ -1,0 +1,62 @@
+{
+  "reference_date": "2026-10-14",
+  "verified_at": "2026-10-14T09:39:00.132101-03:00",
+  "branch": "feature/minutas-manuales-dashboard",
+  "base": "1bd88467b7643f04ff007c904519d4a81daeadaf",
+  "baseline": {
+    "python_tests": 194,
+    "javascript_suites": 17,
+    "result": "passed"
+  },
+  "final": {
+    "python_tests": 202,
+    "javascript_suites": 18,
+    "result": "passed"
+  },
+  "browser": {
+    "result": "passed",
+    "viewports": [
+      "1280x900",
+      "390x844"
+    ],
+    "backend": "real Worker/DO in-memory, real Python bridge/decision engine",
+    "fixtures": "synthetic model and Vikunja; localhost only",
+    "checks": [
+      "original template/copy",
+      "Markdown formatting/preview",
+      "durable reload",
+      "encrypted offline recovery",
+      "local storage failure with confirmed cloud save",
+      "actor isolation",
+      "existing inbox UI approval",
+      "no automatic manual writes",
+      "verified snapshot after human approval"
+    ]
+  },
+  "dry_run": {
+    "result": "passed",
+    "wrangler": "4.147.0",
+    "config": "wrangler.staging.jsonc",
+    "deployed": false
+  },
+  "review": {
+    "diff_check": "passed",
+    "visual": "screenshots inspected, desktop/mobile",
+    "human_acceptance": false
+  },
+  "runtime_changes": false,
+  "production_or_personal_data_writes": false,
+  "pending": [
+    "QA with real model and both bridges",
+    "human UX acceptance",
+    "real mobile/PWA",
+    "cross-device acceptance"
+  ],
+  "screenshots": [
+    "editor-desktop.png",
+    "editor-mobile.png",
+    "inbox-mobile.png",
+    "template-before-desktop.png",
+    "template-before-mobile.png"
+  ]
+}

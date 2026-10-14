@@ -338,3 +338,17 @@ La cita de otro agente es contexto; comprobar la autorización y decisión origi
 13 de octubre de 2026: creados PLAN, MATRIZ_DECISIONES, este registro, ACEPTACION y CONTINUIDAD_AGENTES. Guardada evidencia de la comparación previa y puntos de entrada para reanudar. Sin cambios funcionales ni despliegues en esta entrega. El commit local de documentación se identifica con git log; no se introduce un hash autorreferencial dentro del commit.
 
 13 de octubre de 2026 (tarde), Claude Code (chat Telegram del CEO): registradas las decisiones tomadas en ese chat antes de que existiera este plan (tabla superior). En discusión sin decidir: numeración visible por usuario de tareas (opción B «1, 2, 3…» explicada; el CEO preguntó cómo y dónde se implementaría, sin aprobarla). El CEO pidió que Claude Code lleve el plan de convergencia desde ahora (13-10 21:18: «Luego avanzaras tu con el plan»).
+
+
+### Entrega E13 · Minutas manuales desde el dashboard (14-10-2026)
+
+- Autorización directa del usuario en Codex: implementar autónomamente minutas manuales, borradores, formato, análisis central reutilizado, propuestas en la bandeja y aislamiento; rama exacta `feature/minutas-manuales-dashboard`; commits locales; sin merge, despliegues ni cambios productivos.
+- Esta solicitud es un incremento nuevo; no altera las decisiones anteriores de automatismos de Granola. Las minutas `Manual-Dashboard` siempre requieren aprobación humana.
+- Base: `origin/main` actualizado, 1bd8846. Copia aislada: `C:/Users/admin/Documents/DSTA-multiuser/minutas-manuales-dashboard`. Las copias de main y feat/multiusuario no se cambiaron de rama ni modificaron.
+- Estado: implementado y verificado local; pendiente aceptación visual humana y ensayo con IA real/ambiente QA. No publicado en piloto ni producción.
+- Arquitectura, archivos, pruebas, restricciones y instrucciones: [MINUTAS_MANUALES.md](../MINUTAS_MANUALES.md). Evidencia: [minutas-manuales](evidencia/minutas-manuales/).
+- Reutilización: sobre común de fuentes, mismo analista/parser/aprobación, misma bandeja, mismo DO por actor; incluye el puente original del dueño sin vault y el puente multiusuario. Borradores confiables con CAS, recuperación local cifrada, cola durable, lease y república de análisis guardado. No hay nuevo pipeline IA ni escrituras manuales automáticas.
+- Datos QA: fixtures propios en localhost; IA y Vikunja simulados, puentes/Worker/DO y UI reales en memoria. No se escribieron tareas ni minutas personales. Pruebas de disco usan carpetas temporales.
+- Línea base: 194 Python + todas las suites JS aprobadas. Resultado final exacto en evidencia/resultados.json; E2E Chrome con viewport 1280x900 y 390x844, análisis→bandeja→aprobación UI→snapshot, sin cruces A/B. Empaquetado Wrangler seco OK.
+- Git: consultar `git log -1 feature/minutas-manuales-dashboard` para el commit de la entrega; no push solicitado ni ejecutado.
+- Siguiente paso: revisión de esta rama y aceptación humana, luego ensayo QA con IA real de ambas rutas y autorización separada para integración/despliegue. No desplegar por cerrar documentación/pruebas.

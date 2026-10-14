@@ -29,7 +29,7 @@ if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from user_context import using_root, using_user  # noqa: E402
 
-KINDS = ("action", "label", "chat", "health", "granola")
+KINDS = ("action", "label", "chat", "health", "granola", "manual")
 DRAIN_LIMIT = 5
 DISPATCH_SECONDS = 10
 SWEEP_SECONDS = 300
@@ -109,12 +109,20 @@ class MultiuserBridge:
         for actor in actors:
             user = self._user(actor)
             if user:
-                for kind in ("action", "label"):
+                for kind in ("action", "label", "manual"):
                     handled += self.drain(actor, user, kind)
         return handled
 
     def drain(self, actor: str, user: dict, kind: str) -> int:
         base = self.user_base(actor)
+        if kind == "manual":
+            if not self.minute_inbox or not self.copilot:
+                return 0  # leave the durable request for a capable bridge
+            result = self.request_json(f"{base}/api/bridge/manual-next", token=self.token, timeout=10)
+            if result.get("job"):
+                self._run(self.analysis_pool, self.handle_manual, actor, user, result["job"])
+                return 1
+            return 0
         handled = 0
         for _ in range(DRAIN_LIMIT):
             result = self.request_json(f"{base}/api/bridge/next?kind={kind}", token=self.token, timeout=10)
@@ -268,6 +276,27 @@ class MultiuserBridge:
             log(f"decisión de minuta de {actor[:20]} falló ({type(failure).__name__})")
         self.request_json(f"{self.user_base(actor)}/api/bridge/decision-done", token=self.token, method="POST",
                           payload={"id": decision["id"], **({"error": error} if error else {})}, timeout=20)
+
+    def handle_manual(self, actor: str, user: dict, job: dict) -> None:
+        """Source adapter only: same isolated model, parser, inbox and approval engine as Granola.
+        A saved analysis is republished after an uncertain delivery, never analysed twice."""
+        minute = {"source": "Manual-Dashboard", "source_id": "manual-" + job["id"],
+                  "version": str(job["revision"]), "title": job["title"], "date": job["date"],
+                  "summary": "", "private_notes": job["content"], "context": job["context"]}
+        payload = {"id": job["id"], "attempt": job["attempt"]}
+        try:
+            record = self.minute_inbox.process(actor, user, minute, self._snapshot(user),
+                                               lambda prompt: self.copilot.ask(actor, user, prompt))
+            record = record or self.minute_inbox.current_record(actor, minute)
+            if not record:
+                raise RuntimeError("No saved analysis")
+            self._push_minute(actor, record)
+            payload["minuteId"] = record["id"]
+        except Exception as failure:
+            log(f"minuta manual de {actor[:20]} falló ({type(failure).__name__})")
+            payload["error"] = True  # no model/provider details or meeting notes in errors
+        self.request_json(f"{self.user_base(actor)}/api/bridge/manual-done", token=self.token,
+                          method="POST", payload=payload, timeout=20)
 
     def sync_granola(self, actors: list[str]) -> int:
         """Import each connected user's meetings into THEIR inbox (title, date, summary)."""
