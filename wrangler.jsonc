@@ -9,9 +9,22 @@
     "binding": "ASSETS",
     "run_worker_first": true
   },
+  // Corte multiusuario 14-10-2026: cuentas por usuario (D66) sobre el mismo KV y Durable Object.
+  "vars": {
+    "AUTH_MODE": "accounts"
+  },
   "kv_namespaces": [
     {
-      "binding": "DASHBOARD_DATA"
+      "binding": "DASHBOARD_DATA",
+      "id": "8ae3f32a6d844bb8a42adaa3b046bd7e"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dsta-web-accounts",
+      "database_id": "ccc417d3-1289-44ca-9d72-6bdb370d0d91",
+      "migrations_dir": "./migrations"
     }
   ],
   "durable_objects": {
