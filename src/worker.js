@@ -828,7 +828,7 @@ const FILTER_FIELDS = new Set(["title", "description", "owner", "dependency", "c
 // D55: the owner's profile keeps "Dashboard Gestión DSTA" / PMO-DSTA; everyone else starts with an
 // empty title (the page shows "Dashboard de <name>") and can set their own.
 export function defaultLayout({ cata = true } = {}) {
-  return { version: 1, title: cata ? "Dashboard Gestión DSTA" : "", sections: Object.entries(BUILTIN_SECTIONS)
+  return { version: 1, title: cata ? "Dashboard Gestión de STA Álvaro en producción" : "", sections: Object.entries(BUILTIN_SECTIONS)
     .filter(([key]) => cata || key !== "cata")
     .map(([key, title]) => ({ id: key, kind: "builtin", key, title, enabled: true })) };
 }
