@@ -69,6 +69,18 @@ class UserMinuteInboxTest(unittest.TestCase):
         self.assertIsNone(record["acciones"][0]["task_id"])
         self.assertIn("#63", record["acciones"][0]["motivo"])
 
+    def test_el_analista_ve_bitacora_dependencia_y_completadas(self):
+        """D42: the analyst gets the same context as the copilot, so it does not redo finished work."""
+        snapshot = {"projects": [{"id": 8, "title": "LT Clientes"}], "tasks": [
+            {"id": 81, "title": "Contrato proveedor eléctrico", "project_id": 8, "done": False, "owner": "Paula",
+             "description": "Dependencia: aprobación de Finanzas\n\nAvance 2026-10-08: borrador enviado a Legal"},
+            {"id": 82, "title": "Enviar borrador a Legal", "project_id": 8, "done": True, "description": "hecho"}]}
+        prompt = umi.analysis_prompt(MINUTE, snapshot)
+        self.assertIn("Dependencia: aprobación de Finanzas", prompt)
+        self.assertIn("Avance 2026-10-08: borrador enviado a Legal", prompt)
+        self.assertIn("Tareas ya completadas", prompt)
+        self.assertIn("#82 Enviar borrador a Legal", prompt)
+
     def test_no_reprocesa_la_misma_version(self):
         self.inbox.process("paula", USER, MINUTE, SNAP, self.ask)
         self.assertIsNone(self.inbox.process("paula", USER, MINUTE, SNAP, self.ask))

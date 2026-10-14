@@ -62,16 +62,36 @@ def user_vk(user: dict):
     return module
 
 
+TASKS_BLOCK_CHARS = 50_000
+
+
 def _tasks_block(snapshot: dict | None) -> str:
+    """D42: same context as the copilot (D28): open tasks with their full structured description
+    (dependency, closure criterion, log) and completed ones in short, so the analyst neither duplicates
+    what was already done nor misses the dependency a meeting resolves."""
     snapshot = snapshot or {}
     lines = []
     open_tasks = [t for t in snapshot.get("tasks", []) if not t.get("done")]
     for project in snapshot.get("projects", []):
         lines.append(f"Línea «{project.get('title', '')}» (project_id {project.get('id')}):")
+        if project.get("description"):
+            lines.append(f"  Descripción de la línea: {project['description']}")
         for task in (t for t in open_tasks if t.get("project_id") == project.get("id")):
             extra = " · ".join(str(v) for v in (task.get("owner"), task.get("date")) if v)
             lines.append(f"  - #{task.get('id')} {task.get('title', '')}" + (f" ({extra})" if extra else ""))
-    return "\n".join(lines) or "(sin líneas de trabajo todavía)"
+            if task.get("description"):
+                lines.append("    " + str(task["description"])[:4000].replace("\n", "\n    "))
+    text = "\n".join(lines) or "(sin líneas de trabajo todavía)"
+    done = [t for t in snapshot.get("tasks", []) if t.get("done")]
+    if done:
+        closed = "\n".join(["", "Tareas ya completadas (no proponer rehacerlas):"] +
+                           [f"  - #{t.get('id')} {t.get('title', '')} [project_id {t.get('project_id')}]" +
+                            (f": {str(t['description'])[:300]}".replace("\n", " ") if t.get("description") else "") for t in done])
+        if len(text) + len(closed) <= TASKS_BLOCK_CHARS:
+            text += closed
+    if len(text) > TASKS_BLOCK_CHARS:
+        text = text[:TASKS_BLOCK_CHARS] + "\n[Aviso: el contexto se recortó por tamaño; ante la duda, propone en vez de aplicar.]"
+    return text
 
 
 def _minute_block(minute: dict) -> str:

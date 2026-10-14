@@ -22,6 +22,7 @@ class FakeGranola:
     def __init__(self):
         self.codes, self.tokens, self.clients = {}, set(), {}
         self.refresh_tokens, self.refreshes, self.expires_in = {}, 0, 3600
+        self.list_args = []
         self.xml = False  # True: answer like the real Granola (XML text, time_range, anyOf ids)
         fake = self
 
@@ -104,6 +105,7 @@ class FakeGranola:
                             {"name": "get_meetings", "inputSchema": {"type": "object", "required": ["meeting_ids"],
                              "properties": {"meeting_ids": {"type": "array", "items": {"type": "string"}}}}}]}
                     elif method == "tools/call" and message["params"]["name"] == "list_meetings":
+                        fake.list_args.append(dict(message["params"]["arguments"]))
                         if fake.xml:
                             assert message["params"]["arguments"].get("time_range"), "real Granola filters by time_range"
                             rows = "".join(f'<meeting id="{m["id"]}" title="{m["title"]}" date="Oct {m["date"][-2:]}, 2026 9:00 AM"/>' for m in MEETINGS)

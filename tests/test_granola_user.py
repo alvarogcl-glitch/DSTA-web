@@ -28,11 +28,14 @@ class GranolaUserTest(unittest.TestCase):
         import user_vault
         import granola_user
         self.vault, self.gu = user_vault, granola_user
+        self._today = granola_user.today_chile
+        granola_user.today_chile = lambda: __import__("datetime").date(2026, 10, 13)  # fixtures are dated Oct 2026
         for actor in ("ana", "beto"):
             user_vault.save(actor, {"vikunjaToken": "x", "rootProjectId": 1})
 
     def tearDown(self):
         os.environ.pop("DSTA_VAULT_DIR", None)
+        self.gu.today_chile = self._today
         self.tmp.cleanup()
 
     def consent(self, authorization_url):
@@ -110,6 +113,23 @@ class GranolaUserTest(unittest.TestCase):
             self.assertEqual([m["date"] for m in archive], ["2026-10-11", "2026-10-10", "2026-08-01"])
             self.assertTrue(all(m["id"].startswith("g-") for m in archive))
             self.assertEqual(len({m["id"] for m in archive}), 3, "re-syncing does not duplicate")
+
+    def test_primera_conexion_trae_90_dias_solo_al_archivo(self):
+        """D41: first sync reaches back 90 days; meetings older than 30 days go only to the archive."""
+        import datetime as dt
+        self.gu.today_chile = lambda: dt.date(2026, 11, 10)  # meet-1 (10-10) is now older than 30 days
+        with FakeGranola() as fake:
+            fake.xml = True
+            service = self.gu.GranolaService("http://127.0.0.1:8787/oauth/granola/callback", test_origin=fake.origin)
+            started = service.authorize("ana", "req-1")
+            code, state = self.consent(started["authorizationUrl"])
+            service.exchange("ana", "req-1", state, code)
+            records = service.sync("ana")
+            self.assertEqual(fake.list_args[0], {"time_range": "custom", "custom_start": "2026-08-12", "custom_end": "2026-11-10"})
+            self.assertEqual([r["source_id"] for r in records], ["meet-2"], "only the last 30 days reach the inbox and its analysis")
+            self.assertEqual(len(self.vault.load("ana")["minuteArchive"]), 2, "both are searchable")
+            service.sync("ana")
+            self.assertEqual(fake.list_args[-1], {"time_range": "last_30_days"}, "afterwards, the regular 30-day window")
 
     def test_state_de_otro_usuario_o_reusado_falla(self):
         with FakeGranola() as fake:

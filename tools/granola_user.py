@@ -12,7 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 _tools_dir = str(Path(__file__).resolve().parent)
@@ -128,10 +129,21 @@ class GranolaService:
         token = secret.get("access_token")
         if not token or not self.connected(actor):
             raise GranolaError("Connector is disconnected")
-        records = import_meetings(self.client, token)
+        # D41: the first sync after connecting reaches back 90 days (Granola's free plan returns only
+        # what it keeps). Those older meetings only feed the searchable archive (D31): the inbox and its
+        # AI analysis keep working on the last 30 days, so nobody gets proposals about stale meetings.
+        initial = not self.store._get(actor).get("initialImportDone")
+        today = today_chile()
+        if initial:
+            records = import_meetings(self.client, token, start=(today - timedelta(days=INITIAL_IMPORT_DAYS)).isoformat(),
+                                      end=today.isoformat())
+        else:
+            records = import_meetings(self.client, token)
+        inbox_since = (today - timedelta(days=30)).isoformat()
         # F5 context: the user's recent summaries, kept encrypted in THEIR vault entry.
         with _lock:
             data = self.store._get(actor)
+            data["initialImportDone"] = True
             entry = lambda r, size: {"id": inbox_record(r)["id"], "title": str(r.get("title") or "")[:200],
                                      "date": str(r.get("date") or "")[:10], "summary": str(r.get("summary") or "")[:size]}
             recent = sorted(records, key=lambda r: str(r.get("date") or ""), reverse=True)[:30]
@@ -141,13 +153,20 @@ class GranolaService:
             archive.update({item["id"]: item for item in (entry(r, MINUTE_ARCHIVE_CHARS) for r in records)})
             data["minuteArchive"] = sorted(archive.values(), key=lambda m: str(m.get("date") or ""), reverse=True)[:MINUTE_ARCHIVE_SIZE]
             self.store._save(actor, data)
-        return records
+        return [r for r in records if str(r.get("date") or "") >= inbox_since]
 
     def disconnect(self, actor: str) -> None:
         self.store.disconnect(actor)
 
 
 MINUTE_ARCHIVE_SIZE = 300
+INITIAL_IMPORT_DAYS = 90
+CHILE = ZoneInfo("America/Santiago")
+
+
+def today_chile():
+    return datetime.now(CHILE).date()
+
 MINUTE_ARCHIVE_CHARS = 4000
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
 EMPTY = {"", "no summary", "not available", "no notes", "none", "null"}
@@ -189,7 +208,7 @@ def _meetings(result: dict) -> list[dict]:
     return out
 
 
-def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_days") -> list[dict]:
+def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_days", start: str = "", end: str = "") -> list[dict]:
     """Read-only import with only list_meetings and get_meetings, through the client's allowlisted
     transport. Returns records with id, version, title, ISO date and summary (+ notes, VM only)."""
     with client._session() as http:
@@ -210,7 +229,8 @@ def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_d
 
         rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "dsta-multiuser", "version": "1"}})
         rpc("notifications/initialized", notification=True)
-        listed = _meetings(rpc("tools/call", {"name": "list_meetings", "arguments": {"time_range": days}}))
+        arguments = {"time_range": "custom", "custom_start": start, "custom_end": end} if start else {"time_range": days}
+        listed = _meetings(rpc("tools/call", {"name": "list_meetings", "arguments": arguments}))
         ids = [str(m["id"]) for m in listed if m.get("id")][:500]
         records = []
         for start in range(0, len(ids), 10):
