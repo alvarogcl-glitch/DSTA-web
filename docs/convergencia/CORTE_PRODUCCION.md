@@ -171,3 +171,14 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
 - **Actualización inmediata:** al terminar una decisión de la bandeja, el dashboard se refresca en ese momento y no tras 30 s. El puente ya publica el snapshot antes de cerrar la decisión. Esta era la causa de que el CEO no viera la nota aplicada a la tarea #164.
 - El botón «Minutas» quedó separado del resto, como los demás botones del encabezado.
 - Deploy: versión 4559f255, `CODE_VERSION = minutas-eliminar-2026-10-14`. El cajón del dueño se actualizó con los servicios pausados y luego se reanudaron los 3. Código en 8fa74b1. 206 pruebas Python, más las suites JS y los 2 E2E.
+
+## 11. Texto original de Granola en «Minutas» (14-10-2026, ~16:00)
+
+- **Problema:** el CEO preguntó por qué la minuta de Cata 1-1 se veía distinta a la de Granola. Respuesta: el detalle mostraba `resumen`, que es el análisis del asistente; el texto de Granola solo vivía en la VM («Minutas 2026»).
+- **Decisión del CEO:** opción 1, guardar el texto en su espacio del dashboard (Telegram 14-10 18:53 UTC, «1»).
+- **Cambios (f4a6c3b, versión 39d6ae28, `CODE_VERSION = minutas-texto-2026-10-14`):**
+  - El puente del dueño adjunta el archivo exportado (`minute_original`, hasta 60.000 caracteres) a cada minuta que publica. Al reiniciar republica todas: 27 de 28 con texto.
+  - El puente multiusuario adjunta el resumen de Granola del usuario.
+  - El Worker lo guarda aparte, en `minute-text:<id>`, para que la lista de la bandeja no crezca. Lo sirve en `GET /api/minutes/text?id=`, lo conserva si una subida posterior no trae texto y lo borra al eliminar la minuta.
+  - La ventana muestra «Minuta · texto original (Granola)» separado de «Análisis del asistente».
+- 208 pruebas Python, más las suites JS y los 2 E2E. Despliegue con los servicios en pausa hasta que el cajón del dueño tomó la versión nueva.
