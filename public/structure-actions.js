@@ -24,6 +24,11 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
 
   const byId = id => projects.find(p => String(p.id) === String(id));
   const taskById = id => tasks.find(t => String(t.id) === String(id));
+  const doneText = {
+    'lt.create': 'Línea creada', 'lt.rename': 'Línea renombrada', 'lt.describe': 'Descripción guardada', 'lt.archive': 'Línea archivada',
+    'lt.restore': 'Línea restaurada', 'task.create': 'Tarea creada', 'task.update': 'Tarea actualizada', 'task.move': 'Tarea movida',
+    'task.reopen': 'Tarea reabierta',
+  };
   const ACTION_TEXT = {
     'lt.create': 'Nueva línea de trabajo', 'lt.rename': 'Renombrar línea', 'lt.describe': 'Descripción de la línea', 'lt.archive': 'Archivar línea',
     'task.create': 'Nueva tarea', 'task.update': 'Editar tarea', 'task.move': 'Mover tarea a otra línea',
@@ -83,6 +88,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         status.textContent = 'Listo. Actualizando el dashboard…';
         await refreshUntil(job.snapshotTimestamp || '');
         dialog.close();
+        window.DstaToast?.show(`✓ ${doneText[job.action] || 'Cambio aplicado'}`, true);  // D58
         return;
       }
       if (job.status === 'error') {
@@ -92,7 +98,9 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
       }
       status.textContent = job.status === 'running' ? 'Aplicando en Vikunja…' : 'En cola…';
     }
-    status.textContent = 'Sigue en proceso. Revisa en unos minutos con «Actualizar ahora».';
+    // D58: uncertain result — say so and never resend by itself.
+    status.textContent = 'No pudimos confirmar el cambio todavía. Revisa el elemento antes de reintentar.';
+    status.className = 'status error';
   }
 
   function open(action, fields, build) {
@@ -112,6 +120,8 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     row.append(submit, cancel);
     form.append(status, row);
     dialog.append(form);
+    // D57: Escape closes only this dialog, never the inspector or panel behind it.
+    dialog.addEventListener('keydown', event => { if (event.key === 'Escape') event.stopPropagation(); });
     dialog.addEventListener('close', () => dialog.remove());
     form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -135,6 +145,9 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     });
     document.body.append(dialog);
     dialog.showModal();
+    // D57: the cursor starts in the first field; a dialog without fields (archive) focuses Cancelar,
+    // so Enter never confirms an irreversible-looking action by accident. Escape closes (native).
+    (form.querySelector('input, textarea, select') || cancel).focus();
   }
 
   // An action without a form: same verified queue, status shown inline instead of in a dialog.
@@ -262,13 +275,38 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     window.DstaSettings.addSection('Líneas archivadas', box, 40);
   }
 
+  // D59: a new account sees three first steps instead of an empty dashboard. Nothing is created
+  // automatically; the card goes away as soon as the account has a work line.
+  function renderWelcome() {
+    const existing = document.querySelector('.dsta-welcome');
+    const panel = document.querySelector('#projects');
+    if (!enabled || !panel || typeof projects === 'undefined' || projects.length) { existing?.remove(); return; }
+    if (existing) return;
+    const card = Object.assign(document.createElement('div'), { className: 'dsta-welcome' });
+    card.style.cssText = 'border:1px solid #2f5d46;background:#122019;border-radius:12px;padding:14px 16px;margin:0 0 12px;display:grid;gap:8px';
+    card.append(Object.assign(document.createElement('strong'), { textContent: 'Bienvenida/o. Para empezar:' }));
+    const steps = [
+      ['1. Crea tu primera línea de trabajo', () => document.querySelector('.structure-new-lt')?.click()],
+      ['2. Conecta Granola para traer tus minutas', () => window.DstaSettings?.open()],
+      ['3. Pregúntale al copiloto qué puede hacer por ti', () => document.querySelector('#dsta-assistant-toggle')?.click()],
+    ];
+    for (const [text, action] of steps) {
+      const step = Object.assign(document.createElement('button'), { type: 'button', textContent: text });
+      step.style.cssText = 'text-align:left;width:auto;justify-self:start;background:transparent;border:0;color:#9fe0bd;padding:2px 0;cursor:pointer;font:inherit';
+      step.addEventListener('click', event => { event.stopPropagation(); action(); });
+      card.append(step);
+    }
+    panel.before(card);
+  }
+
   // Only in accounts mode (the single-user dashboard keeps its legacy surface).
   let enabled = false;
   window.DstaStructure = { mount: view => { if (enabled) mount(view); } };
   fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).then(response => {
     if (!response.ok) return;
     enabled = true;
-    const start = () => { addNewLineButton(); addArchivedSection(); };
+    const start = () => { addNewLineButton(); addArchivedSection(); renderWelcome(); };
+    window.addEventListener('dsta-rendered', renderWelcome);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
     window.addEventListener('dsta-settings-ready', addArchivedSection);

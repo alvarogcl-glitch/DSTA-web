@@ -42,7 +42,14 @@ const layout = { version: 1, sections: [
 ] };
 assert.equal((await call('PUT', '/api/preferences/layout', { layout }, { origin: 'https://attacker.example' })).status, 403, 'CSRF');
 assert.equal((await call('PUT', '/api/preferences/layout', { layout })).status, 200);
-assert.deepEqual((await call('GET', '/api/preferences/layout')).body.layout, layout);
+assert.deepEqual((await call('GET', '/api/preferences/layout')).body.layout,
+  { ...layout, title: 'Dashboard Gestión DSTA', brand: 'PMO-DSTA' }, 'D55: an old layout without title gets the profile default');
+// D55: each user sets their own title (up to 80 characters); the brand is not editable.
+assert.equal((await call('PUT', '/api/preferences/layout', { layout: { ...layout, title: 'x'.repeat(81) } })).status, 400);
+assert.equal((await call('PUT', '/api/preferences/layout', { layout: { ...layout, title: ' Mi tablero ', brand: 'Otra' } })).status, 200);
+const saved = (await call('GET', '/api/preferences/layout')).body.layout;
+assert.deepEqual([saved.title, saved.brand], ['Mi tablero', 'PMO-DSTA'], 'the brand sent back by the browser is ignored');
+assert.equal(defaultLayout({ cata: false }).title, '', 'new users: empty title (the page shows "Dashboard de <name>")');
 
 // 3. Validation: unknown builtin, duplicated ids, script in titles kept as text, limits.
 for (const bad of [

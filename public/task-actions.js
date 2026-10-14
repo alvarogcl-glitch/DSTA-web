@@ -20,16 +20,24 @@
   dismiss.type = 'button';
   dismiss.textContent = '×';
   dismiss.setAttribute('aria-label', 'Descartar aviso');
-  dismiss.addEventListener('click', () => { toast.hidden = true; });
+  dismiss.addEventListener('click', () => { toast.hidden = true; toast.classList?.remove('fading'); });
   toast.append(toastText, dismiss);
   document.body.append(toast);
   let toastTimer;
-  function feedback(id, message, success = false) {
+  // D58: one result notice for every change. Success fades out after a few seconds; errors and
+  // uncertain results stay until dismissed, so they are never missed.
+  function notify(text, success = false) {
     clearTimeout(toastTimer);
+    toast.classList?.remove('fading');
     toast.hidden = false;
-    toastText.textContent = '#' + id + ' · ' + message;
-    if (success) toastTimer = setTimeout(() => { toast.hidden = true; }, 6000);
+    toastText.textContent = text;
+    if (success) toastTimer = setTimeout(() => {
+      toast.classList?.add('fading');
+      toastTimer = setTimeout(() => { toast.hidden = true; toast.classList?.remove('fading'); }, 700);
+    }, 6000);
   }
+  function feedback(id, message, success = false) { notify('#' + id + ' · ' + message, success); }
+  window.DstaToast = { show: notify };
   const progress = job => job.kind === 'complete' ? 'Completando…' : 'Guardando registro…';
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());
   const state = id => {

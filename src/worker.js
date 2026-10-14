@@ -788,8 +788,10 @@ const BUILTIN_SECTIONS = {
   cata: "Cata 1-1", labels: "Portafolio por etiqueta", inventory: "Inventario operativo completo",
 };
 const FILTER_FIELDS = new Set(["title", "description", "owner", "dependency", "criterion"]);
+// D55: the owner's profile keeps "Dashboard Gestión DSTA" / PMO-DSTA; everyone else starts with an
+// empty title (the page shows "Dashboard de <name>") and can set their own.
 export function defaultLayout({ cata = true } = {}) {
-  return { version: 1, sections: Object.entries(BUILTIN_SECTIONS)
+  return { version: 1, title: cata ? "Dashboard Gestión DSTA" : "", sections: Object.entries(BUILTIN_SECTIONS)
     .filter(([key]) => cata || key !== "cata")
     .map(([key, title]) => ({ id: key, kind: "builtin", key, title, enabled: true })) };
 }
@@ -855,7 +857,8 @@ function cleanLayout(layout) {
     sections.push({ id: section.id, kind: "custom", title, enabled: section.enabled,
       ...(section.ai === true ? { ai: true } : {}), filters });
   }
-  return { version: 1, sections };
+  if (layout.title !== undefined && (typeof layout.title !== "string" || layout.title.trim().length > 80)) return null;
+  return { version: 1, ...(layout.title !== undefined ? { title: layout.title.trim() } : {}), sections };
 }
 async function layoutRoute(request, env, box) {
   if (request.method === "GET") return json({ layout: await chatStub(env, box).layout() });
@@ -1347,11 +1350,15 @@ export class DashboardChatQueue extends DurableObject {
 
   layout() {
     // Production keeps its five sections (Cata 1-1 included); new users start with four.
-    return this.ctx.storage.kv.get("data:layout") || defaultLayout({ cata: this.legacyAllowed() });
+    const defaults = defaultLayout({ cata: this.legacyAllowed() });
+    const stored = this.ctx.storage.kv.get("data:layout");
+    // Layouts saved before D55 have no title: they get the profile's default one.
+    return { ...(stored || defaults), title: stored?.title ?? defaults.title, brand: this.legacyAllowed() ? "PMO-DSTA" : "" };
   }
 
   saveLayout(layout) {
-    this.ctx.storage.kv.put("data:layout", layout);
+    const { brand, ...stored } = layout;
+    this.ctx.storage.kv.put("data:layout", stored);
     return true;
   }
 

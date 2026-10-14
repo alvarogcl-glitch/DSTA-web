@@ -33,13 +33,45 @@ const openTask = (page, title) => page.evaluate(t => showInspection(taskView(tas
 const step = m => console.log('OK  ' + m);
 
 const a = await session(cfg.A);
+
+// D55: a new user's header is "Dashboard de <name>" with no PMO-DSTA; they can set their own title.
+await a.waitForFunction(() => document.querySelector('#dsta-title')?.textContent === 'Dashboard de UI A', null, { timeout: 15000 });
+assert.doesNotMatch(await a.locator('#dsta-kicker').innerText(), /PMO-DSTA/);
+await a.click('#dsta-settings-toggle');
+await a.fill('.dsta-layout-title input', 'Tablero de prueba');
+await a.click('#dsta-settings-panel button:has-text("Guardar")');
+await a.waitForFunction(() => document.querySelector('#dsta-title')?.textContent === 'Tablero de prueba' && document.title === 'Tablero de prueba');
+// D58: the success notice fades out by itself.
+await a.locator('.task-action-toast', { hasText: 'Configuración guardada' }).waitFor({ state: 'visible' });
+await a.locator('.task-action-toast').waitFor({ state: 'hidden', timeout: 12000 });
+await a.click('#dsta-settings-toggle');
+step('D55/D58: título propio editable en ⚙ y aviso de éxito que se desvanece');
+
+// D59: an account with no lines sees three first steps (nothing created for them).
+await a.evaluate(() => { window.__savedProjects = projects; projects = []; window.dispatchEvent(new Event('dsta-rendered')); });
+assert.equal(await a.locator('.dsta-welcome button').count(), 3);
+await a.evaluate(() => { projects = window.__savedProjects; window.dispatchEvent(new Event('dsta-rendered')); });
+assert.equal(await a.locator('.dsta-welcome').count(), 0, 'the card goes away once there are lines');
+step('D59: tarjeta de bienvenida con 3 pasos solo si no hay líneas');
 await a.click('.structure-new-lt');
 await submitDialog(a, { title: 'LT creada desde UI' });
 assert.ok(await a.evaluate(() => projects.some(p => p.title === 'LT creada desde UI'))); step('A crea una línea desde la interfaz');
 
 await openProject(a, 'LT creada desde UI');
+// D57: focus starts in the first field and Escape closes without sending anything.
+await a.click('.structure-actions button:has-text("+ Nueva tarea")');
+assert.equal(await a.evaluate(() => document.activeElement?.name), 'title');
+await a.keyboard.press('Escape');
+await a.locator('dialog.structure-dialog').waitFor({ state: 'detached' });
+await a.click('.structure-more summary');
+await a.click('.structure-more button:has-text("Archivar línea")');
+assert.equal(await a.evaluate(() => document.activeElement?.textContent), 'Cancelar', 'archive focuses Cancelar, not the confirm button');
+await a.keyboard.press('Escape');
+await a.locator('dialog.structure-dialog').waitFor({ state: 'detached' });
+step('D57: foco en el primer campo, Escape cierra, archivar enfoca Cancelar');
 await a.click('.structure-actions button:has-text("+ Nueva tarea")');
 await submitDialog(a, { title: 'Tarea creada desde UI', description: 'Detalle sintético', dueDate: '2026-12-15' });
+await a.locator('.task-action-toast', { hasText: '✓ Tarea creada' }).waitFor({ state: 'visible', timeout: 5000 });
 const created = await a.evaluate(() => tasks.find(t => t.title === 'Tarea creada desde UI'));
 assert.equal(created.date, '2026-12-15'); step('A crea una tarea con fecha en esa línea');
 

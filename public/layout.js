@@ -27,8 +27,30 @@
   const sectionHeading = section => section.querySelector('.panel-heading h2, h2');
 
   // ── Apply the layout to the page ──
+  // D55: each user's dashboard title (empty = "Dashboard de <name>"); the brand only on the owner's profile.
+  let accountName = null;
+  async function applyHeader() {
+    if (!layout) return;
+    if (!layout.title && accountName === null) {
+      try {
+        const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
+        const session = response.ok ? await response.json() : {};
+        accountName = session.actor?.displayName || session.displayName || '';
+      } catch { accountName = ''; }
+    }
+    const title = layout.title || (accountName ? `Dashboard de ${accountName}` : 'Mi dashboard');
+    window.__dstaBrand = layout.brand || '';
+    const h1 = document.querySelector('#dsta-title'), kicker = document.querySelector('#dsta-kicker');
+    if (h1) h1.textContent = title;
+    if (kicker) kicker.textContent = `${layout.brand ? layout.brand + ' / ' : ''}VIKUNJA / LECTURA EN VIVO`;
+    const copilotKicker = document.querySelector('#dsta-assistant-panel .kicker');
+    if (copilotKicker) copilotKicker.textContent = `HERMES${layout.brand ? ' · ' + layout.brand : ''}`;
+    document.title = title;
+  }
+
   function apply() {
     if (!layout) return;
+    void applyHeader();
     const main = document.querySelector('main.wrap');
     const anchor = document.querySelector('#metrics');
     if (!main || !anchor) return;
@@ -161,6 +183,13 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
 
   function renderEditor() {
     editor.replaceChildren();
+    const titleLabel = Object.assign(document.createElement('label'), { className: 'dsta-layout-title' });
+    const titleInput = Object.assign(document.createElement('input'), { type: 'text', value: draft.title || '', maxLength: 80,
+      placeholder: accountName ? `Dashboard de ${accountName}` : 'Dashboard de tu nombre' });
+    titleInput.addEventListener('input', () => { draft.title = titleInput.value; });
+    titleLabel.append(Object.assign(document.createElement('span'), { textContent: 'Título del dashboard' }), titleInput);
+    titleLabel.style.cssText = 'display:grid;gap:4px;margin-bottom:10px';
+    editor.append(titleLabel);
     const help = Object.assign(document.createElement('p'), { textContent: 'Activa, renombra y arrastra (o usa ↑↓) para ordenar. Guarda para aplicar.' });
     const list = Object.assign(document.createElement('ul'), { className: 'dsta-layout-list' });
     draft.sections.forEach((section, index) => {
@@ -322,9 +351,12 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
       renderEditor();
     });
     dialog.append(form);
+    // D57: Escape closes only this dialog, never the inspector or panel behind it.
+    dialog.addEventListener('keydown', event => { if (event.key === 'Escape') event.stopPropagation(); });
     dialog.addEventListener('close', () => dialog.remove());
     document.body.append(dialog);
     dialog.showModal();
+    name.focus();  // D57
   }
 
   async function saveLayout() {
@@ -335,11 +367,11 @@ dialog.dsta-section-dialog::backdrop{background:rgba(0,0,0,.6)}
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ layout: draft }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-      layout = payload.layout;
+      layout = { ...payload.layout, brand: layout.brand };
       draft = structuredClone(layout);
       apply();
       renderEditor();
-      editor.querySelector('.dsta-layout-status').textContent = '✓ Guardado. El dashboard ya usa este orden.';
+      window.DstaToast?.show('✓ Configuración guardada', true);  // D58
     } catch (error) {
       status.textContent = `No se pudo guardar: ${error.message}`;
     }
