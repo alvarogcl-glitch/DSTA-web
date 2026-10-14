@@ -255,7 +255,9 @@ class UserMinuteInbox:
         record = self._get(actor, str(decision.get("minuteId", "")))
         if not record:
             raise KeyError("La minuta ya no está en la bandeja.")
-        if decision.get("decision") == "descartar":
+        if decision.get("decision") in ("descartar", "eliminar"):
+            if decision.get("decision") == "eliminar":
+                record["eliminadaEn"] = record.get("eliminadaEn") or mi.now()  # hidden; tombstone kept
             if not record.get("descartadaEn"):
                 record["descartadaEn"] = mi.now()
                 for action in record["acciones"]:

@@ -93,6 +93,14 @@ class UserMinuteInboxTest(unittest.TestCase):
         self.assertNotIn("Tarea 150", prompt, "no portfolio dump in the prompt")
         self.assertLess(len(prompt), 8000)
 
+    def test_eliminar_deja_marca_y_no_reprocesa(self):
+        """Eliminar (14-10): like discard plus a tombstone; the same source is never analysed again."""
+        record = self.inbox.process("ana", USER, MINUTE, SNAP, self.ask)
+        deleted = self.inbox.decide("ana", USER, {"minuteId": record["id"], "decision": "eliminar"}, SNAP, self.ask)
+        self.assertTrue(deleted["eliminadaEn"] and deleted["descartadaEn"])
+        self.assertTrue(all(a["estado"] != "propuesta" for a in deleted["acciones"]))
+        self.assertTrue(self.inbox.is_current("ana", MINUTE), "a re-import of the same meeting is skipped")
+
     def test_no_reprocesa_la_misma_version(self):
         self.inbox.process("paula", USER, MINUTE, SNAP, self.ask)
         self.assertIsNone(self.inbox.process("paula", USER, MINUTE, SNAP, self.ask))

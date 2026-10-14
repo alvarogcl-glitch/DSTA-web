@@ -572,7 +572,9 @@ def apply_decision(store: Path, decision: dict[str, Any], vk,
     record = get_record(store, str(decision.get("minuteId", "")))
     if not record:
         raise KeyError("La minuta ya no está en la bandeja.")
-    if decision.get("decision") == "descartar":
+    if decision.get("decision") in ("descartar", "eliminar"):
+        if decision.get("decision") == "eliminar":
+            record["eliminadaEn"] = record.get("eliminadaEn") or now()  # hidden from the lists; tombstone kept
         if not record.get("descartadaEn"):
             record["descartadaEn"] = now()
             for action in record["acciones"]:

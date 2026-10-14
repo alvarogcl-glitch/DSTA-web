@@ -174,6 +174,8 @@
             notice = minute.errorDecision;
             continue;
           }
+          // The bridge publishes the new snapshot before closing the decision: show it now, not in 30 s.
+          if (typeof refresh === 'function') refresh();
           const left = pending(minute).length;
           notice = discarded(minute) ? `«${minute.titulo}» fue descartada y salió de las pendientes.` : left ? `Decisiones aplicadas en «${minute.titulo}»; quedan ${left} por decidir.`
             : `«${minute.titulo}» quedó procesada y salió de la bandeja.`;

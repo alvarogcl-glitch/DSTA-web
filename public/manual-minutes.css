@@ -58,3 +58,11 @@
   .mm-back{display:inline-block}
   .mm-head{padding:14px 14px 8px}.mm-toolbar{padding:0 14px 12px}
 }
+#manual-minutes-open{margin-right:4px}
+.mm-actions .mm-danger,.mm-editor-top .mm-danger{background:transparent;border:1px solid #7a3b3b;color:#ffa194}
+.mm-actions .mm-danger:hover,.mm-editor-top .mm-danger:hover{background:#3d1d1d}
+.mm-delete{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mm-confirm{color:#ffcdc4;font-size:13px;max-width:420px}
+.mm-editor-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mm-editor-top button{border-radius:10px;padding:6px 12px;background:#18222e;border:1px solid #3a4859;color:#eef3f8;cursor:pointer}
+.mm-editor-top .mm-back{background:transparent;border:0;padding:0}

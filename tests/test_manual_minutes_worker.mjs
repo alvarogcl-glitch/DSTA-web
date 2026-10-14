@@ -40,4 +40,18 @@ assert.equal(again.revision,2,'new revision so the inbox analyses it again');
 data.set('minute:m-test2',{id:'m-test2',source:'Manual-Dashboard',sourceId:'manual-'+id,digest:'2',acciones:[{estado:'aplicada'}]});
 assert.equal((await call('done',{id,attempt:again.attempt,minuteId:'m-test2'})).status,200);
 assert.equal((await call('submit',{id,revision:2,reprocess:true})).status,409,'never re-analyse over applied decisions');
+// Eliminar: a processed minute leaves the list (tombstone kept, re-uploads stay hidden) and its manual entry goes away.
+const minutesCall=(path,body)=>box.fetch(new Request('https://internal/minutes/'+path,{method:body?'POST':'GET',...(body?{body:JSON.stringify(body)}:{})}));
+assert.ok((await (await minutesCall('list')).json()).minutes.some(m=>m.id==='m-test2'));
+assert.equal((await minutesCall('decide',{minuteId:'m-test2',decision:'eliminar',digest:'otra'})).status,409,'stale view refused');
+assert.equal((await minutesCall('decide',{minuteId:'m-test2',decision:'eliminar',digest:'2'})).status,202);
+assert.ok(!(await (await minutesCall('list')).json()).minutes.some(m=>m.id==='m-test2'),'hidden at once');
+assert.equal(data.get('manual:'+id),undefined,'its manual entry is removed');
+await minutesCall('upsert',{id:'m-test2',source:'Manual-Dashboard',sourceId:'x',digest:'2',acciones:[]});
+assert.ok(!(await (await minutesCall('list')).json()).minutes.some(m=>m.id==='m-test2'),'a later upload never resurrects it');
+// A draft that was never sent is deleted directly; a sent one is not.
+const draftId=crypto.randomUUID();
+await call('save',{...draft,id:draftId,operationId:crypto.randomUUID(),revision:0});
+assert.equal((await call('delete',{id:draftId})).status,200);
+assert.equal(data.get('manual:'+draftId),undefined);
 console.log('Manual drafts: durable recovery, optimistic concurrency, scope, submit deduplication, lease fencing, errors and inbox proof passed');

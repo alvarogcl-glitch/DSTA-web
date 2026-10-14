@@ -555,7 +555,7 @@ def process_decision(decision: dict, base_url: str, token: str, hermes_home: Pat
     """Apply the approvals, rejections and instructions the user sent from the dashboard inbox."""
     error = ""
     try:
-        discard = decision.get("decision") == "descartar"
+        discard = decision.get("decision") in ("descartar", "eliminar")
         saved = minute_inbox.get_record(inbox_store(hermes_home), str(decision.get('minuteId', '')))
         if saved and saved.get('source') == 'Manual-Dashboard':
             record = owner_manual_inbox(hermes_home).decide('ceo', {}, decision,

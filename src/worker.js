@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "minutas-ventana-2026-10-14";
+const CODE_VERSION = "minutas-eliminar-2026-10-14";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -546,9 +546,10 @@ const MINUTE_EDIT_KEYS = new Set(["task_id", "project_id", "titulo", "nota", "re
 function validDecision(body) {
   const { minuteId, decisions } = body || {};
   if (typeof minuteId !== "string" || !MINUTE_ID.test(minuteId)) return null;
-  if (body.decision === "descartar") {
+  // «eliminar» (14-10): like discarding, and the minute also leaves the lists. Applied changes stay.
+  if (body.decision === "descartar" || body.decision === "eliminar") {
     if (decisions !== undefined || typeof body.digest !== "string" || !body.digest || body.digest.length > 100) return null;
-    return { minuteId, decision: "descartar", digest: body.digest };
+    return { minuteId, decision: body.decision, digest: body.digest };
   }
   if (body.decision !== undefined) return null;
   if (!Array.isArray(decisions) || !decisions.length || decisions.length > 25) return null;
@@ -990,7 +991,8 @@ export class DashboardChatQueue extends DurableObject {
         return json({ error: "Minuta inválida." }, 400);
       }
       const previous = storage.get(`minute:${record.id}`);
-      // A source dismissed by the user stays out even when its content changes.
+      // A source dismissed or deleted by the user stays out even when its content changes.
+      if (previous?.eliminadaEn) record.eliminadaEn = previous.eliminadaEn;
       if (previous?.descartadaEn) {
         record.descartadaEn = previous.descartadaEn;
         record.estado = "descartada";
@@ -1008,7 +1010,7 @@ export class DashboardChatQueue extends DurableObject {
 
     if (url.pathname === "/minutes/list" && request.method === "GET") {
       // Newest meeting first (meeting date), then most recently detected.
-      const minutes = [...storage.list({ prefix: "minute:" })].map(([, record]) => record)
+      const minutes = [...storage.list({ prefix: "minute:" })].map(([, record]) => record).filter(record => !record.eliminadaEn)
         .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) ||
           String(b.detectadaEn).localeCompare(String(a.detectadaEn))).slice(0, url.searchParams.get("all") === "1" ? 500 : 30);
       return json({ minutes });
@@ -1028,9 +1030,14 @@ export class DashboardChatQueue extends DurableObject {
       const record = storage.get(`minute:${decision.minuteId}`);
       if (!record) return json({ error: "Minuta no encontrada." }, 404);
       if (record.aplicando) return json({ error: "Ya se están aplicando decisiones de esta minuta." }, 409);
-      if (record.descartadaEn) return json({ error: "Esta minuta ya fue descartada." }, 409);
-      if (decision.decision === "descartar" && decision.digest !== record.digest) {
-        return json({ error: "La minuta cambió. Actualiza la bandeja antes de descartarla." }, 409);
+      if (record.descartadaEn && decision.decision !== "eliminar") return json({ error: "Esta minuta ya fue descartada." }, 409);
+      if (["descartar", "eliminar"].includes(decision.decision) && decision.digest !== record.digest) {
+        return json({ error: "La minuta cambió. Actualiza la lista antes de continuar." }, 409);
+      }
+      if (decision.decision === "eliminar") {
+        // Hidden right away; the VM records the tombstone so the source is never imported again.
+        record.eliminadaEn = new Date().toISOString();
+        for (const [key, manual] of [...storage.list({ prefix: "manual:" })]) if (manual.minuteId === record.id) storage.delete(key);
       }
       const id = crypto.randomUUID();
       storage.put(`decision:${id}`, { ...decision, id, status: "queued", createdAt: new Date().toISOString() });
@@ -1133,6 +1140,10 @@ export class DashboardChatQueue extends DurableObject {
         Object.assign(old,{revision:old.revision+1,status:'queued',error:'',updatedAt:new Date(now).toISOString()}); storage.put('manual:'+old.id,old);
       }
       return json(view(old),202);
+    }
+    if (url.pathname === '/manual/delete') {
+      if (!['draft','error'].includes(old.status)) return json({error:'Esta minuta ya se envió a análisis. Elimínala desde su resumen.'},409);
+      storage.delete('manual:'+old.id); return json({ok:true});
     }
     if (url.pathname === '/manual/done') {
       if (old.status!=='running' || old.attempt!==body.attempt || old.leaseUntil<=now) return json({error:'Intento no activo.'},409);
@@ -1800,7 +1811,7 @@ export default {
       return response;
     };
 
-    if (url.pathname === '/api/manual-minutes' || url.pathname === '/api/manual-minutes/submit') {
+    if (url.pathname === '/api/manual-minutes' || url.pathname === '/api/manual-minutes/submit' || url.pathname === '/api/manual-minutes/delete') {
       if (!accounts) return json({error:'Requiere modo cuentas.'},404);
       // A tab opened as A must not send A's notes after another tab logs in as B.
       if (request.headers.get('x-dsta-actor')!==session.actor.id) return json({error:'La cuenta cambió. Recarga el dashboard para continuar.'},409);
@@ -1808,6 +1819,7 @@ export default {
       if (request.method!=='POST') return json({error:'Método no permitido.'},405);
       const parsed=await readJson(request,260_000); if (parsed.error) return parsed.error;
       const submit=url.pathname.endsWith('/submit');
+      if (url.pathname.endsWith('/delete')) return forwardToChatObject(env,'/manual/delete',parsed.body,box);
       return announce(forwardToChatObject(env,submit?'/manual/submit':'/manual/save',parsed.body,box),submit?'manual':null);
     }
     if (accounts && url.pathname === "/api/granola/status") {

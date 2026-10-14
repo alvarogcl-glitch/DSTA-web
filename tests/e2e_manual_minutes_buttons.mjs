@@ -71,6 +71,26 @@ try{
  await a.locator('#dsta-inbox').waitFor({state:'visible'});
  await a.locator('#dsta-inbox',{hasText:'Entrega cerrada'}).waitFor();
  results['ventana Minutas: origen, filtros, detalle y bandeja']=true;
+ // Eliminar: a Granola minute (with confirmation) and a draft; both leave the list.
+ await a.locator('#dsta-inbox-close').click();
+ await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').first().waitFor();
+ await a.locator('.mm-item',{hasText:'Revisión semanal'}).click();
+ await a.locator('.mm-actions .mm-danger',{hasText:'Eliminar'}).click();
+ await a.locator('.mm-confirm').waitFor();
+ await a.locator('.mm-actions .mm-danger',{hasText:'Sí, eliminar'}).click();
+ await a.locator('.mm-item',{hasText:'Revisión semanal'}).waitFor({state:'detached'});
+ assert.ok((await a.locator('.mm-chip').allInnerTexts()).some(t=>/^Granola · 1$/.test(t)));
+ await a.locator('.mm-chip',{hasText:'Todas'}).click();
+ const drafts=await a.locator('.mm-item',{hasText:'Borrador'}).count();
+ await a.locator('.mm-item',{hasText:'Borrador'}).first().click();
+ await a.locator('.mm-editor-del .mm-danger').click();await a.locator('.mm-editor-del .mm-danger',{hasText:'Sí, eliminar'}).click();
+ await a.waitForFunction(n=>document.querySelectorAll('.mm-item').length&&[...document.querySelectorAll('.mm-item')].filter(e=>e.textContent.includes('Borrador')).length===n-1,drafts);
+ results['eliminar minuta y borrador']=true;
+ // The «Minutas» header button is spaced like the others.
+ const gap=await a.evaluate(()=>{const m=document.querySelector('#manual-minutes-open').getBoundingClientRect(),r=document.querySelector('#refresh').getBoundingClientRect();return r.left-m.right;});
+ assert.ok(gap>=4,'Minutas button is not glued to the next one: '+gap);
+ await a.keyboard.press('Escape');
+ await a.locator('#dsta-inbox-toggle').click();
  await a.setViewportSize({width:390,height:844});await a.locator('#dsta-inbox-close').click();
  await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').first().waitFor();
  if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/minutas-movil.png'});

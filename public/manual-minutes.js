@@ -217,6 +217,37 @@
       box.append(row);
     }
   }
+  // Eliminar (14-10): a draft is deleted; a processed minute leaves the lists and the VM keeps a
+  // tombstone so its source is never imported again. Changes already applied in Vikunja stay.
+  async function removeItem(item,note){
+    if(item.record){
+      const response=await fetch('/api/minutes/decide',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},
+        body:JSON.stringify({minuteId:item.record.id,decision:'eliminar',digest:item.record.digest})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok)throw Error(payload.error||'No se pudo eliminar la minuta.');
+      records=records.filter(r=>r.id!==item.record.id);
+      window.DstaInbox?.reload?.();
+    }else if(server[item.draft.id]){
+      await api('/delete',{id:item.draft.id});
+    }
+    if(item.draft){delete cache[item.draft.id];delete server[item.draft.id];try{localStorage.removeItem(localName()+':'+item.draft.id);}catch{}}
+    selected=null;renderList();renderDetail(null);
+    window.DstaToast?.show('✓ Minuta eliminada',true);
+  }
+  function deleteButton(container,item,note){
+    const wrap=document.createElement('span');wrap.className='mm-delete';
+    const ask=Object.assign(document.createElement('button'),{type:'button',className:'mm-danger',textContent:'Eliminar'});
+    ask.onclick=()=>{
+      wrap.replaceChildren(Object.assign(document.createElement('span'),{className:'mm-confirm',
+        textContent:item.record?'¿Eliminar esta minuta? Sale de la lista y de la bandeja; lo ya aplicado en Vikunja se mantiene.':'¿Eliminar este borrador?'}));
+      const yes=Object.assign(document.createElement('button'),{type:'button',className:'mm-danger',textContent:'Sí, eliminar'});
+      const no=Object.assign(document.createElement('button'),{type:'button',textContent:'Cancelar'});
+      yes.onclick=async()=>{yes.disabled=no.disabled=true;try{await removeItem(item,note);}catch(e){note.textContent=e.message;wrap.replaceChildren(ask);}};
+      no.onclick=()=>wrap.replaceChildren(ask);
+      wrap.append(yes,no);yes.focus();
+    };
+    wrap.append(ask);container.append(wrap);
+  }
   function renderDetail(item){
     const pane=dialog.querySelector('.mm-detail');dialog.classList.toggle('mm-showing',Boolean(item));
     if(!item){pane.innerHTML='<p class="mm-empty">Selecciona una minuta para ver su resumen, sus propuestas y su estado.</p>';return;}
@@ -233,6 +264,7 @@
     const actions=pane.querySelector('.mm-actions'),note=pane.querySelector('.mm-note');
     const add=(text,cls,fn)=>{const b=Object.assign(document.createElement('button'),{type:'button',className:cls,textContent:text});b.onclick=fn;actions.append(b);return b;};
     if(r)add(left?`Revisar ${left} ${left===1?"propuesta":"propuestas"} en 🔔`:'Abrir en la bandeja 🔔',left?'mm-primary':'',()=>{dialog.close();window.DstaInbox?.open(r.id);});
+    if(!r?.aplicando)deleteButton(actions,item,note);
     if(d){
       add('Ver texto','',()=>showEditor(d));
       if(d.status==='processed'&&!appliedOf(r)&&!r?.descartadaEn)add('Volver a procesar','',async e=>{
@@ -244,8 +276,9 @@
   }
   function showEditor(draft){
     const pane=dialog.querySelector('.mm-detail');dialog.classList.add('mm-showing');
-    pane.innerHTML=`<button type="button" class="mm-back" data-back>← Minutas</button><div data-editor class="mm-editor"><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000" placeholder="Escribe aquí las notas de la reunión: acuerdos, avances, responsables y fechas."></textarea><button type="button" data-copy>Copiar texto</button></div>`;
+    pane.innerHTML=`<div class="mm-editor-top"><button type="button" class="mm-back" data-back>← Minutas</button><span class="mm-editor-del"></span></div><p class="mm-note" role="status"></p><div data-editor class="mm-editor"><textarea class="minute-text" aria-label="Contenido de la minuta" maxlength="60000" placeholder="Escribe aquí las notas de la reunión: acuerdos, avances, responsables y fechas."></textarea><button type="button" data-copy>Copiar texto</button></div>`;
     pane.querySelector('[data-back]').onclick=()=>{openList().catch(e=>window.DstaToast?.show(e.message,false));};
+    if(['draft','error'].includes(draft.status))deleteButton(pane.querySelector('.mm-editor-del'),{draft},pane.querySelector('.mm-note'));
     const field=pane.querySelector('textarea');field.value=draft.content;
     editor(pane.querySelector('[data-editor]'),draft,field,pane.querySelector('[data-copy]'));field.focus();
   }
@@ -257,7 +290,7 @@
     await load();ready=true;
     const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/manual-minutes.css'});document.head.append(style);
     const button=Object.assign(document.createElement('button'),{type:'button',id:'manual-minutes-open',textContent:'Minutas'});
-    document.querySelector('#refresh').before(button);
+    document.querySelector('#refresh').before(button,' ');
     button.onclick=()=>{selected=null;openList().catch(e=>window.DstaToast?.show(e.message,false));};
     new MutationObserver(attach).observe(document.querySelector('#detail-body'),{childList:true});attach();
     setInterval(()=>{
