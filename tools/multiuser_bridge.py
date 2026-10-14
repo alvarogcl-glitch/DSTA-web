@@ -16,6 +16,7 @@ The env file holds DSTA_DASHBOARD_URL (staging) and DSTA_BRIDGE_TOKEN; nothing i
 from __future__ import annotations
 
 import argparse
+import os
 from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
@@ -380,8 +381,10 @@ def build(env_file: Path) -> MultiuserBridge:
     token = hb.setting("DSTA_BRIDGE_TOKEN", values)
     if not base.startswith("https://") and not base.startswith("http://127.0.0.1"):
         raise RuntimeError("DSTA_DASHBOARD_URL debe usar HTTPS")
-    if "dsta-web." in base and "staging" not in base:
-        raise RuntimeError("El puente multiusuario no se conecta a producción antes de F6")
+    # Desde el corte (14-10-2026) el puente puede atender producción; staging y producción usan
+    # vaults distintos (DSTA_VAULT_DIR) para no mezclar usuarios.
+    if "dsta-web." in base and "staging" not in base and "dsta-multiuser-prod" not in str(os.environ.get("DSTA_VAULT_DIR", "")):
+        raise RuntimeError("Producción requiere el vault de producción (DSTA_VAULT_DIR en la carpeta dsta-multiuser-prod)")
     if not token:
         raise RuntimeError("Falta DSTA_BRIDGE_TOKEN")
     users_dir = user_vault.vault_dir().parent / "users"

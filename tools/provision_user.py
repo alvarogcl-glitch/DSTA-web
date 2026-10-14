@@ -145,12 +145,18 @@ def main(argv=None) -> int:
     parser.add_argument("--vikunja-url", default="http://127.0.0.1:14701")
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--persist-to")
+    parser.add_argument("--produccion", action="store_true",
+                        help="Opera contra producción: D1 dsta-web-accounts, wrangler.jsonc y vault de producción")
     args = parser.parse_args(argv)
+    global CONFIG, DATABASE
+    if args.produccion:
+        CONFIG, DATABASE = "wrangler.jsonc", "dsta-web-accounts"
+        os.environ["DSTA_VAULT_DIR"] = str(Path(os.environ["LOCALAPPDATA"]) / "dsta-multiuser-prod" / "vault")
     if not ACTOR_ID.match(args.actor):
         print("Identificador inválido (minúsculas, números y guiones).")
         return 2
-    if "dsta-web." in args.dashboard_url and "staging" not in args.dashboard_url:
-        print("Antes de F6 este script solo opera contra staging.")
+    if ("dsta-web." in args.dashboard_url and "staging" not in args.dashboard_url) != args.produccion:
+        print("Producción exige --produccion (y staging no lo admite): así nunca se mezclan bases ni vaults.")
         return 2
     scope = ("--local", *(("--persist-to", args.persist_to) if args.persist_to else ())) if args.local else ("--remote",)
 
