@@ -267,6 +267,24 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 - Versiones: Worker staging c31e37c2-8906-4c39-bdc8-8dc8e95e7856; puente reiniciado con 3806b63.
 - Rollback: revertir 3806b63, redeploy y reiniciar el puente. La columna `purpose` puede quedarse: es inocua.
 
+### Entrega E12 · Numeración propia de tareas por usuario (opción B)
+
+- Autorización: Telegram 14-10 02:17, «si», a la propuesta: contador propio por usuario; el dueño conserva sus IDs; hacerlo antes del corte.
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: 4fe4fc0 → a3fba2f (rama feat/multiusuario).
+- Cómo funciona:
+  - El puente multiusuario asigna en cada lectura un número por usuario (#1, #2…, en orden de creación). El mapa vive en `task-numbers/<servidor>-<raíz>.json` en la VM, con escritura atómica por archivo.
+  - El snapshot lleva `num`; el ID real de Vikunja sigue en acciones, enlaces y pruebas.
+  - Una tarea conserva su número para siempre, también si se archiva y restaura.
+  - Interfaz: tarjetas, inspector, inventario (búsqueda «#3» y orden), minutas, avisos, bandeja y copiloto muestran #N.
+  - El copiloto y el analista ven «#N (id X)» y usan el id en las acciones.
+  - El perfil del dueño en producción no se numera (vault `ownNumbering: false`, a fijar en el corte). En el piloto, la cuenta alvaro de laboratorio sí se numera.
+- Pruebas:
+  - `npm test`: 181 Python OK, más todas las suites JS.
+  - Navegador: 23 de 23. A y B parten en #1 con distintos IDs reales.
+- Versiones: Worker staging 46396af7-8840-4d0f-9c08-2840271b256f; puente reiniciado con a3fba2f.
+- Rollback: revertir a3fba2f, redeploy y reiniciar el puente. El archivo de números puede quedarse.
+
 ## Plantilla de una decisión
 
 ### Decisión DNN

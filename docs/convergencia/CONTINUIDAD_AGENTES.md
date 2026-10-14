@@ -20,7 +20,8 @@ Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) llev
 - D44–D54 decididas (E09, staging ee18087f).
 - D55, D57–D59 decididas (E10, staging bfd8555c).
 - D61–D63 y D67 decididas (E11, staging c31e37c2).
-- Pendientes, todas del corte a producción: D66, D68, D69, D70, D71, D72.
+- D66–D72 aprobadas para el corte (sin fecha). E12 (numeración propia por usuario) publicada en staging 46396af7.
+- Siguiente: plan de corte y ensayo en staging; luego pedir fecha y hora al CEO para producción.
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.
