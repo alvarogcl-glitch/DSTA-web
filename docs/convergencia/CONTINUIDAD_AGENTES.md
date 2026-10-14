@@ -17,7 +17,8 @@ Actualización 13-10 (tarde): el CEO pidió que Claude Code (chat Telegram) llev
 - D26–D30 decididas e implementadas (E06, staging dd6ee1a2).
 - D31–D37 decididas (E07, staging ecdfac8a).
 - D38–D42 decididas (E08, puente 18672ef).
-- Siguiente: presentar D44 en adelante de la matriz (D40 y D43 ya estaban decididas).
+- D44–D54 decididas, salvo D48 (E09, staging ee18087f).
+- Siguiente: presentar D48, D53 en adelante pendientes (D55, D57–D59, D61–D72).
 - Las demás decisiones siguen por decidir.
 
 Producción no cambia sin una autorización concreta.

@@ -57,6 +57,11 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
 | D39 | decidido | Mismo. | Catálogo propio por usuario. Un usuario nuevo parte sin etiquetas y sin lista sugerida. | Igual. | Ninguno. | — |
 | D41 | decidido | Mismo. | La primera sincronización trae 90 días (rango `custom` de Granola; el plan gratuito entrega solo lo que guarda). Lo anterior a 30 días va solo al archivo de búsqueda (D31), no a la bandeja ni al análisis por IA. Después rige la ventana normal de 30 días. | Equivalente al converger. | Ninguno. | Entrega E08. |
 | D42 | decidido | Mismo «Si», tras el ejemplo del contrato con Legal y Finanzas. | El analista de minutas recibe el mismo contexto que el copiloto: descripción completa de las abiertas (dependencia, criterio, bitácora), descripción de la línea y las completadas en resumen, con aviso si se recorta (límite de 50.000 caracteres). | Equivalente al MCP de producción. | Ninguno. | Entrega E08. |
+| D45 | decidido | Telegram 14-10 00:14: «Si» a D45/D46/D47/D51/D53. | Se mantiene la semántica: descartar no revierte lo aplicado automáticamente. El texto lo dice y explica deshacerlo con «Modificar» en cada cambio. | Igual. | Ninguno. | Entrega E09. |
+| D46 | decidido | Mismo. | El puente publica el snapshot del usuario apenas una decisión o una aplicación automática de minuta cambia sus tareas (antes esperaba el ciclo de 5 minutos). | Igual. | Ninguno. | Entrega E09. |
+| D47 | decidido (sin cambios) | Mismo. | Las notas privadas solo se procesan en la VM y por la IA; nunca llegan al navegador. | Igual. | Ninguno. | — |
+| D51 | decidido | Mismo. | Las secciones personalizadas permiten seleccionar con pulsación larga, con el mismo aviso y botón «Quitar selección». Sin selección se incluyen todas. | Igual al converger. | Ninguno. | Entrega E09. |
+| D53 | decidido | Mismo. | Un solo formato de línea para todas las minutas generadas: #id título · Responsable · Fecha · Dependencia · Estado (Abierta/Vencida/Completada), más el resumen IA si la sección lo tiene. Los campos desconocidos se omiten. Cata conserva su cierre «Otros temas tratados». | Igual al converger. | Ninguno. | Entrega E09. |
 | D06 | decidido | Telegram 13-10 22:05: «D06: A». | Campos separados. Se edita solo el «Detalle»; los metadatos tienen su propio campo y la bitácora solo admite agregar registros. Ni el formulario ni el copiloto pueden reemplazar la descripción completa (`task.update` ya no acepta `description`). | Igual al converger. | Ninguno. | Entrega E03. |
 
 ## Entregas
@@ -209,6 +214,17 @@ Añadir una entrada cuando exista respuesta. Las decisiones no enumeradas aquí 
   - Casos nuevos: la primera sincronización pide el rango `custom` de 90 días; solo lo de los últimos 30 días llega a la bandeja; ambas reuniones quedan en el archivo; la siguiente sincronización usa `last_30_days`.
   - El analista ve dependencia, bitácora y tareas completadas.
 - Rollback: revertir 18672ef y reiniciar el puente.
+
+### Entrega E09 · D45, D46, D51 y D53: minutas más claras e inmediatas; selección y formato común
+
+- Autorización: Telegram 14-10 00:14, «Si».
+- Estado: verificado en local y en navegador, y publicado en el piloto. Falta la prueba del CEO.
+- Commit base y resultado: 8d5eabc → 92e43b2 (rama feat/multiusuario).
+- Pruebas:
+  - `npm test`: 177 Python OK, más todas las suites JS. La prueba de selección ahora verifica el formato común.
+  - Navegador: 15 de 15. Incluye una sección personalizada con pulsación larga, «Generar minuta (1 seleccionada)» y el texto con «Estado: Abierta».
+- Versiones: Worker staging ee18087f-14fd-43e9-9b21-0f7f4e15a538; puente reiniciado con 92e43b2.
+- Rollback: revertir 92e43b2, redeploy de staging y reiniciar el puente.
 
 ## Plantilla de una decisión
 
