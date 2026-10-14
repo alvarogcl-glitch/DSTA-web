@@ -36,7 +36,7 @@
       toastTimer = setTimeout(() => { toast.hidden = true; toast.classList?.remove('fading'); }, 700);
     }, 6000);
   }
-  function feedback(id, message, success = false) { notify('#' + id + ' · ' + message, success); }
+  function feedback(id, message, success = false) { notify('#' + (window.DstaTaskNumber?.(id) ?? id) + ' · ' + message, success); }
   window.DstaToast = { show: notify };
   const progress = job => job.kind === 'complete' ? 'Completando…' : 'Guardando registro…';
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());

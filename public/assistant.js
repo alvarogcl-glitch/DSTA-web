@@ -44,7 +44,7 @@
 
   function showContext() {
     const task = selectedTask();
-    contextEl.textContent = task ? `Contexto incluido: #${task.id} · ${task.title}` : 'Se adjunta el contexto si abriste una tarea en el inspector.';
+    contextEl.textContent = task ? `Contexto incluido: #${task.num ?? task.id} · ${task.title}` : 'Se adjunta el contexto si abriste una tarea en el inspector.';
   }
 
   function openPanel(open = true) {
@@ -148,7 +148,7 @@
   // (D03) were queued by the Worker. Both go through the
   // same verified action queue as the dashboard buttons (/api/task-actions).
   const lineName = id => (typeof projects !== 'undefined' && projects.find(p => p.id === id)?.title) || `LT ${id}`;
-  const taskName = id => (typeof tasks !== 'undefined' && tasks.find(t => t.id === id)?.title) || `#${id}`;
+  const taskName = id => (typeof tasks !== 'undefined' && tasks.find(t => t.id === id)?.title) || `#${window.DstaTaskNumber?.(id) ?? id}`;
   const labelName = id => (typeof labels !== 'undefined' && labels.find(l => l.id === id)?.title) || `#${id}`;
   // D30: label changes use the label queue; everything else the structure/action queue.
   const isLabel = proposal => proposal.queue === 'label' || String(proposal.action).startsWith('label.');

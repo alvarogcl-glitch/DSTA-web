@@ -75,7 +75,7 @@
 
   function taskLabel(id) {
     const task = currentTasks().find(item => String(item.id) === String(id));
-    return task ? `#${task.id} · ${task.title}` : (id ? `#${id}` : 'Sin tarea indicada');
+    return task ? `#${task.num ?? task.id} · ${task.title}` : (id ? `#${window.DstaTaskNumber?.(id) ?? id}` : 'Sin tarea indicada');
   }
 
   function lineLabel(id) {

@@ -7,7 +7,7 @@ const script = html.split('<script>')[1].split('</script>')[0];
 const section = script.slice(script.indexOf('function taskView('), script.indexOf('function showTask('));
 const task = { id: 42, title: 'Validar tarea', project_id: 3, project: 'LT2 · AER',
   done: false, owner: 'Álvaro', date: '', dependency: '', description: '' };
-const context = { projects: [{ id: 3, title: 'LT2 · AER' }], tasks: [task], descriptionLog: () => '' };
+const context = { projects: [{ id: 3, title: 'LT2 · AER' }], tasks: [task], descriptionLog: () => '', tid: t => t.num ?? t.id };
 const inspect = vm.runInNewContext(`${section}\n({projectView,taskView,rebuildInspection})`, context);
 const savedProject = inspect.projectView(context.projects[0]);
 const savedTask = inspect.taskView(task);

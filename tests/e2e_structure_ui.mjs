@@ -53,6 +53,12 @@ assert.equal(await a.locator('.dsta-welcome button').count(), 3);
 await a.evaluate(() => { projects = window.__savedProjects; window.dispatchEvent(new Event('dsta-rendered')); });
 assert.equal(await a.locator('.dsta-welcome').count(), 0, 'the card goes away once there are lines');
 step('D59: tarjeta de bienvenida con 3 pasos solo si no hay líneas');
+
+// E12: own numbering — A's first task is #1 (B's too, checked below), whatever its Vikunja ID.
+const baseA = await a.evaluate(() => tasks.find(t => t.title === 'Tarea base A'));
+assert.equal(baseA.num, 1);
+assert.match(await a.locator('#rows').innerText(), /#1\s+Tarea base A/);
+step('E12: la primera tarea de A se ve como #1');
 await a.click('.structure-new-lt');
 await submitDialog(a, { title: 'LT creada desde UI' });
 assert.ok(await a.evaluate(() => projects.some(p => p.title === 'LT creada desde UI'))); step('A crea una línea desde la interfaz');
@@ -236,6 +242,10 @@ await submitDialog(a, {});
 const b = await session(cfg.B);
 const seenByB = await b.evaluate(() => [...projects.map(p => p.title), ...tasks.map(t => t.title)].join('|'));
 assert.doesNotMatch(seenByB, /desde UI/); step('B no ve nada de lo que hizo A');
+const baseB = await b.evaluate(() => tasks.find(t => t.title === 'Tarea base B'));
+assert.equal(baseB.num, 1, 'B also starts at #1');
+assert.notEqual(baseB.id, baseA.id, 'different real IDs underneath');
+step('E12: B también parte en #1, con otro ID real por debajo');
 
 // D67: B changes their own password from ⚙ (asks for the current one).
 await b.click('#dsta-settings-toggle');

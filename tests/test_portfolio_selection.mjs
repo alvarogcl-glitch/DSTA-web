@@ -19,6 +19,7 @@ const context = {
   exitSelectMode: () => {},
   minuteLine: task => `- #${task.id} ${task.title}`,
   brandPrefix: () => 'PMO-DSTA ',
+  tid: task => task.num ?? task.id,
 };
 const section = script.slice(script.indexOf('function portfolioMinute(){'), script.indexOf('const chosenOrAll='));
 vm.runInNewContext(`${section}\nportfolioMinute()`, context);
@@ -51,6 +52,7 @@ const minuteContext = {
   dayOffset: value => (value === '2026-09-01' ? -5 : 3),
   window: {},
   brandPrefix: () => 'PMO-DSTA ',
+  tid: task => task.num ?? task.id,
   minuteDate: () => '28-09-2026',
   exitSelectMode: () => {},
   minuteView: (...args) => views.push(args),

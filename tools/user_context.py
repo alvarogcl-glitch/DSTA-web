@@ -22,6 +22,39 @@ def root_project_id() -> int:
     return _ROOT_PROJECT_ID.get()
 
 
+_NUMBERS_FILE: ContextVar = ContextVar("dsta_task_numbers_file", default=None)
+_numbers_dir = None
+
+
+def set_numbers_dir(path) -> None:
+    """The multiuser bridge enables per-user task numbers by giving them a directory."""
+    global _numbers_dir
+    _numbers_dir = path
+
+
+def task_numbers_file():
+    """File with this user's own task numbers, or None (single-user mode / owner profile)."""
+    return _NUMBERS_FILE.get()
+
+
+@contextmanager
+def using_user(user: dict):
+    """Root project plus (unless the vault says ownNumbering=False) the user's task numbering."""
+    import hashlib
+    from pathlib import Path
+    root = user["rootProjectId"]
+    numbers = None
+    if _numbers_dir is not None and user.get("ownNumbering", True):
+        server = hashlib.sha256(str(user.get("vikunjaUrl", "")).encode()).hexdigest()[:8]
+        numbers = Path(_numbers_dir) / f"{server}-{root}.json"
+    token = _NUMBERS_FILE.set(numbers)
+    try:
+        with using_root(root):
+            yield
+    finally:
+        _NUMBERS_FILE.reset(token)
+
+
 @contextmanager
 def using_root(project_id: int):
     """Run the enclosed code against another user's root project."""

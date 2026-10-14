@@ -38,7 +38,8 @@ BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
     "Usa SOLO el contexto de abajo: son sus líneas de trabajo, tareas y minutas. No inventes datos; "
-    "si algo no está en el contexto, dilo. No tienes herramientas para modificar nada: los cambios se "
+    "si algo no está en el contexto, dilo. Las tareas se muestran como «#N (id X)»: al hablar con la persona usa #N; "
+    "en el bloque de acciones usa SIEMPRE el id X. No tienes herramientas para modificar nada: los cambios se "
     "aplican desde el dashboard (crear, editar, mover o completar tareas y líneas). Si la persona PIDE "
     "explícitamente un cambio (\"crea…\", \"mueve…\", \"completa…\"), marca ese objeto con \"ejecutar\": true "
     "y el dashboard lo aplicará por sí solo; lo que sugieras por iniciativa propia va SIN esa marca para "
@@ -84,12 +85,13 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
                                         task.get("created") and f"creada {local_date(task['created'])}") if v)
         names = [labels[i] for i in task.get("label_ids") or [] if i in labels]
         tags = f" · etiquetas: {', '.join(names)}" if names else ""
-        return f"- #{task.get('id')} {task.get('title', '')}" + (f" ({extra})" if extra else "") + tags
+        return f"- {task_label(task)} {task.get('title', '')}" + (f" ({extra})" if extra else "") + tags
 
     essential = [INSTRUCTIONS, "", f"Hoy es {today_local()} (hora de Chile).", "", "## Líneas de trabajo y tareas abiertas"]
     if job.get("task"):
         task = job["task"]
-        essential[4:4] = [f"## Tarea seleccionada: #{task.get('id')} {task.get('title', '')}", ""]
+        known = next((t for t in snapshot.get("tasks", []) if t.get("id") == task.get("id")), task)
+        essential[4:4] = [f"## Tarea seleccionada: {task_label(known)} {task.get('title', '')}", ""]
     for project in snapshot.get("projects", []):
         essential.append(f"### {project.get('title', '')} (LT {project.get('id')})")
         if project.get("description"):
@@ -165,6 +167,11 @@ def local_date(value: str) -> str:
 
 def today_local() -> str:
     return datetime.now(CHILE).date().isoformat()
+
+
+def task_label(task: dict) -> str:
+    """E12: the person's own number (#N) plus the real Vikunja id the actions need."""
+    return f"#{task['num']} (id {task.get('id')})" if task.get("num") else f"#{task.get('id')}"
 
 
 def line_key(title) -> str:

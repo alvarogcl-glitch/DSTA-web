@@ -134,6 +134,7 @@ function validSnapshot(snapshot) {
   return snapshot.tasks.every(task =>
     (task.project_id === undefined || projectIds.has(task.project_id)) &&
     (task.done === undefined || typeof task.done === "boolean") &&
+    (task.num === undefined || (Number.isSafeInteger(task.num) && task.num > 0)) &&
     ["project", "owner", "date", "dependency", "criterion", "source", "action_key", "description", "created"]
       .every(key => task[key] === undefined || typeof task[key] === "string"));
 }

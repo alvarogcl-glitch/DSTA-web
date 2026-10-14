@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
-from user_context import root_project_id
+from user_context import root_project_id, task_numbers_file
 
 POLL_SECONDS = 30
 HEARTBEAT_SECONDS = 300
@@ -136,6 +136,13 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
                                          if label.get("id") in label_ids}),
                 }
             )
+    numbers_file = task_numbers_file()
+    if numbers_file is not None:
+        # Per-user numbering: what the person sees as #1, #2… (the real ID keeps working underneath).
+        import task_numbers
+        numbers = task_numbers.assign(numbers_file, [task["id"] for task in tasks])
+        for task in tasks:
+            task["num"] = numbers[task["id"]]
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "observationStartedAt": observation_started_at,

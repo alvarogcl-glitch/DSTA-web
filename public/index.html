@@ -149,11 +149,14 @@ function cataReview(t){
  return record?.summary||'Resumen IA pendiente';
 }
 let panelSets={};
+// E12: each user's own task number (#1, #2…) when the bridge provides it; the real ID stays underneath.
+const tid=t=>t?.num??t?.id;
+window.DstaTaskNumber=id=>{const t=tasks.find(x=>String(x.id)===String(id));return t?tid(t):id};
 // D55: minute headers carry the owner's brand (PMO-DSTA) only on the owner's profile.
 const brandPrefix=()=>{const brand=globalThis.__dstaBrand??'PMO-DSTA';return brand?brand+' ':''};
 const minuteDate=()=>{const d=new Date();return [String(d.getDate()).padStart(2,'0'),String(d.getMonth()+1).padStart(2,'0'),d.getFullYear()].join('-')};
 const openTasks=list=>list.filter(t=>!t.done).sort((a,b)=>a.id-b.id);
-const taskLines=list=>openTasks(list).map(t=>'#'+t.id+' '+t.title).join('\n\n');
+const taskLines=list=>openTasks(list).map(t=>'#'+tid(t)+' '+t.title).join('\n\n');
 function minuteView(title,text){
  if(inspection)inspectionHistory.push(inspection);
  showInspection({title,fields:[],minuteText:text});
@@ -173,7 +176,7 @@ const chosenOrAll=(group,list)=>{const chosen=selections[group]??=new Set();retu
 // D53: one line format for every generated minute (owner, date, dependency, status and, when the
 // section has it on, the AI summary). Unknown fields are left out instead of printing "Por confirmar".
 function minuteLine(t,ai=false){
- const parts=['#'+t.id+' '+t.title];
+ const parts=['#'+tid(t)+' '+t.title];
  if(!missing(t.owner))parts.push('Responsable: '+t.owner);
  if(!missing(t.date))parts.push('Fecha: '+displayDate(t.date));
  if(!missing(t.dependency))parts.push('Dependencia: '+t.dependency);
@@ -203,7 +206,7 @@ async function copyMinute(){
  catch{field.select();document.execCommand('copy');status.textContent='Texto copiado'}
 }
 const selectGroupFor=context=>({'cata-open':'cata',upcoming:'upcoming',overdue:'upcoming'})[context]||(/^custom-.+-open$/.test(context)?context.slice(0,-5):'');
-function priorityCard(t,context,note,overdue=false){const review=context==='cata-open'?'<span class="review-note"><b>Para revisar con Cata:</b> '+esc(cataReview(t))+'</span>':'',group=selectGroupFor(context),selectable=group?' data-select-group="'+group+'" data-select-id="'+esc(t.id)+'"':'';return '<button type="button" class="priority-card" data-task="'+esc(t.id)+'" data-context="'+esc(context)+'"'+selectable+'><span class="due '+(overdue?'overdue':'')+'">#'+esc(t.id)+' · '+esc(note)+'</span><strong>'+esc(t.title)+'</strong>'+review+'<small>'+esc(t.project)+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>'}
+function priorityCard(t,context,note,overdue=false){const review=context==='cata-open'?'<span class="review-note"><b>Para revisar con Cata:</b> '+esc(cataReview(t))+'</span>':'',group=selectGroupFor(context),selectable=group?' data-select-group="'+group+'" data-select-id="'+esc(t.id)+'"':'';return '<button type="button" class="priority-card" data-task="'+esc(t.id)+'" data-context="'+esc(context)+'"'+selectable+'><span class="due '+(overdue?'overdue':'')+'">#'+esc(tid(t))+' · '+esc(note)+'</span><strong>'+esc(t.title)+'</strong>'+review+'<small>'+esc(t.project)+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>'}
 function renderPriority(){
  const dated=tasks.filter(t=>!t.done).map(t=>({task:t,days:dayOffset(t.date)})).filter(x=>x.days!==null).sort((a,b)=>a.days-b.days||a.task.id-b.task.id);
  const overdue=dated.filter(x=>x.days<0),soon=dated.filter(x=>x.days>=0&&x.days<=DAYS_AHEAD);
@@ -238,7 +241,7 @@ function showInspection(view){
   $('#detail-body').innerHTML='<p class="muted">Puedes editar el texto antes de copiarlo.</p><textarea id="minute-text" class="minute-text" aria-label="Texto de minuta">'+esc(view.minuteText)+'</textarea><div class="minute-actions"><button id="copy-minute" type="button">Copiar texto</button><span id="copy-status" class="copy-status" role="status"></span></div>';
   $('#copy-minute').addEventListener('click',copyMinute);
  }else{
-  $('#detail-body').innerHTML=view.fields.map(([k,v])=>'<div class="detail-label">'+esc(k)+'</div><div class="detail-value">'+(v&&typeof v==='object'&&v.html!==undefined?v.html:esc(v))+'</div>').join('')+(view.items?'<div class="detail-label">Tareas ('+view.items.length+')</div>'+view.items.map(t=>'<button type="button" class="task-card" data-task="'+esc(t.id)+'">#'+esc(t.id)+' · '+esc(t.title)+(view.title==='Cata 1-1 · pendientes'?'<span class="review-note">Para revisar: '+esc(cataReview(t))+'</span>':'')+'<small>'+esc(t.project)+' · '+(t.done?'Completada':'Abierta')+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>').join(''):'');
+  $('#detail-body').innerHTML=view.fields.map(([k,v])=>'<div class="detail-label">'+esc(k)+'</div><div class="detail-value">'+(v&&typeof v==='object'&&v.html!==undefined?v.html:esc(v))+'</div>').join('')+(view.items?'<div class="detail-label">Tareas ('+view.items.length+')</div>'+view.items.map(t=>'<button type="button" class="task-card" data-task="'+esc(t.id)+'">#'+esc(tid(t))+' · '+esc(t.title)+(view.title==='Cata 1-1 · pendientes'?'<span class="review-note">Para revisar: '+esc(cataReview(t))+'</span>':'')+'<small>'+esc(t.project)+' · '+(t.done?'Completada':'Abierta')+' · '+esc(t.owner)+' · '+esc(t.date)+'</small></button>').join(''):'');
  }
  if(!view.taskId&&Array.isArray(view.items)&&view.minuteText===undefined){
   $('#detail-body').insertAdjacentHTML('afterbegin','<div class="minute-actions"><button id="inspector-minute" type="button">Generar minuta</button></div>');
@@ -260,7 +263,7 @@ function back(){
  else if(inspectionHistory.length){const previous=rebuildInspection(inspectionHistory.pop());if(previous)showInspection(previous);else closeDirect()}
  else closeDirect();
 }
-function taskView(t){return {title:'#'+t.id+' · '+t.title,taskId:String(t.id),fields:[['Estado',t.done?'Completada':'Abierta'],['Línea',t.project],['Responsable',t.owner],['Fecha / horizonte',t.date],['Dependencia',t.dependency],['Descripción estructurada',{html:descriptionLog(t.description)}]]}}
+function taskView(t){return {title:'#'+tid(t)+' · '+t.title,taskId:String(t.id),fields:[['Estado',t.done?'Completada':'Abierta'],['Línea',t.project],['Responsable',t.owner],['Fecha / horizonte',t.date],['Dependencia',t.dependency],['Descripción estructurada',{html:descriptionLog(t.description)}]]}}
 function projectView(p){const all=tasks.filter(t=>String(t.project_id)===String(p.id)),items=all.filter(t=>!t.done);return {title:p.title,projectId:String(p.id),fields:[...(p.description?[['Descripción',p.description]]:[]),['Tareas totales',all.length],['Abiertas',items.length],['Completadas',all.length-items.length],['Responsables de tareas abiertas',[...new Set(items.map(t=>t.owner))].join(', ')||'Ninguno']],items}}
 function rebuildInspection(view){
  if(view.labelId)return window.DstaLabels?.labelView(view.labelId)||null;
@@ -281,8 +284,8 @@ function inspectorMinute(view){
  minuteView('Minuta · '+current.title,current.title+' - '+minuteDate()+'\n\n'+(body||'Sin tareas abiertas en esta sección.'));
 }
 function showTask(id){const t=tasks.find(x=>String(x.id)===String(id));if(!t)return;if(inspection)inspectionHistory.push(inspection);showInspection(taskView(t));pushDrawerHistory()}
-function filtered(){const q=$('#q').value.toLowerCase(),a=$('#a').value,s=$('#s').value;return tasks.filter(t=>(!q||(t.title+' '+t.project+' '+t.owner+' '+t.id).toLowerCase().includes(q))&&(!a||String(t.project_id)===a)&&(!s||(t.done?'done':'open')===s)&&(!window.DstaLabels||window.DstaLabels.matches(t)))}
-function renderRows(){const visible=filtered(),[field,direction]=$('#sort').value.split('-'),factor=direction==='desc'?-1:1;visible.sort((a,b)=>{let av,bv;if(field==='id'){av=Number(a.id);bv=Number(b.id);return (av-bv)*factor}if(field==='date'){const aHasDate=/^\d{4}-\d{2}-\d{2}$/.test(a.date||''),bHasDate=/^\d{4}-\d{2}-\d{2}$/.test(b.date||'');if(aHasDate!==bHasDate)return aHasDate?-1:1;return aHasDate?a.date.localeCompare(b.date)*factor:Number(a.id)-Number(b.id)}if(field==='status'){av=a.done?'Completada':'Abierta';bv=b.done?'Completada':'Abierta'}else{av=field==='owner'?a.owner:a.title;bv=field==='owner'?b.owner:b.title}return String(av||'').localeCompare(String(bv||''),'es',{numeric:true,sensitivity:'base'})*factor||Number(a.id)-Number(b.id)});$('#rows').innerHTML=visible.map(t=>'<tr class="clickable" tabindex="0" data-task="'+esc(t.id)+'"><td>#'+esc(t.id)+'</td><td><b>'+esc(t.title)+'</b><small>'+esc(t.project)+'</small></td><td><span class="pill '+(t.done?'done':'open')+'">'+(t.done?'Completada':'Abierta')+'</span></td><td>'+esc(t.owner)+'</td><td>'+esc(t.date)+'</td><td>'+esc(t.dependency)+'</td><td>'+ (window.DstaLabels?.chips(t)||'') +'</td></tr>').join('');$('#count').textContent=visible.length+' visibles · '+tasks.length+' tareas totales'}
+function filtered(){const q=$('#q').value.toLowerCase(),a=$('#a').value,s=$('#s').value;return tasks.filter(t=>(!q||(t.title+' '+t.project+' '+t.owner+' '+tid(t)).toLowerCase().includes(q.replace(/^#/,'')))&&(!a||String(t.project_id)===a)&&(!s||(t.done?'done':'open')===s)&&(!window.DstaLabels||window.DstaLabels.matches(t)))}
+function renderRows(){const visible=filtered(),[field,direction]=$('#sort').value.split('-'),factor=direction==='desc'?-1:1;visible.sort((a,b)=>{let av,bv;if(field==='id'){av=Number(tid(a));bv=Number(tid(b));return (av-bv)*factor}if(field==='date'){const aHasDate=/^\d{4}-\d{2}-\d{2}$/.test(a.date||''),bHasDate=/^\d{4}-\d{2}-\d{2}$/.test(b.date||'');if(aHasDate!==bHasDate)return aHasDate?-1:1;return aHasDate?a.date.localeCompare(b.date)*factor:Number(a.id)-Number(b.id)}if(field==='status'){av=a.done?'Completada':'Abierta';bv=b.done?'Completada':'Abierta'}else{av=field==='owner'?a.owner:a.title;bv=field==='owner'?b.owner:b.title}return String(av||'').localeCompare(String(bv||''),'es',{numeric:true,sensitivity:'base'})*factor||Number(a.id)-Number(b.id)});$('#rows').innerHTML=visible.map(t=>'<tr class="clickable" tabindex="0" data-task="'+esc(t.id)+'"><td>#'+esc(tid(t))+'</td><td><b>'+esc(t.title)+'</b><small>'+esc(t.project)+'</small></td><td><span class="pill '+(t.done?'done':'open')+'">'+(t.done?'Completada':'Abierta')+'</span></td><td>'+esc(t.owner)+'</td><td>'+esc(t.date)+'</td><td>'+esc(t.dependency)+'</td><td>'+ (window.DstaLabels?.chips(t)||'') +'</td></tr>').join('');$('#count').textContent=visible.length+' visibles · '+tasks.length+' tareas totales'}
 // Semáforos: el puente mide Vikunja y Granola en la VM; si deja de reportar, se muestran en rojo.
 const HEALTH_STALE_MS=12*60000;
 let healthRefreshing=false;

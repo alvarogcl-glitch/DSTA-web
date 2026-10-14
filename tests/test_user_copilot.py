@@ -214,6 +214,14 @@ class ProposalsTest(unittest.TestCase):
             {"id": i, "title": f"T{i}", "project_id": 8, "done": True, "description": "x" * 300} for i in range(1, 400)]}
         self.assertIn("[Aviso: parte del contexto no cupo", uc.build_prompt(JOB, big, []))
 
+    def test_numero_propio_en_el_contexto(self):
+        """E12: the copilot shows #N to the person and uses the real id in actions."""
+        snap = {"projects": [{"id": 8, "title": "LT"}], "tasks": [{"id": 204, "num": 3, "title": "Informe", "project_id": 8, "done": False}]}
+        prompt = uc.build_prompt({**JOB, "task": {"id": 204, "title": "Informe"}}, snap, [])
+        self.assertIn("- #3 (id 204) Informe", prompt)
+        self.assertIn("Tarea seleccionada: #3 (id 204)", prompt)
+        self.assertIn("usa SIEMPRE el id X", prompt)
+
     def test_reabrir_solo_tareas_completadas(self):
         reply = 'x\n```acciones\n[{"action":"task.reopen","taskId":82},{"action":"task.reopen","taskId":81}]\n```'
         self.assertEqual(uc.split_proposals(reply, self.SNAP)[1], [{"action": "task.reopen", "taskId": 82}])

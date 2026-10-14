@@ -78,7 +78,8 @@ def _tasks_block(snapshot: dict | None) -> str:
             lines.append(f"  Descripción de la línea: {project['description']}")
         for task in (t for t in open_tasks if t.get("project_id") == project.get("id")):
             extra = " · ".join(str(v) for v in (task.get("owner"), task.get("date")) if v)
-            lines.append(f"  - #{task.get('id')} {task.get('title', '')}" + (f" ({extra})" if extra else ""))
+            label = f"#{task['num']} (id {task.get('id')})" if task.get("num") else f"#{task.get('id')}"
+            lines.append(f"  - {label} {task.get('title', '')}" + (f" ({extra})" if extra else ""))
             if task.get("description"):
                 lines.append("    " + str(task["description"])[:4000].replace("\n", "\n    "))
     text = "\n".join(lines) or "(sin líneas de trabajo todavía)"

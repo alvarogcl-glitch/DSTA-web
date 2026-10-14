@@ -26,7 +26,7 @@ from urllib.error import HTTPError, URLError
 _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
-from user_context import using_root  # noqa: E402
+from user_context import using_root, using_user  # noqa: E402
 
 KINDS = ("action", "label", "chat", "health", "granola")
 DRAIN_LIMIT = 5
@@ -145,7 +145,7 @@ class MultiuserBridge:
         base = self.user_base(actor)
         if job.get("kind") in ("action", "label"):
             home = self.users_dir / actor
-            with using_root(user["rootProjectId"]):
+            with using_user(user):
                 self.process_job(job, base, self.token, "", home, "", "", user["vikunjaToken"],
                                  user.get("vikunjaUrl", "http://127.0.0.1:3456"), "", "sonnet")
             return
@@ -182,7 +182,7 @@ class MultiuserBridge:
         import user_copilot
         base = self.user_base(actor)
         try:
-            with using_root(user["rootProjectId"]):
+            with using_user(user):
                 snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
             minutes = user_copilot.minutes_for(user, str(job.get("message") or ""))  # D31: + older matches
             reply = self.copilot.answer(actor, user, job, snapshot, minutes)
@@ -233,7 +233,7 @@ class MultiuserBridge:
         return pool.submit(fn, *args) if pool else fn(*args)
 
     def _snapshot(self, user: dict):
-        with using_root(user["rootProjectId"]):
+        with using_user(user):
             return self.fetch_snapshot(user) if self.fetch_snapshot else None
 
     def _push_minute(self, actor: str, record: dict) -> None:
@@ -331,7 +331,7 @@ class MultiuserBridge:
         if not self.publish_snapshot:
             return
         try:
-            with using_root(user["rootProjectId"]):
+            with using_user(user):
                 self.publish_snapshot(self.user_base(actor), self.token, user["vikunjaToken"],
                                       user.get("vikunjaUrl", "http://127.0.0.1:3456"))
         except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
@@ -344,7 +344,7 @@ class MultiuserBridge:
             if not user or not self.publish_snapshot:
                 continue
             try:
-                with using_root(user["rootProjectId"]):
+                with using_user(user):
                     self.publish_snapshot(self.user_base(actor), self.token, user["vikunjaToken"],
                                           user.get("vikunjaUrl", "http://127.0.0.1:3456"))
                 published += 1
@@ -385,6 +385,8 @@ def build(env_file: Path) -> MultiuserBridge:
     if not token:
         raise RuntimeError("Falta DSTA_BRIDGE_TOKEN")
     users_dir = user_vault.vault_dir().parent / "users"
+    import user_context
+    user_context.set_numbers_dir(user_vault.vault_dir().parent / "task-numbers")  # per-user #1, #2…
     import granola_user
     test_origin = hb.setting("DSTA_GRANOLA_TEST_ORIGIN", values) or None
     granola = granola_user.GranolaService(f"{base}/oauth/granola/callback", test_origin=test_origin)
