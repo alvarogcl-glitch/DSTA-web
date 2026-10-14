@@ -8,6 +8,8 @@ use an isolated Hermes session without tools.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 from concurrent.futures import Future, ThreadPoolExecutor
 import json
@@ -235,6 +237,14 @@ def chat_prompt(job: dict) -> str:
     task_context = json.dumps(job.get("task"), ensure_ascii=False) if job.get("task") else "Sin tarea seleccionada."
     return (
         "Eres el copiloto de gestión PMO-DSTA del usuario y debes responder en español. "
+        f"Fecha actual en America/Santiago: {datetime.now(ZoneInfo('America/Santiago')).date().isoformat()}. "
+        "Para consultar tareas creadas hoy, ayer o en un rango usa pmo_tasks_created: "
+        "sin fechas consulta hoy; start_date y end_date usan AAAA-MM-DD e incluyen ambos días. "
+        "Esta consulta revisa todas las páginas y devuelve filas compactas y total exacto. "
+        "Si has_more es true, continúa con next_offset y las mismas fechas y proyecto "
+        "para listar todos los resultados. No uses pmo_list_tasks ni pmo_open_tasks para "
+        "contar creaciones: una actualización, fecha objetivo o bitácora no acredita creación. "
+        "Incluye tareas abiertas y completadas, y muestra título, ID y línea. "
         "Puedes gestionar etiquetas nativas (flags o clasificación transversal): consulta pmo_list_labels "
         "y pmo_list_label_tasks para encontrar todas las tareas de una etiqueta; "
         "para clasificar tareas usa pmo_edit_task_labels con IDs explícitos, conservando otras etiquetas. "

@@ -1,5 +1,14 @@
 # Historial de versiones
 
+## Pendiente — Consulta de tareas creadas por fecha
+
+- Consulta compacta `pmo_tasks_created` con total exacto y paginación completa.
+- Filtro por creación nativa en America/Santiago, con fechas inclusivas y tareas
+  completadas, sin confundir modificaciones con creaciones.
+- Instrucciones del copiloto y regresiones para límites de día y páginas posteriores.
+- Activación: instalar `tzdata` en el Python de la VM, actualizar MCP/puente y
+  reiniciar DSTA Hermes Bridge; no requiere publicar el Worker.
+
 ## 1.1.0 — Gestión de etiquetas
 
 - Etiquetas nativas de Vikunja en snapshots y tareas, con color de relleno.

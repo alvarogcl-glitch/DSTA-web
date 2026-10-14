@@ -226,6 +226,23 @@ operaciones acotadas para consultar proyectos/tareas, crear tareas estructuradas
 en una línea existente, crear líneas bajo PMO-DSTA, renombrarlas, modificar su
 descripción, mover tareas entre líneas, fusionar líneas, archivar líneas vacías
 y restaurar líneas archivadas.
+Para «¿qué tareas se crearon hoy?» usa `pmo_tasks_created`: consulta todas las
+páginas de las líneas activas, filtra por el campo nativo `created` en
+`America/Santiago` e incluye tareas abiertas y completadas. Acepta `start_date`
+y `end_date` en AAAA-MM-DD (ambos inclusive); sin fechas usa el día actual de
+Santiago. Devuelve el total exacto y hasta 50 filas compactas por respuesta;
+`next_offset` permite continuar sin enviar descripciones ni bitácoras extensas.
+Un error de paginación o una fecha de creación inválida impide confirmar el total.
+`updated` no se interpreta como creación. El listado general conserva su límite
+y no se usa para contar tareas creadas.
+
+Esta corrección requiere actualizar `tools/vikunja_dashboard_mcp.py` y
+`tools/hermes_bridge.py` en la VM y reiniciar **DSTA Hermes Bridge**, cuando no
+haya una consulta en ejecución. No requiere desplegar el Worker ni reiniciar
+el publicador. En el Python que ejecuta el puente y el MCP, instala `tzdata`
+(`python -m pip install tzdata`) para disponer de la zona IANA en Windows;
+se usa la zona de Santiago con sus cambios de horario, sin fijar un desfase UTC.
+
 También puede editar campos, completar tareas, actualizar su dependencia y
 añadir comentarios. Las nuevas tareas incluyen Responsable, Fecha objetivo,
 Dependencia, Criterio de cierre, `SOURCE` y `ACTION_KEY`; lo no especificado queda
