@@ -266,3 +266,18 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - ids explícitos sin numeración propia;
   - ejemplo explícito de edición de un campo.
 - **Volver atrás:** en el repo de producción, `git reset --hard pre-motores-2026-10-15` y reiniciar las 3 tareas. Para cambiar solo el orden de los motores, basta editar `tools/llm_profiles.json`, que se lee en cada llamada.
+
+## 19. Copiloto más rápido y transparente (15-10-2026, ~19:55)
+
+- **Problema reportado por el CEO:** no notaba la diferencia, la ventana seguía diciendo «Hermes» y el modelo dijo «GPT-6.1».
+- **Diagnóstico:** sí respondía Codex (no hubo sesiones nuevas de Hermes). La espera la dominaba el sondeo de chat de la VM, cada 12 s.
+- **Arreglo** (commit `db27bfa`, versión del Worker `2658fff9`, `CODE_VERSION copiloto-rapido-2026-10-15`):
+  - al abrir la ventana del copiloto se llama `/api/assistant/warm`, y la VM consulta cada 2 s durante 3 minutos (reposo: 12 s);
+  - la ventana muestra qué motor respondió y cuánto tardó (motor y total);
+  - se quitaron los textos fijos «Hermes»;
+  - una nota de identidad para el modelo;
+  - el log registra `chat respondido por <motor> en <s>`.
+- **Volver atrás:**
+  1. `wrangler rollback 1d1f0d62-93a7-43d0-8091-fad1fc8b6c97 --name dsta-web`.
+  2. En el repo de producción, `git reset --hard pre-copiloto-rapido-2026-10-15`.
+  3. Reiniciar las 3 tareas.
