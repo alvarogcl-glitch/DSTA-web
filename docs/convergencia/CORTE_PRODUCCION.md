@@ -182,3 +182,12 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - El Worker lo guarda aparte, en `minute-text:<id>`, para que la lista de la bandeja no crezca. Lo sirve en `GET /api/minutes/text?id=`, lo conserva si una subida posterior no trae texto y lo borra al eliminar la minuta.
   - La ventana muestra «Minuta · texto original (Granola)» separado de «Análisis del asistente».
 - 208 pruebas Python, más las suites JS y los 2 E2E. Despliegue con los servicios en pausa hasta que el cajón del dueño tomó la versión nueva.
+
+## 12. E14: skill de minutas y revisión guiada (15-10-2026, ~11:30)
+
+- **Autorización:** el CEO aprobó por Telegram el 15-10 a las 14:31 UTC («Ok»).
+- **Qué se desplegó:** la integración `40f600f` (rama `integracion/e14`), versión del Worker `6836e120`, `CODE_VERSION minutas-skill-2026-10-15`. Los dos puentes se reiniciaron con la skill.
+- **Volver atrás:**
+  1. `wrangler rollback 05dd8bd9-eaa1-4cf7-9c66-f98343256d6e --name dsta-web`.
+  2. En el repo de producción, `git reset --hard pre-e14-2026-10-15`.
+  3. Reiniciar las 3 tareas.
