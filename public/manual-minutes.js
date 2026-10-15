@@ -71,11 +71,11 @@
         const t=d.transcription?.status;
         if(t==='done'){toast.done(`«${title}» · transcripción lista para revisar`);followed.delete(key);}
         else if(t==='error'){toast.fail(`«${title}»: ${d.transcription.error||'no se pudo transcribir'}`);followed.delete(key);}
-        else toast.step(`«${title}» · ${t==='running'?'Transcribiendo escritura a mano (IA)…':'Transcripción en cola: esperando a la VM…'}`);
+        else toast.step(`«${title}» · ${t==='running'?'Transcribiendo…':'Transcripción en cola…'}`);
       }else{
         if(d.status==='processed'){toast.done(`«${title}» procesada · revisa la 🔔`);followed.delete(key);}
         else if(d.status==='error'){toast.fail(`«${title}»: ${d.error||'no se pudo analizar'}`);followed.delete(key);}
-        else toast.step(`«${title}» · ${d.status==='running'?'Analizando con IA contra tu portafolio…':'Análisis en cola: esperando a la VM…'}`);
+        else toast.step(`«${title}» · ${d.status==='running'?'Analizando con IA…':'Análisis en cola…'}`);
       }
     }
   }

@@ -19,7 +19,7 @@
   document.body.append(stack);
   const notices = new Map();
   let serial = 0;
-  const DONE_MS = 2200;
+  const DONE_MS = 1800;
   function noticeFor(key) {
     let item = notices.get(key);
     if (!item) {
@@ -34,7 +34,7 @@
       dismiss.addEventListener('click', () => remove(key));
       el.append(icon, text, dismiss);
       stack.append(el);
-      while ((stack.children?.length || 0) > 4) {  // the oldest finished notice makes room
+      while ((stack.children?.length || 0) > 3) {  // the oldest finished notice makes room
         const old = [...notices].find(([, n]) => !n.el.classList?.contains('busy'));
         if (!old) break;
         remove(old[0]);
@@ -56,6 +56,7 @@
     clearTimeout(item.timer);
     item.el.className = 'task-action-toast ' + state;
     item.text.textContent = message;
+    item.el.title = message;  // the pill shows one line; the full text on hover
     if (state === 'ok') item.timer = setTimeout(() => remove(key), DONE_MS);
   }
   // task(key): the same key always updates the same notice (step → done / fail).
@@ -75,8 +76,8 @@
   window.DstaToast = { show: notify, task };
   window.DstaSteps = {
     // Shared wording for the verified action queue (dashboard buttons, forms, copilot, labels).
-    queue: status => status === 'running' ? 'Aplicando en Vikunja (VM)…' : 'En cola: esperando a la VM…',
-    refreshing: 'Actualizando el dashboard…',
+    queue: status => status === 'running' ? 'Aplicando en Vikunja…' : 'En cola…',
+    refreshing: 'Actualizando…',
   };
   const progress = job => job.kind === 'complete' ? 'Completando…' : 'Guardando registro…';
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());

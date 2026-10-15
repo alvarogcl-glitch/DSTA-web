@@ -268,7 +268,7 @@
       if (!response.ok) throw new Error(payload.error || 'No se pudo enviar la decisión.');
       delete drafts[minuteId];
       awaiting.add(minuteId);
-      toast?.step(`«${minute.titulo}» · Aplicando decisiones en Vikunja (VM)…`);
+      toast?.step(`«${minute.titulo}» · Aplicando decisiones…`);
     } catch (error) {
       minute.aplicando = false;
       loadError = error.message;

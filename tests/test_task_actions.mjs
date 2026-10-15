@@ -17,7 +17,7 @@ async function scenario(mode) {
   const context = {
     crypto: {randomUUID: () => '12345678-1234-4234-8234-123456789012'}, tasks: [task], inspection: { taskId: '17' }, Intl,
     Date: class extends Date { static now() { return now; } },
-    setTimeout: (fn, delay) => { if (delay === 2200) { dismissTimers.push(fn); return dismissTimers.length; } now += 2000; fn(); },
+    setTimeout: (fn, delay) => { if (delay === 1800) { dismissTimers.push(fn); return dismissTimers.length; } now += 2000; fn(); },
     clearTimeout() {},
     sessionStorage: { setItem: (k, v) => { if (mode === 'complete-storage') throw Error('Almacenamiento bloqueado'); storage.set(k, v); }, removeItem: k => storage.delete(k), getItem: k => storage.get(k) },
     document: {
