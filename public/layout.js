@@ -44,7 +44,7 @@
     if (h1) h1.textContent = title;
     if (kicker) kicker.textContent = `${layout.brand ? layout.brand + ' / ' : ''}VIKUNJA / LECTURA EN VIVO`;
     const copilotKicker = document.querySelector('#dsta-assistant-panel .kicker');
-    if (copilotKicker) copilotKicker.textContent = `HERMES${layout.brand ? ' · ' + layout.brand : ''}`;
+    if (copilotKicker) copilotKicker.textContent = `COPILOTO${layout.brand ? ' · ' + layout.brand : ''}`;
     document.title = title;
   }
 

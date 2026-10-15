@@ -151,6 +151,8 @@ try{
  await a.locator('#dsta-assistant-toggle').click();
  await a.locator('.task-action-toast',{hasText:'Copiloto: «¿Qué minutas tengo hoy?»'}).waitFor();
  const auth={authorization:'Bearer qa-only','user-agent':'qa'};
+ // Opening the copilot asked the VM to look for questions every 2 s (warm).
+ assert.equal((await (await fetch(base+'/u/qa-a/api/bridge/next?kind=chat&chatBusy=1',{headers:auth})).json()).warm,true,'copilot open → warm');
  let chatJob=null;for(let i=0;i<30&&!chatJob;i++){chatJob=(await (await fetch(base+'/u/qa-a/api/bridge/next?kind=chat',{headers:auth})).json()).job;if(!chatJob)await new Promise(r=>setTimeout(r,300));}
  assert.ok(chatJob,'chat job queued');
  await a.locator('.task-action-toast',{hasText:'Pensando'}).waitFor({timeout:10000});
@@ -159,11 +161,14 @@ try{
  const done=await fetch(base+'/u/qa-a/api/bridge/complete',{method:'POST',headers:{...auth,'content-type':'application/json'},body:JSON.stringify({id:chatJob.id,
    reply:'Hoy: [Estrategia global [En persona] - 15-10-2026](minuta:Minutas 2026/est.md) y [Comité a mano](minuta:Manual/m-x).',
    minutes:{'Minutas 2026/est.md':{titulo:'Estrategia global [En persona]',fecha:'2026-10-15',contenido:'Texto Granola'},
-            'Manual/m-x':{titulo:'Comité a mano',fecha:'2026-10-15',contenido:'Transcripción del comité',origen:'Manual (dashboard)',borrador:inkDraft}}})});
+            'Manual/m-x':{titulo:'Comité a mano',fecha:'2026-10-15',contenido:'Transcripción del comité',origen:'Manual (dashboard)',borrador:inkDraft}},
+   engine:'Codex (gpt-6-luna)',engineSeconds:6.2})});
  assert.equal(done.status,200,await done.text());
  await a.locator('.task-action-toast.ready',{hasText:'Respuesta lista'}).waitFor({timeout:10000});
  await a.locator('.task-action-toast.ready').click();
  assert.equal(await a.locator('#dsta-assistant-panel').isHidden(),false,'tapping the notice opens the copilot');
+ assert.match(await a.locator('#dsta-assistant-status').innerText(),/Respondió Codex \(gpt-6-luna\) · 6\.2 s el motor · [\d.]+ s en total/);
+ assert.match(await a.locator('#dsta-assistant-panel .kicker').innerText(),/^COPILOTO/,'no longer says Hermes');
  assert.equal(await a.locator('.dsta-minute-link').count(),2,'both cited minutes are links, brackets included');
  await a.locator('.dsta-minute-link',{hasText:'Comité a mano'}).click();
  await a.locator('#dsta-minute-viewer .dsta-minute-ink canvas').first().waitFor({timeout:10000});

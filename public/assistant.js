@@ -9,11 +9,11 @@
   const widget = document.createElement('div');
   widget.id = 'dsta-assistant';
   widget.innerHTML = '<button id="dsta-assistant-toggle" type="button" aria-expanded="false" aria-controls="dsta-assistant-panel">✦ Copiloto</button>' +
-    '<section id="dsta-assistant-panel" aria-label="Copiloto Hermes" hidden>' +
-    '<header><div><span class="kicker">HERMES · PMO-DSTA</span><strong>Copiloto de gestión</strong></div><div class="dsta-assistant-actions"><button id="dsta-assistant-new" type="button" title="Borra la conversación: el copiloto parte sin el contexto anterior">Nueva sesión</button><button id="dsta-assistant-close" type="button" aria-label="Cerrar copiloto">×</button></div></header>' +
+    '<section id="dsta-assistant-panel" aria-label="Copiloto" hidden>' +
+    '<header><div><span class="kicker">COPILOTO · PMO-DSTA</span><strong>Copiloto de gestión</strong></div><div class="dsta-assistant-actions"><button id="dsta-assistant-new" type="button" title="Borra la conversación: el copiloto parte sin el contexto anterior">Nueva sesión</button><button id="dsta-assistant-close" type="button" aria-label="Cerrar copiloto">×</button></div></header>' +
     '<div id="dsta-assistant-status" role="status">Consulta el portafolio o pide una acción en Vikunja.</div>' +
     '<div id="dsta-assistant-messages" aria-live="polite"></div>' +
-    '<form id="dsta-assistant-form"><textarea id="dsta-assistant-input" rows="3" maxlength="4000" placeholder="Pregunta o indica una acción…" aria-label="Mensaje para Hermes"></textarea><div><small id="dsta-assistant-context"></small><button id="dsta-assistant-send" type="submit">Enviar</button></div></form>' +
+    '<form id="dsta-assistant-form"><textarea id="dsta-assistant-input" rows="3" maxlength="4000" placeholder="Pregunta o indica una acción…" aria-label="Mensaje para el copiloto"></textarea><div><small id="dsta-assistant-context"></small><button id="dsta-assistant-send" type="submit">Enviar</button></div></form>' +
     '</section>';
   document.body.append(widget);
 
@@ -47,10 +47,18 @@
     contextEl.textContent = task ? `Contexto incluido: #${task.num ?? task.id} · ${task.title}` : 'Se adjunta el contexto si abriste una tarea en el inspector.';
   }
 
+  // While the window is open the VM looks for new questions every 2 s (instead of 12 s).
+  let lastWarm = 0;
+  function warmUp() {
+    if (Date.now() - lastWarm < 90_000) return;
+    lastWarm = Date.now();
+    fetch('/api/assistant/warm', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => {});
+  }
   function openPanel(open = true) {
     panel.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
     if (open) {
+      warmUp();
       showContext();
       input.focus();
     }
@@ -324,10 +332,10 @@
       await new Promise(resolve => setTimeout(resolve, 2000));
       const response = await fetch(`/api/assistant?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'No se pudo consultar el estado de Hermes.');
+      if (!response.ok) throw new Error(result.error || 'No se pudo consultar el estado del copiloto.');
       if (result.status === 'completed') return result;
-      if (result.status === 'error') throw new Error(result.error || 'Hermes no pudo completar la consulta.');
-      status.textContent = result.status === 'running' ? 'Hermes está consultando o ejecutando la acción…' : 'Solicitud en cola para Hermes…';
+      if (result.status === 'error') throw new Error(result.error || 'El copiloto no pudo completar la consulta.');
+      status.textContent = result.status === 'running' ? 'Pensando: consulta tu portafolio y minutas…' : 'En cola, esperando a la VM…';
       chatProgress(result.status === 'running' ? 'Pensando: revisa tu portafolio y minutas…' : 'En cola, esperando a la VM…');
     }
     throw new Error('La consulta excedió el tiempo de espera. Puedes volver a intentarlo.');
@@ -342,7 +350,9 @@
       replyBubble.classList.remove('pending');
       history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
       if (history.length > 20) history.splice(0, history.length - 20);
-      status.textContent = result.refreshError || 'Listo. Puedes continuar la conversación.';
+      // Which engine answered and how long it took (engine time and total time since sending).
+      const timing = result.engine ? `Respondió ${result.engine}${result.engineSeconds != null ? ` · ${result.engineSeconds} s el motor` : ''}${result.totalSeconds != null ? ` · ${result.totalSeconds} s en total` : ''}.` : '';
+      status.textContent = result.refreshError || `Listo. ${timing} Puedes continuar la conversación.`.replace('  ', ' ');
       chatProgress('Respuesta lista', 'ready');
       window.dispatchEvent(new CustomEvent('dsta-snapshot-ready', {
         detail: { timestamp: result.snapshotTimestamp || '' },
@@ -368,8 +378,8 @@
     const task = selectedTask();
     const historyForRequest = history.slice(-20);
     addMessage('user', message);
-    const replyBubble = addMessage('assistant', 'Hermes está trabajando…', true);
-    status.textContent = 'Conectando con Hermes en la VM…';
+    const replyBubble = addMessage('assistant', 'Pensando…', true);
+    status.textContent = 'Enviando a la VM…';
     chatNote = { key: 'chat:' + Date.now(), question: shortQuestion(message), started: Date.now(), step: 'Enviando…', result: '' };
     renderChatNotice();
     input.value = '';
@@ -397,6 +407,7 @@
   $('#dsta-assistant-close').addEventListener('click', () => openPanel(false));
   newSession.addEventListener('click', startNewSession);
   $('#dsta-assistant-form').addEventListener('submit', submitMessage);
+  input.addEventListener('input', warmUp);
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -410,7 +421,7 @@
       setWaiting(true);
       openPanel(true);
       addMessage('user', pending.message);
-      const replyBubble = addMessage('assistant', 'Recuperando la respuesta de Hermes…', true);
+      const replyBubble = addMessage('assistant', 'Recuperando la respuesta…', true);
       status.textContent = 'Retomando la consulta pendiente…';
       chatNote = { key: 'chat:' + pending.id, question: shortQuestion(pending.message), started: Date.now(), step: 'Retomando…', result: '' };
       void finishPending(pending.id, pending.message, replyBubble);

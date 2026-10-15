@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "avisos-concretos-2026-10-15";
+const CODE_VERSION = "copiloto-rapido-2026-10-15";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -479,7 +479,7 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
   if (parsed.error) return parsed.error;
   if (parsed.body?.kind === "label") return forwardToChatObject(env, "/labels/complete", parsed.body, box);
   if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body, box);
-  const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes, proposals } = parsed.body || {};
+  const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes, proposals, engine, engineSeconds } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
   const cleaned = structureEnabled(env) && !error ? cleanProposals(proposals) : [];
   // D03: what the user asked for explicitly runs by itself through the same verified queue as the
@@ -502,7 +502,7 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, reply, error, refreshError, snapshotTimestamp, minutes: citedMinutes(minutes),
-      proposals: cleaned }),
+      proposals: cleaned, engine, engineSeconds }),
   }));
   if (chatResponse.status !== 404) return chatResponse;
   const done = await chatStub(env, box).completeSummaryJob(id, Boolean(error), summaries);
@@ -981,9 +981,17 @@ export class DashboardChatQueue extends DurableObject {
       const id = url.searchParams.get("id") || "";
       const job = storage.get(`job:${id}`);
       if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
+      const seconds = job.completedAt && job.createdAt ? Math.round((Date.parse(job.completedAt) - Date.parse(job.createdAt)) / 100) / 10 : null;
       return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "",
         refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "",
-        minutes: job.minutes || {}, proposals: job.proposals || [] });
+        minutes: job.minutes || {}, proposals: job.proposals || [],
+        engine: job.engine || "", engineSeconds: job.engineSeconds ?? null, totalSeconds: seconds });
+    }
+
+    if (url.pathname === "/warm" && request.method === "POST") {
+      // The copilot window is open: the owner's bridge polls for chat every 2 s instead of 12 s.
+      storage.put("chat-warm-until", Date.now() + 180_000);
+      return json({ ok: true });
     }
 
     if (url.pathname === "/next" && request.method === "GET") {
@@ -991,11 +999,12 @@ export class DashboardChatQueue extends DurableObject {
       const decision = this.takeDecision();
       const currentId = storage.get("current");
       const job = currentId ? storage.get(`job:${currentId}`) : null;
-      if (url.searchParams.get("chatBusy") === "1" || !job || job.status !== "queued") return json({ job: null, decision });
+      const warm = (storage.get("chat-warm-until") || 0) > Date.now();
+      if (url.searchParams.get("chatBusy") === "1" || !job || job.status !== "queued") return json({ job: null, decision, warm });
       job.status = "running";
       job.startedAt = new Date().toISOString();
       storage.put(`job:${job.id}`, job);
-      return json({ job, decision });
+      return json({ job, decision, warm });
     }
 
     if (url.pathname === "/minutes/upsert" && request.method === "POST") {
@@ -1089,7 +1098,7 @@ export class DashboardChatQueue extends DurableObject {
     }
 
     if (url.pathname === "/complete" && request.method === "POST") {
-      const { id, reply, error, refreshError, snapshotTimestamp, minutes, proposals } = await request.json();
+      const { id, reply, error, refreshError, snapshotTimestamp, minutes, proposals, engine, engineSeconds } = await request.json();
       const job = storage.get(`job:${id}`);
       if (!job || job.status !== "running" || storage.get("current") !== id) {
         return json({ error: "Trabajo no encontrado o no está activo." }, 404);
@@ -1101,6 +1110,8 @@ export class DashboardChatQueue extends DurableObject {
       job.snapshotTimestamp = typeof snapshotTimestamp === "string" ? snapshotTimestamp.slice(0, 40) : "";
       job.minutes = minutes && typeof minutes === "object" ? minutes : {};
       job.proposals = Array.isArray(proposals) && !error ? proposals : [];
+      job.engine = typeof engine === "string" ? engine.slice(0, 60) : "";
+      job.engineSeconds = Number.isFinite(engineSeconds) ? Math.round(engineSeconds * 10) / 10 : null;
       job.completedAt = new Date().toISOString();
       storage.put(`job:${id}`, job);
       storage.delete("current");
@@ -1946,6 +1957,10 @@ export default {
     if (url.pathname === "/api/preferences/layout") return layoutRoute(request, env, box);
     if (url.pathname === "/api/label-actions") return announce(labelActionRoute(request, url, env, box), "label");
     if (url.pathname === "/api/task-actions") return announce(taskActionRoute(request, url, env, box), "action");
+    if (url.pathname === "/api/assistant/warm") {
+      if (request.method !== "POST") return json({ error: "Método no permitido" }, 405);
+      return chatStub(env, box).fetch(new Request("https://chat.internal/warm", { method: "POST" }));
+    }
     if (url.pathname === "/api/assistant") {
       if (request.method === "POST") return announce(createAssistantJob(request, env, box), "chat");
       if (request.method === "GET") return readAssistantJob(url, env, box);

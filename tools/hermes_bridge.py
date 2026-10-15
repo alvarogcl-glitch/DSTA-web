@@ -53,6 +53,7 @@ minute_inbox = importlib.util.module_from_spec(_inbox_spec)
 _inbox_spec.loader.exec_module(minute_inbox)
 
 POLL_SECONDS = 12  # cuenta Cloudflare en plan gratis: 100.000 requests/día en total
+WARM_POLL_SECONDS = 2  # only while the copilot window is open or a conversation is active (3 min)
 ACTION_POLL_SECONDS = 8
 USER_AGENT = "DSTA-Hermes-Bridge/1.0"
 DEFAULT_HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "hermes"
@@ -454,15 +455,26 @@ def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, mo
     """Owner's copilot: engine order from llm_profiles.json («copiloto»), each one with the dashboard tools."""
     name = "recordatorios" if REMINDER_REQUEST.search(str(job.get("message") or "")) else "copiloto"
     engines = {
-        "codex": lambda step: llm_engines.ask_codex(chat_prompt(job) + ENGINE_PROMPT_NOTE, step.get("modelo") or "gpt-6-luna",
-                                                    step.get("razonamiento", "medium"), mcp=llm_engines.mcp_servers(read_only=False)),
+        "codex": lambda step: llm_engines.ask_codex(chat_prompt(job) + ENGINE_PROMPT_NOTE + identity_note(step),
+                                                    step.get("modelo") or "gpt-6-luna", step.get("razonamiento", "medium"),
+                                                    mcp=llm_engines.mcp_servers(read_only=False)),
         "hermes": lambda step: run_hermes(job, hermes_cli, hermes_home, provider, model),
     }
     if claude_cli:
-        engines["claude"] = lambda step: ask_claude(chat_prompt(job) + ENGINE_PROMPT_NOTE, claude_cli, hermes_home,
-                                                    step.get("modelo") or claude_model)
+        engines["claude"] = lambda step: ask_claude(chat_prompt(job) + ENGINE_PROMPT_NOTE + identity_note(step), claude_cli,
+                                                    hermes_home, step.get("modelo") or claude_model)
     answer, step, fallback = llm_engines.run(name, engines)
+    LAST_ENGINE["label"] = llm_engines.label(step) if step["motor"] != "hermes" else f"Hermes ({model})"
     return answer + (fallback_note(step) if fallback else "")
+
+
+LAST_ENGINE: dict = {}
+
+
+def identity_note(step: dict) -> str:
+    """Models do not know their own name: tell them, so «¿qué modelo usas?» is answered correctly."""
+    who = {"codex": "Codex de OpenAI", "claude": "Claude de Anthropic"}.get(step["motor"], step["motor"])
+    return f"\nSi te preguntan qué modelo o motor eres: {who}, modelo {step.get('modelo') or 'por defecto'}."
 
 
 def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path, provider: str,
@@ -738,8 +750,11 @@ def execute_completion(job: dict, request: Callable, *, server_url: str | None =
 def finish_job(base_url: str, token: str, job: dict, *, reply: str = "",
                summaries: list[dict] | None = None, error: str = "",
                refresh_error: str = "", snapshot_timestamp: str = "",
-               minutes: dict | None = None, proposals: list | None = None) -> dict:
+               minutes: dict | None = None, proposals: list | None = None,
+               engine: str = "", engine_seconds: float | None = None) -> dict:
     payload: dict = {"id": job["id"]}
+    if engine:
+        payload.update(engine=engine, engineSeconds=round(engine_seconds or 0, 1))
     if job.get("kind") in {"action", "label"}:
         payload.update(kind=job["kind"], attempt=job.get("attempt"))
     if error:
@@ -828,8 +843,12 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
                                        claude_cli, claude_model)
             finish_job(base_url, token, job, summaries=summaries)
         else:
+            started = time.monotonic()
             reply = answer_chat(job, hermes_cli, hermes_home, hermes_provider, hermes_model,
                                 claude_cli, claude_model)
+            engine_seconds = time.monotonic() - started
+            engine = LAST_ENGINE.get("label", "")
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} chat respondido por {engine} en {engine_seconds:.1f}s", flush=True)
             refresh_error = ""
             snapshot_timestamp = ""
             try:
@@ -842,7 +861,8 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             except OSError:
                 minutes = {}
             finish_job(base_url, token, job, reply=reply, refresh_error=refresh_error,
-                       snapshot_timestamp=snapshot_timestamp, minutes=minutes)
+                       snapshot_timestamp=snapshot_timestamp, minutes=minutes,
+                       engine=engine, engine_seconds=engine_seconds)
         print(f"{job.get('kind')} completado", flush=True)
     except Exception as error:
         safe_error = "No se pudo completar la tarea de forma segura." if job.get("kind") == "action" else "Hermes no pudo generar los resúmenes." if job.get("kind") == "summary" else "Hermes no pudo completar la consulta."
@@ -911,6 +931,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
 
     print("Puente Hermes listo; el canal usa solicitudes HTTPS salientes."
           + (" Respaldo Claude activo." if claude_cli else " Sin respaldo Claude."), flush=True)
+    warm_until = next_summary_poll = 0.0  # chat every 2 s while the copilot window is open
     for record in minute_inbox.load_store(inbox_store(hermes_home))["minutes"].values():
         try:
             push_minute(dashboard_url, bridge_token, record)
@@ -974,6 +995,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 if manual_future is not None and not manual_future.done():
                     chat_query += '&manualBusy=1'
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind={chat_query}", token=bridge_token)
+                if result.get("warm") or result.get("job"):
+                    warm_until = time.monotonic() + 180
                 if result.get('manual'):
                     args = (result['manual'], dashboard_url, bridge_token, hermes_home, vikunja_token, vikunja_url,
                             analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model, claude_cli, claude_model),
@@ -999,7 +1022,9 @@ def run(*, once: bool, env_file: Path | None) -> int:
                                                hermes_cli, hermes_home, hermes_provider, hermes_model,
                                                vikunja_token, vikunja_url, claude_cli, claude_model)
 
-                if summary_future is None or summary_future.done():
+                fast = time.monotonic() < warm_until
+                if (summary_future is None or summary_future.done()) and time.monotonic() >= next_summary_poll:
+                    next_summary_poll = time.monotonic() + POLL_SECONDS
                     result = request_json(f"{dashboard_url}/api/bridge/next?kind=summary", token=bridge_token)
                     summary_job = result.get("job")
                     if summary_job:
@@ -1016,7 +1041,7 @@ def run(*, once: bool, env_file: Path | None) -> int:
                         )
                 if once:
                     return 0
-                time.sleep(POLL_SECONDS)
+                time.sleep(WARM_POLL_SECONDS if fast else POLL_SECONDS)
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 print(f"Puente sin conexión ({type(error).__name__}); reintenta en {POLL_SECONDS}s", file=sys.stderr, flush=True)
                 if once:

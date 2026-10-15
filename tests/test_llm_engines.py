@@ -112,6 +112,12 @@ class BridgeRoutingTest(unittest.TestCase):
         self.assertEqual(codex.call_args.args[1], "gpt-6-luna")
         self.assertNotIn("--read-only", codex.call_args.kwargs["mcp"]["vikunja-dashboard"])
 
+    def test_el_motor_sabe_quien_es_y_se_registra(self):
+        with patch.object(llm_engines, "ask_codex", return_value="Soy Codex") as codex:
+            hb.answer_chat({"message": "¿qué modelo usas?"}, "hermes", Path("."), "p", "m", "claude.exe")
+        self.assertIn("Codex de OpenAI, modelo gpt-6-luna", codex.call_args.args[0])
+        self.assertEqual(hb.LAST_ENGINE["label"], "Codex (gpt-6-luna)")
+
     def test_recordatorios_van_a_hermes(self):
         with patch.object(llm_engines, "ask_codex") as codex, patch.object(hb, "run_hermes", return_value="Programado") as hermes:
             self.assertEqual(hb.answer_chat({"message": "Recuérdame mañana a las 9 llamar a Cata"}, "hermes", Path("."), "p", "m", "claude.exe"), "Programado")
