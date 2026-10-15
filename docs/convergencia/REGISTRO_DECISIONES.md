@@ -364,3 +364,17 @@ La cita de otro agente es contexto; comprobar la autorización y decisión origi
 - Bandeja agrupada; Otra muestra texto solo al seleccionarla y no prevalece si se vuelve a Aprobar/Rechazar. Otros cambios permite instrucciones sin propuestas previas, guarda resultado/error y no duplica la acción al reenviar el mismo UUID. Digest y decisiones repetidas validados. Granola conserva automatismos; manuales siempre requieren aprobación.
 - Evidencia: `C:/Users/admin/Documents/DSTA-multiuser/minutas-manuales-dashboard/docs/convergencia/evidencia/minutas-skill/`. 211 pruebas Python + 18 suites JS aprobadas; skill válida; E2E Chrome 1280x900/390x844 y empaquetado seco correctos. Worker/DO y puente/motor reales, modelo/Vikunja ficticios. Capturas antes/después revisadas. Sin llamadas a modelos reales.
 - Diseño, límites, recuperación e instalación futura: `docs/MINUTAS_SKILL.md` de esa rama. Pendiente: revisión visual humana y QA real de ambas rutas, duplicados semánticos, móvil/PWA. La publicación requiere autorización de la entrega E13+E14 y revisión de diferencias actuales de main. Instalar también skill y módulos nuevos junto con los Python; desplegar assets no actualiza esos recursos.
+
+- Commit local E14 verificado: `906294c` (`codex/minutas-contexto-skill`). No publicado.
+
+### Integración E14 sobre producción (Claude, 15-10-2026)
+
+- Rama local `integracion/e14` (`../integracion-e14`): E14 (`906294c`) unida a producción (`ad5c4b8`). Pendiente de autorización para desplegar.
+- **Conflictos resueltos:**
+  - En `decide`, se mantienen eliminar y el texto de Granola guardado aparte, y se valida el digest en toda decisión.
+  - Se retira el límite de 20k del bloque de tareas.
+- **Lógica retirada:** el desvío de prompts largos a Claude y el análisis del dueño con herramientas. Los reemplaza el transporte stdin de Codex, que entrega el contexto completo.
+- **Verificación:**
+  - 214 pruebas, suites JS y 2 E2E de minutas.
+  - Hermes real con un prompt Unicode de 42k caracteres por stdin.
+  - Ensayo en seco, solo lectura, con la minuta real Cata 1-1 del 14-10 (prompt de 137k, 38 s). Resultado: 7 actualizaciones ligadas a tareas reales (#57, #157, #143, #8, #47, #5, #21) y 1 tema por revisar. El análisis anterior no había ligado ninguna.
