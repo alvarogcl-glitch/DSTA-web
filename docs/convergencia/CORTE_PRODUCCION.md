@@ -253,3 +253,16 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   1. `wrangler rollback 522f0f52-14b8-4d85-bb9e-16e32e08adcf --name dsta-web`.
   2. En el repo de producción, `git reset --hard pre-avisos-concretos-2026-10-15`.
   3. Reiniciar las 3 tareas.
+
+## 18. Motores de IA por función y mejoras del copiloto (15-10-2026, ~19:35)
+
+- **Autorización:** el CEO aprobó por Telegram el 15-10 a las 22:34 UTC («si»).
+- **Qué se publicó:** `e99cb60`, solo código de la VM (`tools/`). El Worker no cambió (sigue en la versión `aaf508dd`), así que no hubo despliegue de Cloudflare. Se actualizó el repo de producción y se reiniciaron las 3 tareas.
+- **Contenido:**
+  - perfiles de motores (`tools/llm_profiles.json`, `tools/llm_engines.py`);
+  - `pmo_get_task`;
+  - contexto completo del copiloto (200k);
+  - editar solo la fecha conserva el título;
+  - ids explícitos sin numeración propia;
+  - ejemplo explícito de edición de un campo.
+- **Volver atrás:** en el repo de producción, `git reset --hard pre-motores-2026-10-15` y reiniciar las 3 tareas. Para cambiar solo el orden de los motores, basta editar `tools/llm_profiles.json`, que se lee en cada llamada.
