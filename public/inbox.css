@@ -47,3 +47,12 @@ body:has(#dsta-inbox:not([hidden])) #dsta-assistant{display:none}
 .dsta-inbox-discard{display:grid;gap:6px;margin-top:10px;padding-top:12px;border-top:1px solid #2b3745}
 .dsta-inbox-discard button{width:100%}
 .dsta-inbox-discard p{font-size:12px}
+
+.dsta-inbox-field[hidden]{display:none}
+.dsta-inbox-group{display:grid;gap:9px;min-width:0}
+.dsta-inbox-group h5,.dsta-inbox-other h5{margin:8px 0;color:#dce9f3;font-size:13px}
+.dsta-inbox-other{border:1px solid #3a4859;border-radius:8px;padding:12px}
+.dsta-inbox-other summary{cursor:pointer;color:#68d391;font-weight:600;min-height:30px}
+.dsta-inbox-other textarea{width:100%;min-width:0;resize:vertical}
+.dsta-inbox-choice label{min-height:36px;cursor:pointer}
+.dsta-inbox-action,.dsta-inbox-other{overflow-wrap:anywhere}

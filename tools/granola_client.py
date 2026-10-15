@@ -405,6 +405,9 @@ class GranolaClient:
             if not isinstance(value, str):
                 raise GranolaError("Unsupported meeting metadata; adapter needed")
             record[field] = value
+        for field in ('participants', 'attendees', 'location', 'duration', 'body', 'content'):
+            if field in meeting:
+                record[field] = meeting[field]
         if "version" in meeting:
             version = _text(meeting["version"], "Unsupported explicit version; adapter needed")
         else:
@@ -546,7 +549,7 @@ class GranolaClient:
         # Validate all provider output before persisting any imported records.
         for record in records:
             self.store.save_minute(user, "granola", record["source_id"], record["version"],
-                                   {key: record[key] for key in ("title", "date", "summary", "private_notes")},
+                                   {key: value for key, value in record.items() if key not in ("source_id", "version")},
                                    expected_epoch=epoch, job_id=jobid,
                                    expected_attempt=attempt)
         self.store.finish_job(user, jobid, expected_epoch=epoch,

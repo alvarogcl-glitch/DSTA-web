@@ -1,0 +1,69 @@
+{
+  "reference_date": "2026-10-15",
+  "verified_at": "2026-10-15T10:37:41.212485-03:00",
+  "branch": "codex/minutas-contexto-skill",
+  "base": "37c5734",
+  "status": "verified_local_pending_human_and_real_model",
+  "final": {
+    "python_tests": 211,
+    "javascript_suites": 18,
+    "result": "passed"
+  },
+  "skill_validation": "passed",
+  "browser": {
+    "result": "passed",
+    "viewports": [
+      "1280x900",
+      "390x844"
+    ],
+    "fixtures": "localhost; synthetic model and Vikunja; real Worker/DO/Python dispatcher and decision engine",
+    "checks": [
+      "approve/reject/other",
+      "ignore hidden instruction after selecting approve",
+      "additional changes and main meeting points",
+      "correct target and one log entry",
+      "snapshot after decisions",
+      "account isolation",
+      "no automatic manual writes",
+      "no mobile horizontal overflow",
+      "baseline manual draft, formatting, copy and recovery"
+    ]
+  },
+  "dry_run": {
+    "result": "passed",
+    "wrangler": "4.147.0",
+    "config": "wrangler.staging.jsonc",
+    "deployed": false
+  },
+  "review": {
+    "visual": "desktop and mobile screenshots inspected",
+    "human_acceptance": false
+  },
+  "no_runtime_changes": true,
+  "no_personal_data_writes": true,
+  "real_model_called": false,
+  "pending": [
+    "human review",
+    "real models on isolated QA, owner and other user",
+    "semantic duplicate quality",
+    "real mobile/PWA",
+    "integration and deployment authorization"
+  ],
+  "screenshots": [
+    "editor-desktop.png",
+    "editor-mobile.png",
+    "inbox-mobile.png",
+    "review-before-desktop.png",
+    "review-before-mobile.png",
+    "review-desktop.png",
+    "review-top-desktop.png",
+    "review-top-mobile.png",
+    "template-before-desktop.png",
+    "template-before-mobile.png"
+  ],
+  "final_targeted_tests": {
+    "tests": 9,
+    "result": "passed",
+    "note": "Transport fallback and final UI submit guard verified after broad suite; final E2E passed"
+  }
+}

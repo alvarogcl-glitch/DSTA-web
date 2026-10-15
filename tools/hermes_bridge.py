@@ -315,11 +315,15 @@ def log_mentions_fallback(log_path: Path, offset: int) -> bool:
 
 
 def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
-                log_path: Path) -> tuple[int, str, bool]:
+                log_path: Path, input_text: str | None = None) -> tuple[int, str, bool]:
     """Run Hermes and stop it as soon as its log shows the switch to the local fallback model."""
     offset = log_path.stat().st_size if log_path.exists() else 0
-    with tempfile.TemporaryFile() as output:
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as query_input:
+        if input_text is not None:
+            query_input.write(input_text.encode('utf-8'))
+            query_input.seek(0)
         process = subprocess.Popen(args, cwd=str(cwd), env=env, stdout=output,
+                                   stdin=query_input if input_text is not None else None,
                                    stderr=subprocess.DEVNULL, creationflags=HERMES_CREATION_FLAGS)
         deadline = time.monotonic() + timeout
         fell_back = timed_out = False
@@ -344,12 +348,18 @@ def ask_hermes(prompt: str, hermes_cli: str, hermes_home: Path, provider: str, m
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     child_env["PYTHONIOENCODING"] = "utf-8"
-    returncode, stdout, fell_back = run_watched(
-        [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
-         "--model", model, "--toolsets", toolsets,
-         "--max-turns", str(max_turns), "--query", prompt],
+    from hermes_prompt_transport import prepare_query
+    try:
+        args, query_input = prepare_query(
+            [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
+             "--model", model, "--toolsets", toolsets,
+             "--max-turns", str(max_turns), "--query", prompt])
+    except OSError as error:
+        raise CodexUnavailable('Hermes no pudo recibir el contexto completo.') from error
+    returncode, stdout, fell_back = run_watched(args,
         cwd=hermes_home, env=child_env, timeout=timeout or HERMES_TIMEOUT_SECONDS,
         log_path=hermes_home / "logs" / "agent.log",
+        **({'input_text': query_input} if query_input is not None else {}),
     )
     if fell_back:
         raise CodexUnavailable("Codex no respondió y Hermes cambió al modelo local.")

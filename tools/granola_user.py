@@ -214,7 +214,7 @@ def _meetings(result: dict) -> list[dict]:
     out = []
     for node in nodes:
         item = dict(node.attrib)
-        for field in ("summary", "private_notes"):
+        for field in ("summary", "private_notes", "participants", "attendees", "location", "duration", "body", "content"):
             child = node.find(field)
             if child is not None:
                 item[field] = "".join(child.itertext()).strip()
@@ -255,7 +255,9 @@ def import_meetings(client: GranolaClient, token: str, *, days: str = "last_30_d
                 notes = str(meeting.get("private_notes") or "")
                 version = hashlib.sha256(f"{summary}\n{notes}".encode("utf-8")).hexdigest()
                 records.append({"source_id": str(meeting["id"]), "version": version, "title": str(meeting.get("title") or ""),
-                                "date": iso_date(str(meeting.get("date") or "")), "summary": summary, "private_notes": notes})
+                                "date": iso_date(str(meeting.get("date") or "")), "source_date": str(meeting.get("date") or ""),
+                                "summary": summary, "private_notes": notes,
+                                **{key: meeting[key] for key in ('participants', 'attendees', 'location', 'duration', 'body', 'content') if key in meeting}})
         return records
 
 

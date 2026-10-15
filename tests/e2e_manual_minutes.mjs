@@ -12,6 +12,8 @@ const source=readFileSync(new URL('../src/worker.js',import.meta.url),'utf8').re
 const {default:worker,DashboardChatQueue}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 const root=resolve(new URL('..',import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1'));
 const baselineHTML=execFileSync('git',['show','1bd8846:public/index.html'],{cwd:root});
+const previousInbox=execFileSync('git',['show','37c5734:public/inbox.js'],{cwd:root});
+const previousInboxCSS=execFileSync('git',['show','37c5734:public/inbox.css'],{cwd:root});
 const work=mkdtempSync(join(tmpdir(),'dsta-manual-qa-'));
 const screenshots=process.env.DSTA_EVIDENCE_DIR||join(work,'screenshots');mkdirSync(screenshots,{recursive:true});
 const users={'qa-a':{id:'qa-a',display_name:'QA A',email:'a@qa.test'},'qa-b':{id:'qa-b',display_name:'QA B',email:'b@qa.test'}};
@@ -29,7 +31,7 @@ await new Promise(r=>http.listen(0,'127.0.0.1',r));const base=`http://localhost:
 const bridge=spawn(process.env.DSTA_PYTHON||'python',[join(root,'tests/manual_bridge_fixture.py'),base,work],{cwd:root,env:{...process.env,PYTHONUTF8:'1'},stdio:['ignore','pipe','pipe']});let bridgeLog='';bridge.stdout.on('data',d=>bridgeLog+=d);bridge.stderr.on('data',d=>bridgeLog+=d);
 const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
 const errors=[];
-async function pageFor(actor,manual=true){const context=await browser.newContext({viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write'],extraHTTPHeaders:manual?{}:{'x-qa-baseline':'1'}});await context.addCookies([{name:'__Host-dsta_session',value:actor,url:base.replace('http:','https:'),secure:true,sameSite:'Lax'}]);const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());await page.goto(base);await page.locator(manual?'#manual-minutes-open':'#rows tr').waitFor();return page;}
+async function pageFor(actor,manual=true,previous=false){const context=await browser.newContext({viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write'],extraHTTPHeaders:manual?{}:{'x-qa-baseline':'1'}});await context.addCookies([{name:'__Host-dsta_session',value:actor,url:base.replace('http:','https:'),secure:true,sameSite:'Lax'}]);const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());if(previous){await page.route('**/inbox.js',route=>route.fulfill({contentType:'text/javascript',body:previousInbox}));await page.route('**/inbox.css',route=>route.fulfill({contentType:'text/css',body:previousInboxCSS}));}await page.goto(base);await page.locator(manual?'#manual-minutes-open':'#rows tr').waitFor();return page;}
 try{
  const before=await pageFor('qa-a',false);await before.locator('[data-project="3"]').click();await before.locator('#inspector-minute').click();await before.screenshot({path:join(screenshots,'template-before-desktop.png')});await before.setViewportSize({width:390,height:844});await before.screenshot({path:join(screenshots,'template-before-mobile.png')});await before.context().close();
  const a=await pageFor('qa-a'),b=await pageFor('qa-b');
@@ -62,14 +64,37 @@ try{
  assert.equal(snapshots['qa-a'].tasks[0].done,false);
  const records=[...boxes.get('u:qa-a').ctx.storage.kv.list({prefix:'minute:'}).values()];assert.equal(records.length,1);assert.ok(records[0].acciones.every(x=>x.estado==='propuesta'&&!x.auto));
  const state=JSON.parse(readFileSync(join(work,'vikunja.json')));assert.equal(state['qa-a'].tasks[0].done,false,'no automatic changes');assert.equal(state['qa-a'].tasks.length,1);
+ const previous=await pageFor('qa-a',true,true);await previous.locator('#dsta-inbox-toggle').click();await previous.locator(`[data-open="${records[0].id}"]`).click();
+ await previous.screenshot({path:join(screenshots,'review-before-desktop.png')});await previous.setViewportSize({width:390,height:844});await previous.screenshot({path:join(screenshots,'review-before-mobile.png')});await previous.context().close();
  // Approve through the existing browser endpoint: the real Python decision engine writes then publishes.
  await a.locator(`[data-open="${records[0].id}"]`).click();
+ await a.setViewportSize({width:1280,height:900});await a.screenshot({path:join(screenshots,'review-top-desktop.png')});
+ await a.setViewportSize({width:390,height:844});await a.screenshot({path:join(screenshots,'review-top-mobile.png')});
+ const first=a.locator('.dsta-inbox-action').nth(0),second=a.locator('.dsta-inbox-action').nth(1),third=a.locator('.dsta-inbox-action').nth(2);
+ assert.equal(await first.locator('input[type=radio]').count(),3);
+ assert.equal(await first.locator('textarea').isVisible(),false);
+ await first.locator('[value="instruccion"]').check();await first.locator('textarea').fill('NO DEBE ENVIARSE');
+ await first.locator('[value="aprobar"]').check();assert.equal(await first.locator('textarea').isVisible(),false);
+ await second.locator('[value="instruccion"]').check();await second.locator('textarea').fill('Cambiar título a Seguimiento QA ajustado');
+ await third.locator('[value="rechazar"]').check();
+ await a.locator('.dsta-inbox-other summary').click();
+ assert.match(await a.locator('.dsta-inbox-other').innerText(),/Presupuesto tratado/);
+ await a.locator('.dsta-inbox-other textarea').fill('Registrar presupuesto validado QA en la tarea existente');
+ assert.equal(await a.locator(`#dsta-inbox [data-submit="${records[0].id}"]`).innerText(),'Enviar (4)');
+ await a.setViewportSize({width:1280,height:900});
+ await a.screenshot({path:join(screenshots,'review-desktop.png')});
+ await a.setViewportSize({width:390,height:844});
  await a.screenshot({path:join(screenshots,'inbox-mobile.png')});
- const approval=a.locator('#dsta-inbox input[data-decision][value="aprobar"]');for(let i=0;i<await approval.count();i++)await approval.nth(i).check();
+ assert.ok(await a.locator('#dsta-inbox').evaluate(e=>e.scrollWidth<=e.clientWidth),'no mobile horizontal overflow');
  await a.locator(`#dsta-inbox [data-submit="${records[0].id}"]`).click();
 
  const deadline=Date.now()+20000;while(true){const ok=await a.evaluate(async()=>{const d=await(await fetch('/api/dashboard')).json();return d.tasks.some(t=>t.id===63&&t.done)&&d.tasks.some(t=>t.id===200);});if(ok)break;if(Date.now()>deadline)throw Error('Approved changes missing from snapshot');await new Promise(r=>setTimeout(r,100));}
  const final=JSON.parse(readFileSync(join(work,'vikunja.json')));assert.equal(final['qa-b'].tasks.length,1);assert.ok(final['qa-a'].tasks.find(t=>t.id===200).description.includes('manual-dashboard-manual-'));
+ assert.equal(final['qa-a'].tasks.find(t=>t.id===200).title,'Seguimiento QA ajustado');
+ // Snapshot completion can precede the instruction at the end of the batch.
+ await a.waitForFunction(async()=>{const d=await(await fetch('/api/dashboard')).json();return d.tasks.some(t=>t.id===63&&t.description.includes('Presupuesto validado QA'));},null,{timeout:20000});
+ const reviewed=JSON.parse(readFileSync(join(work,'vikunja.json')));
+ assert.equal(reviewed['qa-a'].tasks.length,2);assert.equal(reviewed['qa-a'].tasks[0].description.split('Presupuesto validado QA').length-1,1);
  // Storage failure still permits an explicit, confirmed cloud save.
  await b.locator('[data-new]').click();await b.locator('.manual-dialog [data-title]').fill('B sin almacenamiento local');
  await b.evaluate(()=>{Storage.prototype.setItem=()=>{throw new DOMException('QA quota failure','QuotaExceededError');};});

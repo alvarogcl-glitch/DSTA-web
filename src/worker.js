@@ -551,13 +551,14 @@ function validDecision(body) {
     return { minuteId, decision: "descartar", digest: body.digest };
   }
   if (body.decision !== undefined) return null;
-  if (!Array.isArray(decisions) || !decisions.length || decisions.length > 25) return null;
+  if (!Array.isArray(decisions) || !decisions.length || decisions.length > 26) return null;
   const clean = [];
   for (const item of decisions) {
-    if (!item || !MINUTE_ACTION_ID.test(String(item.actionId || ""))) return null;
+    if (!item || !(MINUTE_ACTION_ID.test(String(item.actionId || "")) || item.actionId === "otros")) return null;
     if (!["aprobar", "rechazar", "instruccion"].includes(item.decision)) return null;
     const instruccion = typeof item.instruccion === "string" ? item.instruccion.trim() : "";
     if (item.decision === "instruccion" && (!instruccion || instruccion.length > 1500)) return null;
+    if (item.actionId === "otros" && item.decision !== "instruccion") return null;
     const edits = {};
     for (const [key, value] of Object.entries(item.edits || {})) {
       if (!MINUTE_EDIT_KEYS.has(key) || !["string", "number"].includes(typeof value)) return null;
@@ -566,7 +567,9 @@ function validDecision(body) {
     }
     clean.push({ actionId: item.actionId, decision: item.decision, edits, ...(instruccion ? { instruccion } : {}) });
   }
-  return { minuteId, decisions: clean };
+  if (new Set(clean.map(item => item.actionId)).size !== clean.length) return null;
+  if (body.digest !== undefined && (typeof body.digest !== 'string' || !body.digest || body.digest.length > 100)) return null;
+  return { minuteId, decisions: clean, ...(body.digest ? {digest: body.digest} : {}) };
 }
 
 function forwardToChatObject(env, path, body, box = LEGACY_BOX) {
@@ -1029,8 +1032,8 @@ export class DashboardChatQueue extends DurableObject {
       if (!record) return json({ error: "Minuta no encontrada." }, 404);
       if (record.aplicando) return json({ error: "Ya se están aplicando decisiones de esta minuta." }, 409);
       if (record.descartadaEn) return json({ error: "Esta minuta ya fue descartada." }, 409);
-      if (decision.decision === "descartar" && decision.digest !== record.digest) {
-        return json({ error: "La minuta cambió. Actualiza la bandeja antes de descartarla." }, 409);
+      if (decision.digest !== undefined && decision.digest !== record.digest) {
+        return json({ error: "La minuta cambió. Actualiza la bandeja antes de enviar decisiones." }, 409);
       }
       const id = crypto.randomUUID();
       storage.put(`decision:${id}`, { ...decision, id, status: "queued", createdAt: new Date().toISOString() });

@@ -299,7 +299,10 @@ class UserCopilot:
         args = [self.hermes_cli, "chat", "--quiet", "--source", f"dsta-mu-{actor}", "--ignore-rules", "--ignore-user-config",
                 "--provider", self.provider, "--model", self.model, "-t", "todo", "--max-turns", "3", "--query", prompt]
         try:
-            code, out, err = self.run(args, cwd=str(cwd), env=env, timeout=HERMES_TIMEOUT)
+            from hermes_prompt_transport import prepare_query
+            args, query_input = prepare_query(args)
+            code, out, err = self.run(args, cwd=str(cwd), env=env, timeout=HERMES_TIMEOUT,
+                                      **({'input_text': query_input} if query_input is not None else {}))
         except (OSError, subprocess.TimeoutExpired):
             code, out, err = 1, "", ""
         finally:
