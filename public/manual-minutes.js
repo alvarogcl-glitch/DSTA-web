@@ -85,7 +85,7 @@
     modes.innerHTML='<button type="button" data-mode="keys">⌨️ Teclado</button><button type="button" data-mode="pen">✏️ Lápiz</button>';
     container.insertBefore(modes,field);
     const inkArea=document.createElement('div');inkArea.className='manual-ink';
-    const pad=window.DstaInk?.create({ink:draft.ink||'',onChange:()=>{draft.ink=pad.serialize();draft.inkDirty=true;changed();}});
+    const pad=window.DstaInk?.create({ink:draft.ink||'',onChange:()=>{draft.ink=pad.serialize();draft.inkDirty=true;changed();renderStatus();}});
     const transcribeRow=document.createElement('div');transcribeRow.className='manual-transcribe';
     transcribeRow.innerHTML='<button type="button" data-transcribe>Transcribir a texto</button><span>La IA convierte tu letra en texto; lo revisas antes de procesar.</span>';
     if(pad)inkArea.append(pad.el,transcribeRow);

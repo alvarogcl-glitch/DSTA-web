@@ -104,6 +104,7 @@ try{
  }
  await a.waitForFunction(()=>/guardado/.test(document.querySelector('.mm-editor .manual-status')?.textContent||''),null,{timeout:10000});
  assert.equal(inkStrokes(),3,'three mouse strokes saved as ink');
+ assert.ok(await a.locator('[data-transcribe]').isEnabled(),'Transcribir se habilita apenas hay escritura (sin otro clic antes)');
  const synthetic=type=>a.evaluate(t=>{const c=document.querySelector('.ink-page canvas'),r=c.getBoundingClientRect();
    const ev=(name,x)=>c.dispatchEvent(new PointerEvent(name,{pointerType:t,pointerId:t==='pen'?7:9,bubbles:true,cancelable:true,clientX:r.left+x,clientY:r.top+300,pressure:.6,button:0,buttons:1}));
    ev('pointerdown',50);for(let x=60;x<200;x+=10)ev('pointermove',x);ev('pointerup',200);},type);
