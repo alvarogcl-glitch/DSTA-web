@@ -239,3 +239,17 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   1. `wrangler rollback 1b8795f0-473c-4e5e-afb7-395217d856c4 --name dsta-web`.
   2. En el repo de producción, `git reset --hard pre-avisos-2026-10-15`.
   3. Reiniciar las 3 tareas.
+
+## 17. Avisos concretos, avance del copiloto y minuta manuscrita en el visor (15-10-2026, ~17:35)
+
+- **Autorización:** el CEO aprobó por Telegram el 15-10 a las 20:28 UTC («Si»).
+- **Qué se desplegó:** commit `802a123`, versión del Worker `aaf508dd`, `CODE_VERSION avisos-concretos-2026-10-15`.
+- **Cambios:**
+  - avisos en 2 líneas (acción concreta · paso);
+  - aviso del copiloto con su ventana cerrada, con los segundos transcurridos y «Respuesta lista» clicable;
+  - el regex de links de minuta acepta [corchetes] en el título;
+  - las minutas manuales citadas llevan `borrador` y el visor y la ventana Minutas muestran la tinta recortada (`compact`).
+- **Volver atrás:**
+  1. `wrangler rollback 522f0f52-14b8-4d85-bb9e-16e32e08adcf --name dsta-web`.
+  2. En el repo de producción, `git reset --hard pre-avisos-concretos-2026-10-15`.
+  3. Reiniciar las 3 tareas.
