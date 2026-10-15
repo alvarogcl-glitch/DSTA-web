@@ -61,6 +61,24 @@
   const isTablet=()=>/iPad/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   const preferredMode=()=>{try{return localStorage.getItem(MODE)||(isTablet()?'pen':'keys');}catch{return isTablet()?'pen':'keys';}};
   const transcribing=d=>['queued','running'].includes(d.transcription?.status);
+  // Per-action notices: what this browser sent is followed until it ends (analysis or transcription).
+  const followed=new Map();
+  const follow=(key,d)=>followed.set(key,d.title||'Minuta');
+  function reportProgress(){
+    for(const [key,title] of followed){
+      const [kind,id]=key.split(':'),d=cache[id],toast=window.DstaToast?.task(key);if(!d||!toast)continue;
+      if(kind==='ink'){
+        const t=d.transcription?.status;
+        if(t==='done'){toast.done(`«${title}» · transcripción lista para revisar`);followed.delete(key);}
+        else if(t==='error'){toast.fail(`«${title}»: ${d.transcription.error||'no se pudo transcribir'}`);followed.delete(key);}
+        else toast.step(`«${title}» · ${t==='running'?'Transcribiendo escritura a mano (IA)…':'Transcripción en cola: esperando a la VM…'}`);
+      }else{
+        if(d.status==='processed'){toast.done(`«${title}» procesada · revisa la 🔔`);followed.delete(key);}
+        else if(d.status==='error'){toast.fail(`«${title}»: ${d.error||'no se pudo analizar'}`);followed.delete(key);}
+        else toast.step(`«${title}» · ${d.status==='running'?'Analizando con IA contra tu portafolio…':'Análisis en cola: esperando a la VM…'}`);
+      }
+    }
+  }
   const inkCurrent=d=>!d.hasInk&&!d.ink||(!d.inkDirty&&d.transcription?.status==='done'&&d.transcription.inkRev===d.inkRev);
   const fullText=d=>[d.content,d.transcript?'[Escrito a mano · transcripción]\n'+d.transcript:''].filter(x=>String(x||'').trim()).join('\n\n');
   function toolbar(field,container,onChange){
@@ -161,7 +179,8 @@
       try{
         await sync();
         const result=await api('/transcribe',{id:draft.id,revision:draft.revision});
-        Object.assign(draft,result,{dirty:false});server[draft.id]=result;await persistLocal(draft).catch(()=>{});
+        Object.assign(draft,result,{dirty:false});server[draft.id]=result;cache[draft.id]=draft;await persistLocal(draft).catch(()=>{});
+        follow('ink:'+draft.id,draft);reportProgress();
       }catch(e){message(e.message,true);}finally{busy=false;renderStatus();}
     });
     toolbar(field,container,changed);
@@ -169,7 +188,7 @@
     buttons.querySelector('[data-submit]').addEventListener('click',async()=>{
       if(busy)return;busy=true;renderStatus();clearTimeout(timer);
       if(pad&&!pad.isEmpty()&&!inkCurrent(draft)){busy=false;renderStatus();message('Tienes escritura a mano sin transcribir. Usa «Transcribir a texto» y revisa el resultado antes de procesar.',true);return;}
-      try{await sync();const result=await api('/submit',{id:draft.id,revision:draft.revision});Object.assign(draft,result,{dirty:false});await persistLocal(draft).catch(()=>{});unsaved=false;renderStatus();}
+      try{await sync();const result=await api('/submit',{id:draft.id,revision:draft.revision});Object.assign(draft,result,{dirty:false});cache[draft.id]=draft;follow('manual:'+draft.id,draft);reportProgress();await persistLocal(draft).catch(()=>{});unsaved=false;renderStatus();}
       catch(e){message(e.message+' · el borrador se conserva.',true);}finally{busy=false;renderControls();}
     });
     function renderControls(){renderStatus();}
@@ -340,7 +359,7 @@
       add('Ver texto','',()=>showEditor(d));
       if(d.status==='processed'&&!appliedOf(r)&&!r?.descartadaEn)add('Volver a procesar','',async e=>{
         e.target.disabled=true;note.textContent='Enviando a análisis…';
-        try{const result=await api('/submit',{id:d.id,revision:d.revision,reprocess:true});Object.assign(d,result,{dirty:false});note.textContent='En cola de análisis. Las nuevas propuestas llegarán a la 🔔 en unos minutos.';}
+        try{const result=await api('/submit',{id:d.id,revision:d.revision,reprocess:true});Object.assign(d,result,{dirty:false});follow('manual:'+d.id,d);reportProgress();note.textContent='En cola de análisis. Las nuevas propuestas llegarán a la 🔔 en unos minutos.';}
         catch(error){note.textContent=error.message;e.target.disabled=false;}
       });
     }
@@ -366,8 +385,8 @@
     new MutationObserver(attach).observe(document.querySelector('#detail-body'),{childList:true});attach();
     setInterval(()=>{
       if(!Object.values(cache).some(d=>['queued','running'].includes(d.status)||transcribing(d)))return;
-      load().then(()=>{active?.update?.();window.dispatchEvent(new Event('dsta-minutes-changed'));}).catch(()=>{});
-    },10000);
+      load().then(()=>{active?.update?.();reportProgress();window.dispatchEvent(new Event('dsta-minutes-changed'));}).catch(()=>{});
+    },5000);
   }
   start().catch(()=>{const button=Object.assign(document.createElement('button'),{type:'button',textContent:'Reintentar minutas'});button.onclick=()=>{button.remove();start().catch(()=>window.DstaToast?.show('No se pudieron cargar los borradores. Recarga para reintentar.',false));};document.querySelector('#refresh')?.before(button);});
 })();

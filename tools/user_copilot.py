@@ -111,10 +111,11 @@ def build_prompt(job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
         def minute_line(m: dict) -> str:
             cite = f" [cítala como [{m.get('title', '')}](minuta:{m['id']})]" if m.get("id") else ""
             size = 1500 if m.get("found") else 600
-            return f"- {m.get('date', '')} · {m.get('title', '')}{cite}: {str(m.get('summary', ''))[:size]}"
+            kind = " (minuta manual)" if m.get("source") == "Manual" else ""
+            return f"- {m.get('date', '')} · {m.get('title', '')}{kind}{cite}: {str(m.get('summary', ''))[:size]}"
         recent = [m for m in minutes if not m.get("found")]
         found = [m for m in minutes if m.get("found")]
-        secondary.append(["", "## Minutas recientes"] + [minute_line(m) for m in recent[:15]] +
+        secondary.append(["", "## Minutas recientes"] + [minute_line(m) for m in recent[:25]] +
                          (["", "## Minutas anteriores relacionadas con la pregunta"] + [minute_line(m) for m in found[:5]] if found else []))
     done = [t for t in snapshot.get("tasks", []) if t.get("done")]
     if done:
@@ -349,16 +350,24 @@ def _words(text: str) -> set[str]:
     return set(WORD.findall(line_key(text)))
 
 
-def minutes_for(user: dict, query: str = "") -> list[dict]:
+def _manual(manual: list[dict] | None) -> list[dict]:
+    """Manual minutes of the dashboard (typed or handwritten) in the copilot's minute shape."""
+    return [{"id": m["id"], "title": m["titulo"], "date": m["fecha"], "summary": m["contenido"], "source": "Manual"}
+            for m in (manual or [])]
+
+
+def minutes_for(user: dict, query: str = "", manual: list[dict] | None = None) -> list[dict]:
     """The user's 15 most recent Granola summaries plus (D31) up to 5 older ones from THEIR archive
-    that best match the question. Never another user's minutes: both lists live in this vault entry."""
-    recent = _stored(user, "minutes")[:15]
+    that best match the question. Never another user's minutes: both lists live in this vault entry.
+    Their manual minutes (up to 10 recent, plus older matches) are included too."""
+    manual = _manual(manual)
+    recent = sorted(_stored(user, "minutes")[:15] + manual[:10], key=lambda m: str(m.get("date") or ""), reverse=True)
     seen = {m.get("id") for m in recent if m.get("id")} | {(m.get("title"), m.get("date")) for m in recent}
     wanted = _words(query)
     if not wanted:
         return recent
     scored = []
-    for minute in _stored(user, "minuteArchive"):
+    for minute in _stored(user, "minuteArchive") + manual[10:]:
         if minute.get("id") in seen or (minute.get("title"), minute.get("date")) in seen:
             continue
         title_hits = len(wanted & _words(minute.get("title", "")))
@@ -369,9 +378,9 @@ def minutes_for(user: dict, query: str = "") -> list[dict]:
     return recent + found
 
 
-def cited_minutes(user: dict, reply: str) -> dict[str, dict]:
+def cited_minutes(user: dict, reply: str, manual: list[dict] | None = None) -> dict[str, dict]:
     """D32: text of the user's minutes the copilot linked as [título](minuta:<id>), for the chat viewer."""
-    by_id = {m["id"]: m for m in _stored(user, "minuteArchive") + _stored(user, "minutes") if m.get("id")}
+    by_id = {m["id"]: m for m in _stored(user, "minuteArchive") + _stored(user, "minutes") + _manual(manual) if m.get("id")}
     cited: dict[str, dict] = {}
     for minute_id in MINUTE_LINK.findall(reply or ""):
         minute = by_id.get(minute_id.strip())

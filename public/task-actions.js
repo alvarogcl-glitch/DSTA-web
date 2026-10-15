@@ -9,35 +9,75 @@
   let pending = null;
   let tracking = false;
   let sending = false;
-  const toast = document.createElement('div');
-  toast.className = 'task-action-toast';
-  toast.setAttribute('role', 'status');
-  toast.setAttribute('aria-live', 'polite');
-  toast.setAttribute('aria-atomic', 'true');
-  toast.hidden = true;
-  const toastText = document.createElement('span');
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.textContent = '×';
-  dismiss.setAttribute('aria-label', 'Descartar aviso');
-  dismiss.addEventListener('click', () => { toast.hidden = true; toast.classList?.remove('fading'); });
-  toast.append(toastText, dismiss);
-  document.body.append(toast);
-  let toastTimer;
-  // D58: one result notice for every change. Success fades out after a few seconds; errors and
-  // uncertain results stay until dismissed, so they are never missed.
-  function notify(text, success = false) {
-    clearTimeout(toastTimer);
-    toast.classList?.remove('fading');
-    toast.hidden = false;
-    toastText.textContent = text;
-    if (success) toastTimer = setTimeout(() => {
-      toast.classList?.add('fading');
-      toastTimer = setTimeout(() => { toast.hidden = true; toast.classList?.remove('fading'); }, 700);
-    }, 6000);
+  // Notices (D58, revised 15-10): one notice per action, stacked at the bottom. A running action
+  // shows its current step (spinner) and is updated in place until it ends; success disappears
+  // after ~2 s, errors and uncertain results stay until dismissed so they are never missed.
+  const stack = document.createElement('div');
+  stack.className = 'task-toasts';
+  stack.setAttribute('role', 'status');
+  stack.setAttribute('aria-live', 'polite');
+  document.body.append(stack);
+  const notices = new Map();
+  let serial = 0;
+  const DONE_MS = 2200;
+  function noticeFor(key) {
+    let item = notices.get(key);
+    if (!item) {
+      const el = document.createElement('div');
+      el.className = 'task-action-toast';
+      const icon = Object.assign(document.createElement('i'), { className: 'toast-icon' });
+      icon.setAttribute('aria-hidden', 'true');
+      const text = document.createElement('span');
+      const dismiss = Object.assign(document.createElement('button'), { type: 'button', textContent: '×' });
+      dismiss.setAttribute('aria-label', 'Descartar aviso');
+      item = { el, text, timer: 0 };
+      dismiss.addEventListener('click', () => remove(key));
+      el.append(icon, text, dismiss);
+      stack.append(el);
+      while ((stack.children?.length || 0) > 4) {  // the oldest finished notice makes room
+        const old = [...notices].find(([, n]) => !n.el.classList?.contains('busy'));
+        if (!old) break;
+        remove(old[0]);
+      }
+      notices.set(key, item);
+    }
+    return item;
   }
-  function feedback(id, message, success = false) { notify('#' + (window.DstaTaskNumber?.(id) ?? id) + ' · ' + message, success); }
-  window.DstaToast = { show: notify };
+  function remove(key) {
+    const item = notices.get(key);
+    if (!item) return;
+    clearTimeout(item.timer);
+    notices.delete(key);
+    item.el.classList?.add('fading');
+    setTimeout(() => item.el.remove?.(), 350);
+  }
+  function setNotice(key, message, state) {
+    const item = noticeFor(key);
+    clearTimeout(item.timer);
+    item.el.className = 'task-action-toast ' + state;
+    item.text.textContent = message;
+    if (state === 'ok') item.timer = setTimeout(() => remove(key), DONE_MS);
+  }
+  // task(key): the same key always updates the same notice (step → done / fail).
+  function task(key) {
+    return {
+      step: message => setNotice(key, message, 'busy'),
+      done: message => setNotice(key, message, 'ok'),
+      fail: message => setNotice(key, message, 'error'),
+      close: () => remove(key),
+    };
+  }
+  function notify(text, success = false) { setNotice('msg:' + (++serial), text, success ? 'ok' : 'error'); }
+  const taskKey = id => 'task:' + id;
+  const label = (id, message) => '#' + (window.DstaTaskNumber?.(id) ?? id) + ' · ' + message;
+  function feedback(id, message, success = false) { task(taskKey(id))[success ? 'done' : 'fail'](label(id, message)); }
+  const stepFor = (id, message) => task(taskKey(id)).step(label(id, message));
+  window.DstaToast = { show: notify, task };
+  window.DstaSteps = {
+    // Shared wording for the verified action queue (dashboard buttons, forms, copilot, labels).
+    queue: status => status === 'running' ? 'Aplicando en Vikunja (VM)…' : 'En cola: esperando a la VM…',
+    refreshing: 'Actualizando el dashboard…',
+  };
   const progress = job => job.kind === 'complete' ? 'Completando…' : 'Guardando registro…';
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());
   const state = id => {
@@ -138,7 +178,7 @@
     const draft = state(job.taskId);
     if (job.draft) Object.assign(draft, job.draft);
     draft.status = progress(job);
-    feedback(job.taskId, draft.status);
+    stepFor(job.taskId, draft.status);
     redraw();
     try {
       const deadline = Date.now() + 360000;
@@ -153,10 +193,12 @@
         result = await response.json();
         if (!response.ok || result.status === 'error') throw Error(result.error || 'No se pudo completar la solicitud.');
         if (result.status === 'completed') break;
+        stepFor(job.taskId, window.DstaSteps.queue(result.status));
       }
       if (result?.status !== 'completed') throw Error('La solicitud sigue pendiente. Recarga para retomar su seguimiento; revisa la tarea antes de reintentar.');
       if (result.refreshError || !result.snapshotTimestamp) throw Error(result.refreshError || 'No se recibió la actualización de Vikunja. Revisa la tarea antes de reintentar.');
       let refreshed = false;
+      stepFor(job.taskId, window.DstaSteps.refreshing);
       for (let attempt = 0; attempt < 20; attempt++) {
         if (await refresh(result.snapshotTimestamp)) { refreshed = true; break; }
         await new Promise(resolve => setTimeout(resolve, 750));
@@ -190,7 +232,7 @@
     let directLog = false;
     if (kind === 'log') {
       sending = true; // a second click while the mode resolves is ignored
-      draft.status = progress({ kind }); feedback(id, draft.status); redraw();
+      draft.status = progress({ kind }); stepFor(id, 'Enviando…'); redraw();
       const mode = await resolveMode();
       sending = false;
       if (mode === 'unknown') {
@@ -213,7 +255,7 @@
     try { savePending(job); }
     catch (error) { sending = false; draft.status = error.message; feedback(id, draft.status); redraw(); return; }
     draft.status = progress({ kind });
-    feedback(id, draft.status); redraw();
+    stepFor(id, 'Enviando…'); redraw();
     try {
       const response = await fetch(job.endpoint || '/api/assistant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(job.body || (kind === 'complete'
         ? { action: 'complete', requestId: job.id, taskId: Number(id) }

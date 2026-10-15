@@ -32,7 +32,8 @@ class MinutasTests(unittest.TestCase):
         (self.secondary / "2026-09-14-consejo-vrai.md").write_text(
             "# Consejo VRAI\n\n- Presupuesto de la Academia\n", encoding="utf-8")
         (base / "secreto.md").write_text("# fuera de alcance\n", encoding="utf-8")
-        env = {"DSTA_MINUTAS_DIRS": os.pathsep.join([str(self.primary), str(self.secondary)])}
+        env = {"DSTA_MINUTAS_DIRS": os.pathsep.join([str(self.primary), str(self.secondary)]),
+               "DSTA_MANUAL_MINUTES_STORE": str(base / "sin-minutas-manuales.json")}  # never the real store
         self.env = patch.dict(os.environ, env)
         self.env.start()
         self.module = load_module()

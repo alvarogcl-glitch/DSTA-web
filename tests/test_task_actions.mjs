@@ -8,11 +8,16 @@ async function scenario(mode) {
   let section, complete, posts = 0, sent, now = 0, toast;
   const dismissTimers = [];
   const storage = new Map();
-  const field = () => ({ value: '', disabled: false, focus() {}, children: [], append(...nodes) { this.children.push(...nodes); }, setAttribute(name, value) { this[name] = value; }, addEventListener(name, fn) { this[name] = fn; } });
+  const field = () => { const el = { value: '', disabled: false, className: '', focus() {}, children: [], append(...nodes) { for (const n of nodes) { if (n && typeof n === 'object') n.parent = this; this.children.push(n); } }, setAttribute(name, value) { this[name] = value; }, addEventListener(name, fn) { this[name] = fn; },
+    remove() { const i = this.parent?.children.indexOf(this) ?? -1; if (i >= 0) this.parent.children.splice(i, 1); this.removed = true; } };
+    el.classList = { add: c => { el.className += ' ' + c; }, contains: c => el.className.split(' ').includes(c) }; return el; };
+  // Notices are stacked per action: the current one is the last child of the stack (icon, text, ×).
+  const note = () => toast?.children[toast.children.length - 1];
+  const noteText = () => note()?.children[1]?.textContent || '';
   const context = {
     crypto: {randomUUID: () => '12345678-1234-4234-8234-123456789012'}, tasks: [task], inspection: { taskId: '17' }, Intl,
     Date: class extends Date { static now() { return now; } },
-    setTimeout: (fn, delay) => { if (delay === 6000) { dismissTimers.push(fn); return dismissTimers.length; } now += 2000; fn(); },
+    setTimeout: (fn, delay) => { if (delay === 2200) { dismissTimers.push(fn); return dismissTimers.length; } now += 2000; fn(); },
     clearTimeout() {},
     sessionStorage: { setItem: (k, v) => { if (mode === 'complete-storage') throw Error('Almacenamiento bloqueado'); storage.set(k, v); }, removeItem: k => storage.delete(k), getItem: k => storage.get(k) },
     document: {
@@ -30,7 +35,7 @@ async function scenario(mode) {
     },
     taskView: () => ({ taskId: '17' }),
     refresh: async () => {
-      assert.doesNotMatch(toast?.children[0]?.textContent || '', /completada|guardado/, 'no éxito antes de confirmar snapshot');
+      assert.doesNotMatch(noteText(), /completada|guardado/, 'no éxito antes de confirmar snapshot');
       if (mode === 'stale' || mode === 'complete-stale') return false;
       if (sent.action === 'complete') task.done = true;
       else task.description += '\n\nNota 2026-10-05: Acuerdo <literal>';
@@ -83,13 +88,14 @@ async function scenario(mode) {
     for (let i=0;i<30;i++) await Promise.resolve();
     assert.equal(posts,0,'blocked storage must prevent all writes before losing idempotency');
     assert.equal(task.done,false);
-    assert.match(toast.children[0].textContent,/No se pudo guardar la solicitud; no se envió el cambio/);
+    assert.match(noteText(),/No se pudo guardar la solicitud; no se envió el cambio/);
     return;
   }
   assert.equal(toast?.['role'], 'status', 'feedback independiente del inspector');
   assert.equal(toast?.['aria-live'], 'polite');
-  assert.match(toast.children[0].textContent, /#17/);
-  if (mode.startsWith('complete')) assert.match(toast.children[0].textContent, /Completando…/);
+  assert.match(noteText(), /#17/);
+  if (mode.startsWith('complete')) assert.match(noteText(), /Enviando…|En cola|Aplicando|Completando…/);
+  assert.equal(toast.children.length, 1, 'one notice per action, updated in place');
   context.inspection = null; // navegar no debe perder el estado de la acción
   for (let i = 0; i < 1500; i++) await Promise.resolve();
   context.inspection = { taskId: '17' };
@@ -112,18 +118,20 @@ async function scenario(mode) {
     assert.equal(section.form.elements.entry.value, 'Acuerdo <literal>', 'un fallo conserva el registro');
     assert.doesNotMatch(section.status.textContent, /Registro guardado/);
   }
-  assert.match(toast.children[0].textContent, /#17/);
-  assert.equal(toast.hidden, false, 'feedback sigue visible tras navegar');
+  assert.match(noteText(), /#17/);
+  assert.equal(toast.children.length, 1, 'feedback sigue visible tras navegar');
   if (['success', 'complete', 'log-accounts'].includes(mode)) {
-    assert.match(toast.children[0].textContent, mode === 'complete' ? /Tarea completada/ : /Registro guardado/);
+    assert.match(noteText(), mode === 'complete' ? /Tarea completada/ : /Registro guardado/);
+    assert.ok(note().classList.contains('ok'));
     assert.equal(dismissTimers.length, 1);
     dismissTimers[0]();
-    assert.equal(toast.hidden, true, 'el éxito desaparece automáticamente');
+    assert.equal(toast.children.length, 0, 'el éxito desaparece automáticamente (~2 s)');
   } else {
-    assert.doesNotMatch(toast.children[0].textContent, /Tarea completada|Registro guardado/);
+    assert.doesNotMatch(noteText(), /Tarea completada|Registro guardado/);
+    assert.ok(note().classList.contains('error'));
     assert.equal(dismissTimers.length, 0, 'errores y resultados inciertos no desaparecen');
-    toast.children[1].click();
-    assert.equal(toast.hidden, true, 'se puede descartar sin modal');
+    note().children[2].click();
+    assert.equal(toast.children.length, 0, 'se puede descartar sin modal');
   }
   assert.equal(storage.size, ['timeout','complete-timeout','complete-stale','complete-500','complete-error'].includes(mode) ? 1 : 0, 'una solicitud incierta conserva su id para consultar sin reenviar');
   if (mode === 'complete-error') {

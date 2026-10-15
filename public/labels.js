@@ -19,7 +19,11 @@
   const notice = document.createElement('div');
   notice.className = 'label-notice'; notice.setAttribute('role','status'); notice.setAttribute('aria-live','polite'); notice.hidden = true;
   document.body.append(notice);
-  function notify(text) {notice.textContent = text;notice.hidden = false;}
+  const toast = () => window.DstaToast?.task('labels');
+  function notify(text, state = 'fail') {
+    if (window.DstaToast) { toast()[state](text); return; }
+    notice.textContent = text; notice.hidden = false;
+  }
   function persist(value) {
     // Persist before any mutation, even when the browser disallows storage.
     if (value) sessionStorage.setItem(storageKey,JSON.stringify(value)); else sessionStorage.removeItem(storageKey);
@@ -44,17 +48,18 @@
         }
         if (result.status === 'error') {job.terminal=true;sessionStorage.setItem(storageKey,JSON.stringify(job));throw Error(result.error);}
         if (result.status === 'completed') break;
+        notify('Etiquetas · '+(window.DstaSteps?.queue(result.status)||'En proceso…'),'step');
         await new Promise(r => setTimeout(r,2000));
       }
       if (result?.status !== 'completed') throw Error('El cambio sigue pendiente. Conservamos su identificador para consultar el resultado.');
       let confirmed = false;
+      notify('Etiquetas · '+(window.DstaSteps?.refreshing||'Actualizando…'),'step');
       for (let i=0;i<20;i++) {
         if (await refresh(result.snapshotTimestamp)) {confirmed=true;break;}
         await new Promise(r => setTimeout(r,750));
       }
       if (!confirmed) throw Error('El cambio terminó, pero falta cargar el snapshot actualizado. Consulta su resultado.');
-      persist(null);notify('Etiquetas actualizadas.');
-      setTimeout(() => {if (!pending) notice.hidden=true;},6000);
+      persist(null);notify('Etiquetas actualizadas.','done');notice.hidden=true;
       if (editor.open) editor.close();
       renderManager();
     } catch (error) {
@@ -66,7 +71,7 @@
     if (pending) {notify('Hay un cambio pendiente. Consulta su resultado antes de enviar otro.');return;}
     const job = {...action,requestId:crypto.randomUUID()};
     try {persist(job);} catch {notify('No se pudo conservar el identificador; no se envió el cambio.');return;}
-    notify('Actualizando etiquetas…');render();updatePendingControls();
+    notify('Etiquetas · Enviando…','step');render();updatePendingControls();
     // track performs the initial idempotent POST on 404 and resumes the same UUID.
     await track(job);
   }
@@ -75,6 +80,8 @@
     manager.querySelectorAll('button').forEach(el => {if (!el.matches('[data-close]')) el.disabled=Boolean(pending)||!ready();});
     manager.querySelector('#new-label').disabled=Boolean(pending)||!ready()||!palette.length;
     if (pending && !polling) {
+      notice.textContent = pending.terminal ? 'Revisa el resultado del último cambio de etiquetas.' : 'Hay un cambio de etiquetas pendiente.';
+      notice.hidden = false;
       const button = document.createElement('button');button.type='button';
       button.textContent=pending.terminal?'Actualizar y revisar etiquetas':'Consultar cambio pendiente';
       button.addEventListener('click',async () => {

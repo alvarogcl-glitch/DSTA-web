@@ -193,10 +193,12 @@ class MultiuserBridge:
         try:
             with using_user(user):
                 snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
-            minutes = user_copilot.minutes_for(user, str(job.get("message") or ""))  # D31: + older matches
+            import manual_minutes
+            manual = manual_minutes.entries(self.minute_inbox._store(actor)) if self.minute_inbox else []
+            minutes = user_copilot.minutes_for(user, str(job.get("message") or ""), manual)  # D31: + older matches
             reply = self.copilot.answer(actor, user, job, snapshot, minutes)
             reply, proposals = user_copilot.split_proposals(reply, snapshot)
-            cited = user_copilot.cited_minutes(user, reply)  # D32: open cited minutes from the chat
+            cited = user_copilot.cited_minutes(user, reply, manual)  # D32: open cited minutes from the chat
             self.finish_job(base, self.token, job, reply=reply, **({"proposals": proposals} if proposals else {}),
                             **({"minutes": cited} if cited else {}))
             executed = [proposal for proposal in proposals if proposal.get("execute")]

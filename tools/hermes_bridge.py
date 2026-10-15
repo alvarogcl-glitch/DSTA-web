@@ -199,15 +199,15 @@ class HealthMonitor:
 
 def cited_minutes(reply: str) -> dict[str, dict]:
     """Full text of the minutes the copilot linked as [título](minuta:<id>)."""
-    files = minutas.minute_files()
     cited: dict[str, dict] = {}
     for minute_id in MINUTE_LINK.findall(reply):
         minute_id = minute_id.strip()
-        path = files.get(minute_id)
-        if not path or minute_id in cited or len(cited) >= MAX_CITED_MINUTES:
+        if minute_id in cited or len(cited) >= MAX_CITED_MINUTES:
             continue
-        text = minutas.read_text(path)
-        item = minutas.summary_item(minute_id, path, text)
+        found = minutas.read_minute(minute_id)  # Granola files and manual minutes
+        if not found:
+            continue
+        item, text = found
         cited[minute_id] = {"titulo": item["titulo"], "fecha": item["fecha"], "contenido": text[:60_000]}
     return cited
 
@@ -278,8 +278,9 @@ def chat_prompt(job: dict) -> str:
         "esos datos. Para programar un recordatorio, utiliza cronjob solo cuando el usuario lo pida; "
         "si falta la fecha, hora o zona horaria, pregúntala antes. "
         "Para preguntas sobre reuniones o lo conversado en ellas usa el conjunto dsta-minutas "
-        "(minutas_buscar, minutas_listar, minutas_leer), que contiene las minutas exportadas de "
-        "Granola; cita la minuta y su fecha. Vikunja sigue siendo la fuente oficial del estado de "
+        "(minutas_buscar, minutas_listar, minutas_leer), que contiene TODAS sus minutas: las de "
+        "Granola y las manuales del dashboard (tecleadas o escritas a mano y transcritas; su id empieza con «Manual/»). "
+        "Si preguntan por minutas, considera ambos orígenes y di de cuál es cada una; cita la minuta y su fecha. Vikunja sigue siendo la fuente oficial del estado de "
         "las tareas. Si no encuentras la minuta, dilo; no la reconstruyas. "
         "Responde directo con el resultado final: sin mostrar razonamiento, planes, pasos numerados "
         "del proceso, comandos ni comentarios sobre las herramientas que usaste. "

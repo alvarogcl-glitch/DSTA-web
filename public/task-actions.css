@@ -27,3 +27,17 @@
  .task-log-toggle,.task-log-cancel,.task-actions button[type=submit]{min-height:44px}
 }
 @media(prefers-reduced-motion:reduce){.task-complete-text{transition:none}}
+
+/* Stacked per-action notices (15-10): spinner while running, ✓ when done, ! on error. */
+.task-toasts{position:fixed;z-index:30;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;width:420px;max-width:calc(100vw - 24px);pointer-events:none}
+.task-toasts .task-action-toast{position:static;transform:none;width:auto;max-width:none;left:auto;bottom:auto;pointer-events:auto;animation:toast-in .2s ease}
+.task-toasts .task-action-toast.fading{opacity:0;transition:opacity .35s ease}
+.toast-icon{flex:none;width:18px;height:18px;display:inline-grid;place-items:center;font-style:normal;font-size:13px;font-weight:700;border-radius:50%}
+.task-action-toast.busy .toast-icon{border:2px solid #3a4859;border-top-color:#68d391;animation:toast-spin .8s linear infinite}
+.task-action-toast.ok .toast-icon::before{content:"✓";color:#68d391}
+.task-action-toast.error .toast-icon::before{content:"!";color:#f6a899}
+.task-action-toast.ok{border-color:#2f6b4a}
+.task-action-toast.error{border-color:#7a3b33}
+@keyframes toast-spin{to{transform:rotate(360deg)}}
+@keyframes toast-in{from{opacity:0;transform:translateY(6px)}}
+@media (prefers-reduced-motion:reduce){.task-action-toast.busy .toast-icon{animation:none}.task-toasts .task-action-toast{animation:none}}

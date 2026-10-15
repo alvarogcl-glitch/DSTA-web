@@ -181,19 +181,30 @@
     return false;
   }
   // Follows a queued action until the snapshot confirms it (same proof as the dashboard buttons).
-  async function watchAction(requestId, note, url = '/api/task-actions') {
-    for (let i = 0; i < 80; i += 1) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const job = await (await fetch(`${url}?id=${requestId}`, { cache: 'no-store' })).json();
-      if (job.status === 'completed') {
-        note.textContent = 'Actualizando el dashboard…';
-        const shown = await refreshUntil(job.snapshotTimestamp || '');
-        note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
-        return;
+  async function watchAction(requestId, note, url = '/api/task-actions', label = 'Cambio del copiloto') {
+    const toast = window.DstaToast?.task(requestId);
+    toast?.step(`${label} · ${window.DstaSteps?.queue('queued') || 'En cola…'}`);
+    try {
+      for (let i = 0; i < 80; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const job = await (await fetch(`${url}?id=${requestId}`, { cache: 'no-store' })).json();
+        if (job.status === 'completed') {
+          note.textContent = 'Actualizando el dashboard…';
+          toast?.step(`${label} · ${window.DstaSteps?.refreshing || 'Actualizando…'}`);
+          const shown = await refreshUntil(job.snapshotTimestamp || '');
+          note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
+          toast?.done(label);
+          return;
+        }
+        if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
+        if (job.status) toast?.step(`${label} · ${window.DstaSteps?.queue(job.status) || 'En proceso…'}`);
       }
-      if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
+    } catch (error) {
+      toast?.fail(`${label}: ${error.message}`);
+      throw error;
     }
     note.textContent = 'Sigue en proceso; revisa en unos minutos.';
+    toast?.fail(`${label}: sigue en proceso; revisa en unos minutos.`);
   }
   async function applyProposal(proposal, button, note) {
     button.disabled = true;
@@ -209,7 +220,7 @@
       const queued = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(queued.error || `HTTP ${response.status}`);
       window.DstaPending?.add({ id: requestId, url: queueUrl(proposal), label: describeProposal(proposal) });  // D62
-      await watchAction(requestId, note, queueUrl(proposal));
+      await watchAction(requestId, note, queueUrl(proposal), describeProposal(proposal));
       window.DstaPending?.done(requestId);
       button.hidden = true;
       return true;
@@ -239,7 +250,7 @@
         button.hidden = true;
         note.textContent = 'Ejecutando…';
         window.DstaPending?.add({ id: proposal.requestId, url: queueUrl(proposal), label: describeProposal(proposal) });  // D62
-        watchAction(proposal.requestId, note, queueUrl(proposal)).then(() => window.DstaPending?.done(proposal.requestId)).catch(error => {
+        watchAction(proposal.requestId, note, queueUrl(proposal), describeProposal(proposal)).then(() => window.DstaPending?.done(proposal.requestId)).catch(error => {
           window.DstaPending?.done(proposal.requestId);
           note.textContent = `${error.message} Puedes reintentar.`;
           button.textContent = 'Reintentar';

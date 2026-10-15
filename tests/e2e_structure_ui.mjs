@@ -77,7 +77,7 @@ await a.locator('dialog.structure-dialog').waitFor({ state: 'detached' });
 step('D57: foco en el primer campo, Escape cierra, archivar enfoca Cancelar');
 await a.click('.structure-actions button:has-text("+ Nueva tarea")');
 await submitDialog(a, { title: 'Tarea creada desde UI', description: 'Detalle sintético', dueDate: '2026-12-15' });
-await a.locator('.task-action-toast', { hasText: '✓ Tarea creada' }).waitFor({ state: 'visible', timeout: 5000 });
+await a.locator('.task-action-toast.ok', { hasText: 'Tarea creada' }).waitFor({ state: 'visible', timeout: 5000 });
 const created = await a.evaluate(() => tasks.find(t => t.title === 'Tarea creada desde UI'));
 assert.equal(created.date, '2026-12-15'); step('A crea una tarea con fecha en esa línea');
 
@@ -230,7 +230,7 @@ const sentBeforeReload = await a.evaluate(async lt => {
   return requestId;
 }, ltA);
 await a.reload();
-await a.locator('.task-action-toast', { hasText: '✓ Tarea creada antes de recargar' }).waitFor({ state: 'visible', timeout: 90000 });
+await a.locator('.task-action-toast.ok', { hasText: 'Tarea creada antes de recargar' }).waitFor({ state: 'visible', timeout: 90000 });
 assert.equal(await a.evaluate(() => tasks.filter(t => t.title === 'Creada antes de recargar').length), 1, 'created once, not resent');
 assert.equal(await a.evaluate(id => (JSON.parse(sessionStorage.getItem('dsta-structure-pending-v1') || '[]')).some(x => x.id === id), sentBeforeReload), false);
 step('D62: tras recargar se retoma el seguimiento del cambio y se informa, sin reenviarlo');

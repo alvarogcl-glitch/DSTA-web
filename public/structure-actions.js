@@ -75,7 +75,9 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     }
     return false;
   }
-  async function track(requestId, status, dialog) {
+  async function track(requestId, status, dialog, label = 'Cambio') {
+    const notice = window.DstaToast?.task(requestId);
+    notice?.step(`${label} · ${window.DstaSteps.queue('queued')}`);
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -87,22 +89,26 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
       if (job.status === 'completed') {
         window.DstaPending.done(requestId);
         status.textContent = 'Listo. Actualizando el dashboard…';
+        notice?.step(`${label} · ${window.DstaSteps.refreshing}`);
         await refreshUntil(job.snapshotTimestamp || '');
         dialog.close();
-        window.DstaToast?.show(`✓ ${doneText[job.action] || 'Cambio aplicado'}`, true);  // D58
+        notice?.done(doneText[job.action] || 'Cambio aplicado');  // D58
         return;
       }
       if (job.status === 'error') {
         window.DstaPending.done(requestId);
         status.textContent = job.error || 'No se pudo aplicar el cambio.';
         status.className = 'status error';
+        notice?.fail(`${label}: ${status.textContent}`);
         return;
       }
       status.textContent = job.status === 'running' ? 'Aplicando en Vikunja…' : 'En cola…';
+      notice?.step(`${label} · ${window.DstaSteps.queue(job.status)}`);
     }
     // D58: uncertain result — say so and never resend by itself.
     status.textContent = 'No pudimos confirmar el cambio todavía. Revisa el elemento antes de reintentar.';
     status.className = 'status error';
+    notice?.fail(`${label}: no pudimos confirmarlo todavía. Revisa antes de reintentar.`);
   }
 
   function open(action, fields, build) {
@@ -138,7 +144,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
         window.DstaPending.add({ id: body.requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
-        await track(body.requestId, status, dialog);
+        await track(body.requestId, status, dialog, doneText[action] || 'Cambio');
       } catch (error) {
         status.textContent = error.message;
         status.className = 'status error';
@@ -165,7 +171,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
       window.DstaPending.add({ id: requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
-      await track(requestId, status, { close() {} });
+      await track(requestId, status, { close() {} }, doneText[action] || 'Cambio');
     } catch (error) {
       status.textContent = error.message;
       status.className = 'status error';
@@ -270,24 +276,28 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
     for (const item of pendingList()) {
       if (Date.now() - item.at > 86_400_000) { window.DstaPending.done(item.id); continue; }
       void (async () => {
+        const notice = window.DstaToast?.task(item.id);
+        notice?.step(`${item.label} · retomando seguimiento…`);
         for (let i = 0; i < 80; i += 1) {
           let job = {};
           try { job = await (await fetch(`${item.url}?id=${encodeURIComponent(item.id)}`, { cache: 'no-store', credentials: 'same-origin' })).json(); }
           catch { /* network: try again */ }
           if (job.status === 'completed') {
             window.DstaPending.done(item.id);
+            notice?.step(`${item.label} · ${window.DstaSteps.refreshing}`);
             await refreshUntil(job.snapshotTimestamp || '');
-            window.DstaToast?.show(`✓ ${item.label}`, true);
+            notice?.done(item.label);
             return;
           }
           if (job.status === 'error' || ['Acción no encontrada.', 'Solicitud no encontrada'].includes(job.error)) {
             window.DstaPending.done(item.id);
-            window.DstaToast?.show(`${item.label}: ${job.error || 'no se pudo aplicar'}`);
+            notice?.fail(`${item.label}: ${job.error || 'no se pudo aplicar'}`);
             return;
           }
+          if (job.status) notice?.step(`${item.label} · ${window.DstaSteps.queue(job.status)}`);
           await new Promise(resolve => setTimeout(resolve, 1500));
         }
-        window.DstaToast?.show(`No pudimos confirmar «${item.label}» todavía. Revisa antes de reintentar.`);
+        notice?.fail(`No pudimos confirmar «${item.label}» todavía. Revisa antes de reintentar.`);
       })();
     }
   }
