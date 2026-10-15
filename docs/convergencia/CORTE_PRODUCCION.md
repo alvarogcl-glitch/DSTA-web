@@ -216,3 +216,9 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   - El cajón del dueño siguió con `CODE_VERSION minutas-lapiz-2026-10-15` por tráfico constante. No tiene efecto: la lógica del Worker y del DO es idéntica, solo cambió el string de versión. El cambio está en el asset `ink.js`.
   - Servicios reiniciados.
 - **Volver atrás:** `wrangler rollback 701c62d1-0a7c-48b8-8af0-578f57a208a8 --name dsta-web`.
+
+## 15. Arreglo del botón «Transcribir a texto» (15-10-2026, ~16:40)
+
+- **Síntoma:** el CEO reportó que el botón no funcionaba. Seguía desactivado mientras se escribía, porque los controles solo se volvían a dibujar después de otro clic.
+- **Arreglo:** commit `c78a6fd`, versión del Worker `1f9e36bd`. La E2E ahora verifica que el botón se habilite apenas hay escritura; falla sin el arreglo.
+- **Volver atrás:** `wrangler rollback cb995d58-3009-42fe-b743-7396bbd78951 --name dsta-web`.
