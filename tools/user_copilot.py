@@ -56,6 +56,8 @@ INSTRUCTIONS = (
     '{"action":"lt.archive","projectId":<LT>} (solo sin tareas abiertas), {"action":"lt.restore","projectId":<LT archivada>}, '
     '{"action":"lt.merge","projectId":<LT origen>,"targetProjectId":<LT destino>} (mueve todas sus tareas y archiva el origen), '
     '{"action":"label.assign","taskId":<id>,"labelId":<id etiqueta>}, {"action":"label.unassign","taskId":<id>,"labelId":<id etiqueta>}. '
+    'Para cambiar solo un campo envía solo ese campo, p. ej. la fecha: {"action":"task.update","taskId":<id>,"dueDate":"AAAA-MM-DD"} '
+    '(el título y lo demás se conservan). '
     'Omite los campos que no sepas. Pedido explícito, por ejemplo: '
     '{"action":"complete","taskId":<id>,"ejecutar": true}.')
 
