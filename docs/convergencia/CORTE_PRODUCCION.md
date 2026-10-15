@@ -222,3 +222,20 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
 - **Síntoma:** el CEO reportó que el botón no funcionaba. Seguía desactivado mientras se escribía, porque los controles solo se volvían a dibujar después de otro clic.
 - **Arreglo:** commit `c78a6fd`, versión del Worker `1f9e36bd`. La E2E ahora verifica que el botón se habilite apenas hay escritura; falla sin el arreglo.
 - **Volver atrás:** `wrangler rollback cb995d58-3009-42fe-b743-7396bbd78951 --name dsta-web`.
+
+## 16. Avisos mínimos por acción y minutas manuales en el copiloto (15-10-2026, ~17:15)
+
+- **Autorización:** el CEO aprobó por Telegram el 15-10 a las 20:11 UTC («ok pasa a producción»).
+- **Qué se desplegó:** commits `16733b2` y `1ee9586`, versión del Worker `b12dfdab`, `CODE_VERSION avisos-minimos-2026-10-15`.
+- **Avisos:**
+  - un aviso por acción (`DstaToast.task`), con forma de píldora de una línea abajo a la izquierda;
+  - los clics pasan a través; muestra el progreso paso a paso;
+  - el éxito desaparece a los 1,8 s; los errores quedan con ×.
+- **Copiloto:**
+  - las minutas manuales vienen de la bandeja de la VM (`tools/manual_minutes.py`, id `Manual/<id>`);
+  - el dueño las ve en el MCP `dsta-minutas`; cada usuario, en su contexto;
+  - verificado en producción: el MCP lista las 2 minutas manuales del CEO.
+- **Volver atrás:**
+  1. `wrangler rollback 1b8795f0-473c-4e5e-afb7-395217d856c4 --name dsta-web`.
+  2. En el repo de producción, `git reset --hard pre-avisos-2026-10-15`.
+  3. Reiniciar las 3 tareas.
