@@ -10,33 +10,46 @@
   const loadSettings = () => { try { return { color: 0, width: 1, finger: false, ...JSON.parse(localStorage.getItem(SETTINGS) || '{}') }; } catch { return { color: 0, width: 1, finger: false }; } };
   const saveSettings = s => { try { localStorage.setItem(SETTINGS, JSON.stringify(s)); } catch { /* per-device convenience only */ } };
 
-  // Stroke: {c, w, pts:[x,y,p, x,y,p, ...]} absolute page units; p = pressure 1..9.
+  // Stroke: {c, w, pts:[x,y,p, ...]} in page units (0.1 precision); p = pressure 0..1.
+  // Stored delta-encoded integers: coordinates × q (10) and pressure × pq (100). Early drafts had q=1, pq=9.
+  const Q = 10, PQ = 100;
   function decode(text) {
     if (!text) return [{ strokes: [] }];
-    const data = JSON.parse(text);
+    const data = JSON.parse(text), q = data.q || 1, pq = data.pq || 9;
     const pages = (data.pages || []).map(page => ({ strokes: page.map(([c, w, d]) => {
       const pts = []; let x = 0, y = 0;
-      for (let i = 0; i < d.length; i += 3) { x += d[i]; y += d[i + 1]; pts.push(x, y, d[i + 2]); }
+      for (let i = 0; i < d.length; i += 3) { x += d[i]; y += d[i + 1]; pts.push(x / q, y / q, d[i + 2] / pq); }
       return { c, w, pts };
     }) }));
     return pages.length ? pages : [{ strokes: [] }];
   }
   function encode(pages) {
     if (pages.every(p => !p.strokes.length)) return '';
-    return JSON.stringify({ v: 1, w: PAGE_W, h: PAGE_H, pages: pages.map(page => page.strokes.map(s => {
+    return JSON.stringify({ v: 1, w: PAGE_W, h: PAGE_H, q: Q, pq: PQ, pages: pages.map(page => page.strokes.map(s => {
       const d = []; let x = 0, y = 0;
-      for (let i = 0; i < s.pts.length; i += 3) { d.push(s.pts[i] - x, s.pts[i + 1] - y, s.pts[i + 2]); x = s.pts[i]; y = s.pts[i + 1]; }
+      for (let i = 0; i < s.pts.length; i += 3) {
+        const X = Math.round(s.pts[i] * Q), Y = Math.round(s.pts[i + 1] * Q);
+        d.push(X - x, Y - y, Math.max(1, Math.min(PQ, Math.round(s.pts[i + 2] * PQ)))); x = X; y = Y;
+      }
       return [s.c, s.w, d];
     })) });
   }
-  function drawStroke(ctx, s, scale) {
+  const widthOf = (base, scale, p) => base * scale * (0.45 + 0.9 * p);
+  // Smooth rendering: quadratic curves through the midpoints of consecutive samples, one piece per
+  // sample so the width follows the pencil's pressure. `from` limits the work while drawing live.
+  function drawStroke(ctx, s, scale, from = 0, tail = true) {
     const color = COLORS[s.c]?.[0] || COLORS[0][0], base = WIDTHS[s.w]?.[0] || WIDTHS[1][0];
     ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const p = s.pts;
-    if (p.length === 3) { ctx.beginPath(); ctx.arc(p[0] * scale, p[1] * scale, base * scale * (0.5 + p[2] / 10) / 2, 0, Math.PI * 2); ctx.fill(); return; }
-    for (let i = 3; i < p.length; i += 3) {
-      ctx.lineWidth = base * scale * (0.5 + (p[i - 1] + p[i + 2]) / 20);
-      ctx.beginPath(); ctx.moveTo(p[i - 3] * scale, p[i - 2] * scale); ctx.lineTo(p[i] * scale, p[i + 1] * scale); ctx.stroke();
+    const p = s.pts, n = p.length / 3, X = i => p[i * 3] * scale, Y = i => p[i * 3 + 1] * scale, P = i => p[i * 3 + 2];
+    if (n === 1) { ctx.beginPath(); ctx.arc(X(0), Y(0), widthOf(base, scale, P(0)) / 2, 0, Math.PI * 2); ctx.fill(); return; }
+    const mid = (a, b) => [(X(a) + X(b)) / 2, (Y(a) + Y(b)) / 2];
+    for (let i = Math.max(1, from); i < n; i++) {
+      const start = i === 1 ? [X(0), Y(0)] : mid(i - 2, i - 1);
+      const end = i === n - 1 && tail ? [X(i), Y(i)] : mid(i - 1, i);
+      ctx.lineWidth = widthOf(base, scale, (P(i - 1) + P(i)) / 2);
+      ctx.beginPath(); ctx.moveTo(start[0], start[1]);
+      if (i === 1) ctx.lineTo(end[0], end[1]); else ctx.quadraticCurveTo(X(i - 1), Y(i - 1), end[0], end[1]);
+      ctx.stroke();
     }
   }
   const nearStroke = (s, x, y) => {
@@ -137,8 +150,8 @@
       const { canvas } = view; let current = null, before = null, pointer = null, erased = false;
       const point = e => {
         const r = canvas.getBoundingClientRect();
-        const x = Math.round((e.clientX - r.left) / r.width * PAGE_W), y = Math.round((e.clientY - r.top) / r.height * PAGE_H);
-        const p = e.pressure > 0 && e.pointerType === 'pen' ? Math.max(1, Math.min(9, Math.round(e.pressure * 9))) : 5;
+        const x = Math.round((e.clientX - r.left) / r.width * PAGE_W * Q) / Q, y = Math.round((e.clientY - r.top) / r.height * PAGE_H * Q) / Q;
+        const p = e.pressure > 0 && e.pointerType === 'pen' ? Math.min(1, e.pressure) : 0.5;
         return [Math.max(0, Math.min(PAGE_W, x)), Math.max(0, Math.min(PAGE_H, y)), p];
       };
       // Palm and finger: with a pencil (or the finger option off) only pencil/mouse write; fingers scroll.
@@ -166,16 +179,19 @@
           const pt = point(ev);
           if (current === 'erase') { eraseAt(pt); continue; }
           const n = current.pts.length;
-          if (Math.hypot(pt[0] - current.pts[n - 3], pt[1] - current.pts[n - 2]) < 1.5) continue;
+          if (Math.hypot(pt[0] - current.pts[n - 3], pt[1] - current.pts[n - 2]) < 0.6) continue;
+          pt[2] = current.pts[n - 1] * 0.6 + pt[2] * 0.4;  // the pencil's pressure is noisy: low-pass it
           current.pts.push(...pt);
-          drawStroke(view.ctx, { ...current, pts: current.pts.slice(-6) }, view.scale);
+          // Live: the curve piece ending at the previous sample is final once the next one exists.
+          const k = current.pts.length / 3;
+          if (k >= 3) drawStroke(view.ctx, { ...current, pts: current.pts.slice((k - 3) * 3) }, view.scale, 2, false);
         }
       });
       const end = e => {
         if (e.pointerId !== pointer) return;
         pointer = null;
         if (current === 'erase') { if (erased) commit(before); }
-        else if (current) { view.page.strokes.push(current); commit(before); }
+        else if (current) { view.page.strokes.push(current); paint(view); commit(before); }
         current = null;
       };
       canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);

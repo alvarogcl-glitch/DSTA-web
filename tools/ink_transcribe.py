@@ -37,6 +37,7 @@ def decode(ink: str) -> list[list[dict]]:
     data = json.loads(ink)
     if data.get("v") != 1:
         raise TranscriptionError("Formato de escritura desconocido.")
+    q, pq = float(data.get("q") or 1), float(data.get("pq") or 9)  # early drafts: integer units, pressure 1..9
     pages = []
     for page in data.get("pages", [])[:MAX_PAGES]:
         strokes = []
@@ -45,7 +46,7 @@ def decode(ink: str) -> list[list[dict]]:
             pts = []
             for i in range(0, len(deltas) - 2, 3):
                 x += int(deltas[i]); y += int(deltas[i + 1])
-                pts.append((x, y, int(deltas[i + 2])))
+                pts.append((x / q, y / q, int(deltas[i + 2]) / pq))
             if pts:
                 strokes.append({"c": int(color), "w": int(width), "pts": pts})
         pages.append(strokes)
@@ -67,7 +68,7 @@ def render(ink: str) -> list[bytes]:
             base = WIDTHS[stroke["w"]] if 0 <= stroke["w"] < len(WIDTHS) else WIDTHS[1]
             pts = stroke["pts"]
             for index, (x, y, pressure) in enumerate(pts):
-                width = max(1.0, base * SCALE * (0.5 + pressure / 10))
+                width = max(1.0, base * SCALE * (0.45 + 0.9 * pressure))
                 if index:
                     px, py, _ = pts[index - 1]
                     draw.line([(px * SCALE, py * SCALE), (x * SCALE, y * SCALE)], fill=color, width=round(width))

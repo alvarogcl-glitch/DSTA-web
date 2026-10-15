@@ -28,7 +28,10 @@ def claude_output(text, ok=True):
 class InkTranscribeTest(unittest.TestCase):
     def test_decodifica_deltas(self):
         pages = it.decode(INK)
-        self.assertEqual(pages[0][0]["pts"], [(100, 100, 5), (150, 100, 5), (200, 120, 7)])
+        self.assertEqual([(x, y) for x, y, _ in pages[0][0]["pts"]], [(100, 100), (150, 100), (200, 120)])
+        self.assertAlmostEqual(pages[0][0]["pts"][2][2], 7 / 9, msg="early drafts: pressure 1..9")
+        fine = json.dumps({"v": 1, "q": 10, "pq": 100, "pages": [[[0, 1, [1005, 2003, 40, 5, 0, 60]]]]})
+        self.assertEqual(it.decode(fine)[0][0]["pts"], [(100.5, 200.3, 0.4), (101.0, 200.3, 0.6)])
         self.assertEqual(pages[1], [])
 
     def test_renderiza_solo_hojas_con_escritura_recortadas(self):
