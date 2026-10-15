@@ -191,3 +191,16 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   1. `wrangler rollback 05dd8bd9-eaa1-4cf7-9c66-f98343256d6e --name dsta-web`.
   2. En el repo de producción, `git reset --hard pre-e14-2026-10-15`.
   3. Reiniciar las 3 tareas.
+
+## 13. Escritura a mano en minutas manuales (15-10-2026, ~15:10)
+
+- **Autorización:** el CEO la dio por Telegram el 15-10 a las 18:05 UTC («llevemos a producción»).
+- **Qué se desplegó:** commit `7095be0`, versión del Worker `957d190e`, `CODE_VERSION minutas-lapiz-2026-10-15`.
+  - Modos Teclado y Lápiz (`public/ink.js`).
+  - La tinta se guarda aparte, en `manual-ink:<id>`.
+  - Cola de transcripción `/manual/transcribe`, que la VM atiende con `tools/ink_transcribe.py` (Claude con visión).
+- **Volver atrás:**
+  1. `wrangler rollback cee2e212-e963-4f56-9fb1-16dbc705b3af --name dsta-web`.
+  2. En el repo de producción, `git reset --hard pre-lapiz-2026-10-15`.
+  3. Reiniciar las 3 tareas.
+- **Pendiente:** primera prueba con iPad y Apple Pencil reales (palma, presión, calidad de la transcripción de letra real).
