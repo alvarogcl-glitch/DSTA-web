@@ -204,3 +204,15 @@ Los Durable Objects no se pueden exportar. El corte no borra ni migra sus datos:
   2. En el repo de producción, `git reset --hard pre-lapiz-2026-10-15`.
   3. Reiniciar las 3 tareas.
 - **Pendiente:** primera prueba con iPad y Apple Pencil reales (palma, presión, calidad de la transcripción de letra real).
+
+## 14. Trazo del lápiz más nítido (15-10-2026, ~16:30)
+
+- **Pedido:** el CEO notó el trazo pixelado y pidió mejorarlo (Telegram, 15-10).
+- **Cambios** (commit `be7cbf3`, versión del Worker `59fdf474`):
+  - coordenadas con precisión 0,1 (`q:10`) y presión con 100 niveles (`pq:100`), filtrada;
+  - curvas cuadráticas entre los puntos medios;
+  - la tinta antigua (`q:1`, `pq:9`) sigue siendo compatible, también en `ink_transcribe.py`.
+- **Estado del despliegue:**
+  - El cajón del dueño siguió con `CODE_VERSION minutas-lapiz-2026-10-15` por tráfico constante. No tiene efecto: la lógica del Worker y del DO es idéntica, solo cambió el string de versión. El cambio está en el asset `ink.js`.
+  - Servicios reiniciados.
+- **Volver atrás:** `wrangler rollback 701c62d1-0a7c-48b8-8af0-578f57a208a8 --name dsta-web`.
