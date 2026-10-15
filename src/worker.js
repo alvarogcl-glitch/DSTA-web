@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "minutas-texto-2026-10-14";
+const CODE_VERSION = "minutas-skill-2026-10-15";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -552,13 +552,14 @@ function validDecision(body) {
     return { minuteId, decision: body.decision, digest: body.digest };
   }
   if (body.decision !== undefined) return null;
-  if (!Array.isArray(decisions) || !decisions.length || decisions.length > 25) return null;
+  if (!Array.isArray(decisions) || !decisions.length || decisions.length > 26) return null;
   const clean = [];
   for (const item of decisions) {
-    if (!item || !MINUTE_ACTION_ID.test(String(item.actionId || ""))) return null;
+    if (!item || !(MINUTE_ACTION_ID.test(String(item.actionId || "")) || item.actionId === "otros")) return null;
     if (!["aprobar", "rechazar", "instruccion"].includes(item.decision)) return null;
     const instruccion = typeof item.instruccion === "string" ? item.instruccion.trim() : "";
     if (item.decision === "instruccion" && (!instruccion || instruccion.length > 1500)) return null;
+    if (item.actionId === "otros" && item.decision !== "instruccion") return null;
     const edits = {};
     for (const [key, value] of Object.entries(item.edits || {})) {
       if (!MINUTE_EDIT_KEYS.has(key) || !["string", "number"].includes(typeof value)) return null;
@@ -567,7 +568,9 @@ function validDecision(body) {
     }
     clean.push({ actionId: item.actionId, decision: item.decision, edits, ...(instruccion ? { instruccion } : {}) });
   }
-  return { minuteId, decisions: clean };
+  if (new Set(clean.map(item => item.actionId)).size !== clean.length) return null;
+  if (body.digest !== undefined && (typeof body.digest !== 'string' || !body.digest || body.digest.length > 100)) return null;
+  return { minuteId, decisions: clean, ...(body.digest ? {digest: body.digest} : {}) };
 }
 
 function forwardToChatObject(env, path, body, box = LEGACY_BOX) {
@@ -1043,7 +1046,8 @@ export class DashboardChatQueue extends DurableObject {
       if (!record) return json({ error: "Minuta no encontrada." }, 404);
       if (record.aplicando) return json({ error: "Ya se están aplicando decisiones de esta minuta." }, 409);
       if (record.descartadaEn && decision.decision !== "eliminar") return json({ error: "Esta minuta ya fue descartada." }, 409);
-      if (["descartar", "eliminar"].includes(decision.decision) && decision.digest !== record.digest) {
+      // Every decision carries the digest the user saw (Codex E14); discard/delete always did.
+      if (decision.digest !== undefined && decision.digest !== record.digest) {
         return json({ error: "La minuta cambió. Actualiza la lista antes de continuar." }, 409);
       }
       if (decision.decision === "eliminar") {

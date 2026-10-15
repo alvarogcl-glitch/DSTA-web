@@ -41,9 +41,19 @@ class Model:
     def ask(self,actor,user,prompt):
         assert actor=='qa-a'
         assert 'Minuta QA' in prompt and 'Portafolio' in prompt
-        return json.dumps({'resumen':'Compromisos QA','acciones':[
+        assert 'Revisión contextual de minutas DSTA' in prompt
+        if 'Traduce la instrucción en operaciones' in prompt:
+            assert 'NO DEBE ENVIARSE' not in prompt
+            if 'Cambiar título a Seguimiento QA ajustado' in prompt:
+                return json.dumps({'resumen':'Título ajustado','operaciones':[
+                    {'tipo':'crear','project_id':3,'titulo':'Seguimiento QA ajustado','nota':'Próximo paso'}]})
+            assert 'Registrar presupuesto validado QA' in prompt
+            return json.dumps({'resumen':'Registrar acuerdo omitido','operaciones':[
+                {'tipo':'comentar','task_id':63,'nota':'Presupuesto validado QA'}]})
+        return json.dumps({'resumen':'Compromisos QA','puntos_tratados':['Entrega completada','Seguimiento pendiente','Presupuesto tratado'], 'acciones':[
             {'tipo':'completar','task_id':63,'evidente':True,'confianza':'alta','nota':'Entregado'},
-            {'tipo':'crear','project_id':3,'titulo':'Seguimiento QA','evidente':True,'confianza':'alta','nota':'Próximo paso'}]})
+            {'tipo':'crear','project_id':3,'titulo':'Seguimiento QA','evidente':True,'confianza':'alta','nota':'Próximo paso'},
+            {'tipo':'revisar','titulo':'Posible LT de materiales','nota':'Estudiar alcance','evidente':False,'confianza':'baja'}]})
 
 def snapshot(user):
     actor=next(a for a,u in users.items() if u is user)

@@ -27,6 +27,7 @@ _tools_dir = str(Path(__file__).resolve().parent)
 if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 import minute_inbox as mi  # noqa: E402
+import minute_analysis as ma
 from minute_sources import inbox_record  # noqa: E402
 
 ACTOR_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -63,69 +64,16 @@ def user_vk(user: dict):
     return module
 
 
-TASKS_BLOCK_CHARS = 20_000  # the prompt must fit Hermes' command line; the analyst can query Vikunja
-
-
 def _tasks_block(snapshot: dict | None) -> str:
-    """D42: same context as the copilot (D28): open tasks with their full structured description
-    (dependency, closure criterion, log) and completed ones in short, so the analyst neither duplicates
-    what was already done nor misses the dependency a meeting resolves."""
-    snapshot = snapshot or {}
-    lines = []
-    open_tasks = [t for t in snapshot.get("tasks", []) if not t.get("done")]
-    for project in snapshot.get("projects", []):
-        lines.append(f"Línea «{project.get('title', '')}» (project_id {project.get('id')}):")
-        if project.get("description"):
-            lines.append(f"  Descripción de la línea: {project['description']}")
-        for task in (t for t in open_tasks if t.get("project_id") == project.get("id")):
-            extra = " · ".join(str(v) for v in (task.get("owner"), task.get("date")) if v)
-            label = f"#{task['num']} (id {task.get('id')})" if task.get("num") else f"#{task.get('id')}"
-            lines.append(f"  - {label} {task.get('title', '')}" + (f" ({extra})" if extra else ""))
-            if task.get("description"):
-                lines.append("    " + str(task["description"])[:4000].replace("\n", "\n    "))
-    text = "\n".join(lines) or "(sin líneas de trabajo todavía)"
-    done = [t for t in snapshot.get("tasks", []) if t.get("done")]
-    if done:
-        closed = "\n".join(["", "Tareas ya completadas (no proponer rehacerlas):"] +
-                           [f"  - #{t.get('id')} {t.get('title', '')} [project_id {t.get('project_id')}]" +
-                            (f": {str(t['description'])[:300]}".replace("\n", " ") if t.get("description") else "") for t in done])
-        if len(text) + len(closed) <= TASKS_BLOCK_CHARS:
-            text += closed
-    if len(text) > TASKS_BLOCK_CHARS:
-        text = text[:TASKS_BLOCK_CHARS] + "\n[Aviso: el contexto se recortó por tamaño; ante la duda, propone en vez de aplicar.]"
-    return text
+    return ma.tasks_block(snapshot)
 
 
 def _minute_block(minute: dict) -> str:
-    return (f"Minuta «{minute.get('title') or minute.get('titulo', '')}» ({minute.get('date') or minute.get('fecha', '')})\n"
-            f"Origen: {minute.get('source') or 'Granola'}\nContexto seleccionado: {json.dumps(minute.get('context') or {}, ensure_ascii=False)}\n"
-            f"Resumen:\n{minute.get('summary', '')}\n\nNotas:\n{minute.get('private_notes', '')}")
+    return ma.minute_block(minute)
 
 
 def analysis_prompt(minute: dict, snapshot: dict | None) -> str:
-    rules = mi.analysis_prompt("x", "x", "x")
-    rules = rules[rules.index("Extrae hechos"):]
-    rules = (rules.replace("Si la reunión no tiene relación con PMO-DSTA", "Si la reunión no tiene relación con sus líneas de trabajo")
-             .replace("Álvaro", "la persona"))
-    return ("Eres el analista que reconcilia las minutas de UNA persona con sus líneas de trabajo y tareas "
-            "en Vikunja. Responde en español. No tienes herramientas: usa SOLO el contexto de abajo; Vikunja es la fuente "
-            "oficial y la minuta es evidencia de cambios.\n\n"
-            f"## Tareas abiertas por línea\n{_tasks_block(snapshot)}\n\n## {_minute_block(minute)}\n\n{rules}")
-
-
-def analysis_prompt_with_tools(minute: dict, snapshot: dict | None) -> str:
-    """Owner (Hermes with read-only Vikunja tools): the analyst queries the tasks it needs instead of
-    receiving the whole portfolio in the prompt, so the meeting notes get almost all the room
-    (Hermes takes the prompt as a command-line argument, ~30k characters in total)."""
-    rules = mi.analysis_prompt("x", "x", "x")
-    rules = rules[rules.index("Extrae hechos"):]
-    return ("Eres el analista PMO-DSTA que reconcilia una minuta con Vikunja. Responde en español. Tienes "
-            "herramientas de SOLO LECTURA: usa pmo_open_tasks para ver las líneas y tareas abiertas (con el inicio "
-            "de su descripción) y pmo_list_tasks(project_id) para leer la descripción completa de las tareas de una "
-            "línea: bitácora, dependencia, criterio de cierre y también las completadas, para no proponer algo ya "
-            "hecho. Consulta lo necesario antes de proponer. Vikunja es la fuente oficial y la minuta es evidencia "
-            "de cambios; no intentes modificar nada.\n\n"
-            f"## {_minute_block(minute)}\n\n{rules}")
+    return ma.analysis_prompt(minute, snapshot)
 
 
 def scope_actions(actions: list[dict], snapshot: dict | None) -> None:
@@ -234,8 +182,10 @@ class UserMinuteInbox:
             plan = mi.parse_plan(ask(prompt + mi.RETRY_NOTE))
         record = {**base, "minuta": base["sourceId"], "detectadaEn": mi.now(), "resumen": plan["resumen"] or base["resumen"],
                   "antecedentes": plan["antecedentes"], "acciones": plan["acciones"], "vista": False,
+                  "puntos_tratados": plan["puntos_tratados"], "skillVersion": ma.skill_version(),
                   "texto": _minute_block(minute)}
         scope_actions(record["acciones"], snapshot)
+        ma.guard_duplicates(record["acciones"], snapshot)
         auto_allowed = base["source"] == "Granola"
         vk = self.vk_factory(user) if auto_allowed and any(mi.is_evident(a) for a in record["acciones"]) else None
         for action in record["acciones"]:
@@ -271,15 +221,19 @@ class UserMinuteInbox:
         vk = None
         by_id = {action["id"]: action for action in record["acciones"]}
         for choice in decision.get("decisions") or []:
-            action = by_id.get(str(choice.get("actionId", "")))
+            action = by_id.get(str(choice.get("actionId", ""))) or ma.additional_action(record, choice, decision.get("id"))
             instruction = mi.text_field(choice.get("instruccion"), 1500)
             if action and choice.get("decision") == "instruccion" and instruction and ask:
+                if decision.get('id') and action.get('decisionInstruccion') == decision['id']:
+                    continue
                 if record.get('source') == 'Manual-Dashboard':
                     action['instruccionId'] = str(decision.get('id') or uuid.uuid5(uuid.NAMESPACE_URL, instruction))
                 vk = vk or self.vk_factory(user)
                 context = (f"Contexto (no tienes herramientas, usa solo esto):\n## Tareas abiertas por línea\n"
-                           f"{_tasks_block(snapshot)}\n\n## {record.get('texto', '')}\n\n")
+                           f"{_tasks_block(snapshot)}\n\n")
                 apply_user_instruction(action, record, instruction, ask, vk, context)
+                action["decisionInstruccion"] = decision.get("id")
+                self._save(actor, record)
                 continue
             if not action or action.get("auto") or action["estado"] not in {"propuesta", "error"}:
                 continue
@@ -295,6 +249,11 @@ class UserMinuteInbox:
                     action[key] = mi.text_field(value, 1500)
             if action["fecha_objetivo"] and not mi.DATE_RE.match(action["fecha_objetivo"]):
                 action["fecha_objetivo"] = ""
+            if action['tipo'] == 'revisar':
+                action['estado'] = 'aplicada'
+                action['resultado'] = 'Tema aceptado para revisión; sin crear LT ni tareas. Usa Otra para indicar una LT existente.'
+                self._save(actor, record)
+                continue
             vk = vk or self.vk_factory(user)
             if record.get('source') == 'Manual-Dashboard' and self.apply is mi.apply_action:
                 self.apply(action, record, vk, checkpoint=lambda: self._save(actor, record))

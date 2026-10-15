@@ -81,18 +81,6 @@ class UserMinuteInboxTest(unittest.TestCase):
         self.assertIn("Tareas ya completadas", prompt)
         self.assertIn("#82 Enviar borrador a Legal", prompt)
 
-    def test_dueno_consulta_tareas_con_herramientas(self):
-        """Option 1 (CEO 14-10): the owner's analyst looks tasks up with read-only tools, so the prompt
-        carries the meeting notes, not the whole portfolio (Hermes command-line limit)."""
-        big = {"projects": [{"id": 8, "title": "LT"}],
-               "tasks": [{"id": i, "title": f"Tarea {i}", "project_id": 8, "done": False, "description": "x" * 500} for i in range(1, 300)]}
-        prompt = umi.analysis_prompt_with_tools({**MINUTE, "private_notes": "Acuerdo clave del comité"}, big)
-        self.assertIn("pmo_open_tasks", prompt)
-        self.assertIn("pmo_list_tasks", prompt)
-        self.assertIn("Acuerdo clave del comité", prompt)
-        self.assertNotIn("Tarea 150", prompt, "no portfolio dump in the prompt")
-        self.assertLess(len(prompt), 8000)
-
     def test_eliminar_deja_marca_y_no_reprocesa(self):
         """Eliminar (14-10): like discard plus a tombstone; the same source is never analysed again."""
         record = self.inbox.process("ana", USER, MINUTE, SNAP, self.ask)

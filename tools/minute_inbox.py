@@ -28,6 +28,7 @@ if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 from task_mutation_lock import task_lock
 from minute_sources import source_label, action_prefix
+import minute_analysis as ma
 
 
 def mutation_scope(vk):
@@ -42,7 +43,7 @@ REPORTS = PMO_ROOT / "04_reportes" / "granola-reconciliation-reports"
 MINUTES_DIR = PMO_ROOT / "Minutas 2026"
 CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
-OPERATIONS = {"actualizar", "comentar", "completar", "crear", "mover"}
+OPERATIONS = {"actualizar", "comentar", "completar", "crear", "mover", "revisar"}
 AUTO_OPERATIONS = {"actualizar", "comentar", "completar", "crear"}
 EDITABLE_FIELDS = {"task_id", "project_id", "titulo", "nota", "responsable", "fecha_objetivo",
                    "dependencia", "criterio_cierre"}
@@ -145,36 +146,17 @@ def minute_ref(item: dict[str, Any]) -> tuple[str, str]:
     return f"{MINUTES_DIR.name}/{path.name}", title
 
 
+def analysis_rules() -> str:
+    return ma.analysis_rules()
+
+
 def analysis_prompt(minute_id: str, title: str, meeting_date: str) -> str:
     return (
-        "Eres el analista PMO-DSTA que reconcilia minutas de Granola con Vikunja. Responde en español. "
-        f"Lee la minuta «{title}» ({meeting_date}) con minutas_leer usando el id exacto `{minute_id}`. "
-        "Consulta las líneas y tareas abiertas con pmo_open_tasks; Vikunja es la fuente oficial y la minuta "
-        "es evidencia de cambios. Solo puedes leer: no intentes modificar nada.\n\n"
-        "Extrae hechos, decisiones, avances, bloqueos, responsables, fechas, dependencias y cierres "
-        "(no solo 'Próximos pasos'). Para cada cambio propone una acción:\n"
-        "- actualizar: registrar avance en una tarea existente (task_id) y opcionalmente responsable, "
-        "fecha_objetivo (YYYY-MM-DD) o dependencia.\n"
-        "- comentar: dejar un antecedente breve (sin cambio de estado) en una tarea existente.\n"
-        "- completar: cerrar una tarea existente cuyo resultado la minuta declara terminado.\n"
-        "- crear: nueva tarea en una línea (project_id) con titulo accionable.\n"
-        "- mover: cambiar una tarea de línea.\n"
-        "Marca evidente=true y confianza=alta SOLO si la minuta lo dice de forma explícita, la tarea o "
-        "línea es inequívoca y no hay conflicto de alcance: p. ej. un avance concreto sobre una tarea "
-        "identificable, un cierre declarado sin pendientes, o un compromiso nuevo con línea clara que no "
-        "existe ya en Vikunja. Si hay dudas de destino, duplicado, alcance, dueño o si una tarea debería "
-        "dividirse o fusionarse, usa evidente=false para que Álvaro decida. Nunca inventes dueños, "
-        "fechas, cierres ni destinos. Excluye datos confidenciales y comentarios sin acción verificable "
-        "(ponlos en antecedentes si aportan contexto). Si la reunión no tiene relación con PMO-DSTA, no "
-        "propongas acciones.\n\n"
-        "Redacta cada nota como texto final para la bitácora, sin prefijos de fecha ni «Minuta …» "
-        "(la fecha y la fuente se agregan solas). Sé concreto: máximo 15 acciones, nota de hasta 300 "
-        "caracteres, evidencia de hasta 160 y sin comillas dobles dentro de los textos.\n\n"
-        "Responde SOLO con JSON válido, sin texto adicional, con esta forma:\n"
-        '{"resumen":"2-3 frases","acciones":[{"tipo":"actualizar","evidente":true,"confianza":"alta",'
-        '"task_id":63,"project_id":null,"titulo":"","nota":"avance a registrar","responsable":"",'
-        '"fecha_objetivo":"","dependencia":"","criterio_cierre":"","evidencia":"cita literal breve",'
-        '"motivo":"por qué"}],"antecedentes":["..."]}'
+        "Eres el analista PMO-DSTA. Solo puedes leer; no modifiques nada. "
+        f"Lee la minuta completa «{title}» ({meeting_date}) con minutas_leer, id `{minute_id}`. "
+        "Consulta las líneas, sus descripciones y tareas completas con las herramientas de lectura; "
+        "pmo_open_tasks es solo un índice compacto, no reemplaza descripciones y bitácoras completas. "
+        "Consulta también las completadas antes de proponer una creación.\n\n" + analysis_rules()
     )
 
 
@@ -241,6 +223,7 @@ def parse_plan(output: str) -> dict[str, Any]:
                if isinstance(item, dict)]
     return {
         "resumen": text_field(decoded.get("resumen"), 800),
+        "puntos_tratados": [text_field(item, 600) for item in (decoded.get("puntos_tratados") or []) if isinstance(item, str)][:15],
         "acciones": [action for action in actions if action][:25],
         "antecedentes": [text_field(item, 400) for item in (decoded.get("antecedentes") or [])
                          if isinstance(item, str)][:15],
@@ -308,18 +291,25 @@ def _execute_locked(action: dict[str, Any], minute: dict[str, Any], vk, checkpoi
     if manual:
         source += f" · acción {action['id']}"
     operation = action["tipo"]
+    if operation == "revisar":
+        return "Tema aceptado para revisión; sin crear LT ni tareas. Usa Otra para indicar una LT existente."
     if operation == "crear":
         projects = vk.pmo_projects()
         if not any(int(project.get("id") or 0) == action["project_id"] and vk.is_pmo_line(project) for project in projects):
             raise ValueError("La línea indicada no es una línea activa de PMO-DSTA.")
         wanted = slug(action["titulo"])
         action_key = f"{action_prefix(minute)}-{minute['sourceId']}-{action['id'] if manual else wanted}"
-        for task in vk.project_tasks(action["project_id"]):
+        creation_tasks = vk.project_tasks(action["project_id"])
+        for task in creation_tasks:
             if manual and f'ACTION_KEY: {action_key}' in str(task.get('description') or '').splitlines():
                 action['creada_id'] = task['id']
                 return f"Creada #{task['id']} · {task.get('title', '')}"
             if not task.get("done") and slug(task.get("title", "")) == wanted:
                 raise ValueError(f"Ya existe una tarea abierta con ese título (#{task['id']}).")
+        similar = ma.similar_tasks(action, creation_tasks)
+        if similar:
+            ids = ', '.join('#' + str(t['id']) for t in similar)
+            raise ValueError(f"Posible duplicado de {ids}. Indica una actualización de bitácora mediante Otra.")
         created = vk.pmo_create_task(
             project_id=action["project_id"], title=action["titulo"],
             description=f"Registro inicial {date}: {action['nota']}" if action["nota"] else "",
@@ -443,11 +433,14 @@ def instruction_prompt(minute: dict[str, Any], action: dict[str, Any], instructi
                                               "responsable", "fecha_objetivo", "dependencia", "estado", "resultado")}
     state = "ya se aplicó automáticamente" if action.get("auto") else "es una propuesta aún no aplicada"
     return (
-        "Eres el analista PMO-DSTA. Álvaro dio una instrucción sobre una acción derivada de la minuta "
+        ma.skill_instructions() + "\n\nEres el analista PMO-DSTA. Álvaro dio una instrucción sobre una acción derivada de la minuta "
         f"«{minute['titulo']}» ({minute.get('fecha', '')}), id `{minute['minuta']}` en dsta-minutas. "
         f"La acción {state}:\n{json.dumps(done, ensure_ascii=False)}\n\n"
+        f"Contexto completo disponible de la reunión:\n{minute.get('texto', '')}\n\n"
         f"Instrucción de Álvaro: «{instruction}»\n\n"
-        "Traduce la instrucción en operaciones. Puedes leer la minuta (minutas_leer) y las tareas "
+        "Si complementa o modifica la propuesta, conserva lo demás y devuelve la operación final completa. "
+        "Si no puedes cumplirla devuelve operaciones vacías, descartar=false y explica el motivo en resumen. "
+        "Solo usa descartar=true si el usuario pidió rechazar. Traduce la instrucción en operaciones. Puedes leer la minuta (minutas_leer) y las tareas "
         "(pmo_open_tasks); no modifiques nada tú mismo. Operaciones posibles: actualizar, comentar, "
         "completar, crear, mover (mismos campos que en el análisis: task_id, project_id, titulo, nota, "
         "responsable, fecha_objetivo AAAA-MM-DD, dependencia, criterio_cierre) y deshacer, que revierte "
@@ -456,7 +449,7 @@ def instruction_prompt(minute: dict[str, Any], action: dict[str, Any], instructi
         "aplicado, usa deshacer y luego la operación correcta. Si la instrucción es descartar una propuesta, "
         "no devuelvas operaciones. No inventes datos que la instrucción o la minuta no den.\n\n"
         'Responde SOLO JSON: {"resumen":"qué harás en una frase","operaciones":[{"tipo":"deshacer"},'
-        '{"tipo":"crear","project_id":4,"titulo":"...","nota":"...","responsable":"Nelson","fecha_objetivo":"2026-10-15"}]}'
+        '{"tipo":"crear","project_id":4,"titulo":"...","nota":"...","responsable":"Nelson","fecha_objetivo":"2026-10-15"}],"descartar":false}'
     )
 
 
@@ -492,8 +485,8 @@ def apply_instruction(action: dict[str, Any], minute: dict[str, Any], instructio
     summary = "; ".join(results) or "Sin cambios en Vikunja"
     action.setdefault("instrucciones", []).append({"texto": instruction[:1500], "resultado": summary[:800], "fecha": now()})
     if not action.get("auto"):
-        action["estado"] = "error" if failed else ("aplicada" if results else "rechazada")
-        action["resultado"] = summary[:400] if results else "Descartada según tu instrucción"
+        action["estado"] = "error" if failed else ("aplicada" if results else "rechazada" if decoded.get('descartar') is True else "error")
+        action["resultado"] = summary[:400] if results else ("Descartada según tu instrucción" if decoded.get('descartar') is True else f"No se aplicó tu instrucción: {text_field(decoded.get('resumen'), 350) or 'no se pudo interpretar'}")
     else:
         action["resultado"] = f"{action['resultado']} → Instrucción: {summary}"[:600]
 
@@ -542,6 +535,16 @@ def process_item(item: dict[str, Any], ask_model: Callable[[str], str], vk, stor
     minute_id, title = minute_ref(item)
     date = iso_meeting_date(item.get("meeting_date", ""))
     prompt = analysis_prompt(minute_id, title, item.get("meeting_date", ""))
+    projects = [p for p in vk.pmo_projects() if vk.is_pmo_line(p)]
+    snapshot = {'projects': projects, 'tasks': [t for p in projects for t in vk.project_tasks(int(p['id']))]}
+    source = Path(item['file'])
+    minute_text = source.read_text(encoding='utf-8') if source.is_file() else ''
+    if minute_text:
+        prompt = ma.analysis_prompt({'title': title, 'date': item.get('meeting_date', ''),
+                                     'source': 'Granola', 'body': minute_text}, snapshot)
+    else:
+        prompt = ma.ensure_context(prompt + '\n\n## Portafolio completo\n' + ma.tasks_block(snapshot)
+                               + '\n\n## Cuerpo y metadatos completos de la minuta\n' + minute_text)
     try:
         plan = parse_plan(ask_model(prompt))
     except ValueError:  # includes JSONDecodeError: long plans occasionally break quoting
@@ -550,8 +553,10 @@ def process_item(item: dict[str, Any], ask_model: Callable[[str], str], vk, stor
         "id": item["source_id"], "sourceId": item["source_id"], "digest": item["digest"],
         "titulo": title, "fecha": date, "minuta": minute_id, "detectadaEn": now(),
         "resumen": plan["resumen"], "antecedentes": plan["antecedentes"], "acciones": plan["acciones"],
+        "puntos_tratados": plan["puntos_tratados"], "skillVersion": ma.skill_version(), "texto": minute_text,
         "vista": False,
     }
+    ma.guard_duplicates(record["acciones"], snapshot)
     for action in record["acciones"]:
         if is_evident(action):
             action["auto"] = True
@@ -594,11 +599,17 @@ def apply_decision(store: Path, decision: dict[str, Any], vk,
         raise ValueError("Esta minuta ya fue descartada.")
     by_id = {action["id"]: action for action in record["acciones"]}
     for choice in decision.get("decisions") or []:
-        action = by_id.get(str(choice.get("actionId", "")))
+        action = by_id.get(str(choice.get("actionId", ""))) or ma.additional_action(record, choice, decision.get("id"))
         instruction = text_field(choice.get("instruccion"), 1500)
         if action and choice.get("decision") == "instruccion" and instruction and ask_model:
             # Instructions also work on actions already applied automatically.
+            if decision.get('id') and action.get('decisionInstruccion') == decision['id']:
+                continue
+            if source_label(record) == 'Manual-Dashboard':
+                action['instruccionId'] = str(decision.get('id') or ma.skill_version())
             apply_instruction(action, record, instruction, ask_model, vk)
+            action["decisionInstruccion"] = decision.get("id")
+            save_record(store, record)
             continue
         if not action or action.get("auto") or action["estado"] not in {"propuesta", "error"}:
             continue

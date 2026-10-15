@@ -34,7 +34,6 @@ CLAUDE_TIMEOUT = 150
 HERMES_COOLDOWN = 600  # D35: seconds on Claude after a Hermes failure, as in production
 MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
 MAX_CONTEXT_CHARS = 26_000  # keeps most prompts within Hermes' command-line limit
-HERMES_QUERY_LIMIT = 30_000
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
@@ -285,9 +284,7 @@ class UserCopilot:
         cwd = self.work_dir / actor
         cwd.mkdir(parents=True, exist_ok=True)
         # D35: like production, after a Hermes failure go straight to Claude for 10 minutes.
-        # Hermes takes the prompt as a command-line argument (Windows limit ~32k): a longer prompt goes
-        # to Claude via stdin without marking Hermes as down for everyone else.
-        if len(prompt) <= HERMES_QUERY_LIMIT and self.clock() >= self.hermes_down_until:
+        if self.clock() >= self.hermes_down_until:
             reply = self._hermes(actor, prompt, cwd)
             if reply:
                 return reply
@@ -302,7 +299,10 @@ class UserCopilot:
         args = [self.hermes_cli, "chat", "--quiet", "--source", f"dsta-mu-{actor}", "--ignore-rules", "--ignore-user-config",
                 "--provider", self.provider, "--model", self.model, "-t", "todo", "--max-turns", "3", "--query", prompt]
         try:
-            code, out, err = self.run(args, cwd=str(cwd), env=env, timeout=HERMES_TIMEOUT)
+            from hermes_prompt_transport import prepare_query
+            args, query_input = prepare_query(args)
+            code, out, err = self.run(args, cwd=str(cwd), env=env, timeout=HERMES_TIMEOUT,
+                                      **({'input_text': query_input} if query_input is not None else {}))
         except (OSError, subprocess.TimeoutExpired):
             code, out, err = 1, "", ""
         finally:

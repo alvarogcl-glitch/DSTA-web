@@ -164,13 +164,14 @@ class MinuteInboxTests(unittest.TestCase):
         self.assertEqual(record["estado"], "procesada")
         self.assertEqual(self.marks, ["awaiting_user", "processed"])
 
-    def test_creation_rejects_duplicates_and_reports_the_error(self):
+    def test_creation_duplicate_is_proposed_as_existing_task_log(self):
         plan = {"acciones": [{"tipo": "crear", "evidente": True, "confianza": "alta", "project_id": 3,
                               "titulo": "Robot MEDS", "nota": "x"}]}
         record = self.process(plan)
         action = record["acciones"][0]
-        self.assertEqual(action["estado"], "error")
-        self.assertIn("#9", action["resultado"])
+        self.assertEqual(action["estado"], "propuesta")
+        self.assertEqual((action["tipo"], action["task_id"]), ("comentar", 9))
+        self.assertIn("#9", action["motivo"])
         self.assertFalse(action.get("auto"), "a failed automatic action returns to the user")
         self.assertEqual(record["estado"], "por_revisar")
 
@@ -223,7 +224,7 @@ class MinuteInboxTests(unittest.TestCase):
         record = inbox.apply_decision(self.store, {"minuteId": "abc-123", "decisions": [
             {"actionId": "a3", "decision": "instruccion", "instruccion": "créala con Nelson para el 15-10"},
             {"actionId": "a2", "decision": "instruccion", "instruccion": "no corresponde"}]},
-            self.vk, lambda prompt: '{"operaciones":[]}' if "no corresponde" in prompt else ask(prompt))
+            self.vk, lambda prompt: '{"operaciones":[],"descartar":true}' if "no corresponde" in prompt else ask(prompt))
         create, close = record["acciones"][2], record["acciones"][1]
         self.assertEqual(create["estado"], "aplicada")
         self.assertEqual(self.vk.created[-1]["owner"], "Nelson")

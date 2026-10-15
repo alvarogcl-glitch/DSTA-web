@@ -105,13 +105,6 @@ HERMES_TIMEOUT_SECONDS = 180
 CLAUDE_TIMEOUT_SECONDS = 150
 CODEX_RETRY_SECONDS = 600
 ANALYSIS_TOOLSETS = "vikunja-readonly,dsta-minutas"
-# Hermes only takes the prompt as a command-line argument; Windows caps a command line at 32,767
-# characters (WinError 206, raised as FileNotFoundError). Longer prompts go to Claude via stdin.
-HERMES_QUERY_LIMIT = 30_000
-
-
-class PromptTooLong(Exception):
-    pass
 ANALYSIS_TIMEOUT_SECONDS = 420
 GRANOLA_FIRST_CHECK_SECONDS = 60
 VIKUNJA_CHECK_SECONDS = 60
@@ -322,11 +315,15 @@ def log_mentions_fallback(log_path: Path, offset: int) -> bool:
 
 
 def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
-                log_path: Path) -> tuple[int, str, bool]:
+                log_path: Path, input_text: str | None = None) -> tuple[int, str, bool]:
     """Run Hermes and stop it as soon as its log shows the switch to the local fallback model."""
     offset = log_path.stat().st_size if log_path.exists() else 0
-    with tempfile.TemporaryFile() as output:
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as query_input:
+        if input_text is not None:
+            query_input.write(input_text.encode('utf-8'))
+            query_input.seek(0)
         process = subprocess.Popen(args, cwd=str(cwd), env=env, stdout=output,
+                                   stdin=query_input if input_text is not None else None,
                                    stderr=subprocess.DEVNULL, creationflags=HERMES_CREATION_FLAGS)
         deadline = time.monotonic() + timeout
         fell_back = timed_out = False
@@ -348,17 +345,21 @@ def run_watched(args: list[str], *, cwd: Path, env: dict, timeout: int,
 
 def ask_hermes(prompt: str, hermes_cli: str, hermes_home: Path, provider: str, model: str,
                toolsets: str, max_turns: int = 12, timeout: int = 0) -> str:
-    if len(prompt) > HERMES_QUERY_LIMIT:
-        raise PromptTooLong()
     child_env = os.environ.copy()
     child_env["HERMES_HOME"] = str(hermes_home)
     child_env["PYTHONIOENCODING"] = "utf-8"
-    returncode, stdout, fell_back = run_watched(
-        [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
-         "--model", model, "--toolsets", toolsets,
-         "--max-turns", str(max_turns), "--query", prompt],
+    from hermes_prompt_transport import prepare_query
+    try:
+        args, query_input = prepare_query(
+            [hermes_cli, "chat", "--quiet", "--source", "tool", "--provider", provider,
+             "--model", model, "--toolsets", toolsets,
+             "--max-turns", str(max_turns), "--query", prompt])
+    except OSError as error:
+        raise CodexUnavailable('Hermes no pudo recibir el contexto completo.') from error
+    returncode, stdout, fell_back = run_watched(args,
         cwd=hermes_home, env=child_env, timeout=timeout or HERMES_TIMEOUT_SECONDS,
         log_path=hermes_home / "logs" / "agent.log",
+        **({'input_text': query_input} if query_input is not None else {}),
     )
     if fell_back:
         raise CodexUnavailable("Codex no respondió y Hermes cambió al modelo local.")
@@ -426,11 +427,6 @@ def codex_or_claude(with_codex: Callable[[], str], with_claude: Callable[[], str
     if time.monotonic() >= _codex_retry_at:
         try:
             return with_codex()
-        except PromptTooLong:
-            # Not an outage: this one prompt goes to Claude (stdin), Hermes stays first for the rest.
-            if not claude_cli:
-                raise RuntimeError("La consulta es demasiado larga para Hermes y no hay respaldo Claude.")
-            return with_claude()
         except CodexUnavailable as error:
             if not claude_cli:
                 raise RuntimeError(str(error)) from error
@@ -485,11 +481,10 @@ def inbox_store(hermes_home: Path) -> Path:
 
 
 def owner_manual_inbox(hermes_home: Path):
-    from user_minute_inbox import UserMinuteInbox, analysis_prompt_with_tools
-    # The owner's analyst has read-only Vikunja tools: it looks tasks up instead of getting them all.
+    from user_minute_inbox import UserMinuteInbox
+    # Common minutes skill with the complete context (Codex E14); long prompts reach Hermes via stdin.
     return UserMinuteInbox(hermes_home / 'cache', store_path=inbox_store(hermes_home),
-                           store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja(),
-                           prompt_builder=analysis_prompt_with_tools)
+                           store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja())
 
 
 def process_manual(job: dict, base_url: str, token: str, hermes_home: Path,

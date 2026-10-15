@@ -141,6 +141,9 @@ assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-12
 assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { sql: 'x' } }] })).status, 400);
 assert.equal((await call(env, 'POST', '/api/minutes/decide', { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'instruccion', instruccion: '  ' }] })).status, 400,
   'an instruction needs text');
+assert.equal((await call(env, 'POST', '/api/minutes/decide', {minuteId:'abc-123', decisions:[{actionId:'otros',decision:'aprobar'}]})).status,400);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', {minuteId:'abc-123',digest:'stale',decisions:[{actionId:'otros',decision:'instruccion',instruccion:'Registrar acuerdo omitido'}]})).status,409);
+assert.equal((await call(env, 'POST', '/api/minutes/decide', {minuteId:'abc-123',decisions:[{actionId:'a1',decision:'aprobar'},{actionId:'a1',decision:'rechazar'}]})).status,400);
 const decided = await call(env, 'POST', '/api/minutes/decide',
   { minuteId: 'abc-123', decisions: [{ actionId: 'a1', decision: 'aprobar', edits: { titulo: 'Coordinar FACh', project_id: 3 } }] });
 assert.equal(decided.status, 202);
