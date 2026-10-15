@@ -83,3 +83,18 @@ Autorizado para implementar/probar localmente, sin despliegue. Evidencia en `evi
 - Desktop/móvil revisados localmente. Pendientes: aceptación visual del usuario, IA real, PWA/dispositivo real, verificación remota QA y copia entre dispositivos.
 
 No registrar E13 como verificado en piloto/producción ni como aceptado por el usuario hasta ejecutar esos recorridos autorizados.
+
+
+## A19 · Skill contextual y revisión de minutas (E14, 15-10-2026)
+
+Implementado/verificado local en `codex/minutas-contexto-skill`, sobre E13; evidencia en `C:/Users/admin/Documents/DSTA-multiuser/minutas-manuales-dashboard/docs/convergencia/evidencia/minutas-skill/`.
+
+- El analista ve título, cuerpo, fecha/hora, participantes cuando existen, contexto seleccionado y descripciones/bitácoras completas propias; ambas rutas incluyen la misma skill y el respaldo recibe el mismo prompt.
+- Falta de skill o exceso del límite completo: error antes del modelo/escrituras y reporte previo conservado. No recortar silenciosamente.
+- Creación similar a una tarea abierta: propuesta de bitácora, sin renombrar ni cambiar sus campos automáticamente. Tarea completada/varios candidatos: revisión. Verificar con IA real duplicados semánticos de títulos distintos (pendiente).
+- Aprobar/Rechazar/Otra, exactamente tres opciones por propuesta. Otra abre el texto; volver a Aprobar ignora el texto oculto. Se agrupan actualizaciones, nuevas tareas y temas por ubicar.
+- Otros cambios muestra puntos tratados y permite una instrucción incluso sin propuestas. Conserva su resultado/error, mismo UUID no duplica la acción, una nota verificada tras publicar snapshot; A/B separados.
+- Aprobar un tema sin LT conserva su aceptación para revisión y no crea LT/tarea; UI explica cómo indicar LT existente mediante Otra.
+- Instrucción imposible no rechaza silenciosamente. Decisiones con digest anterior o IDs repetidos se rechazan. Descartar y automatismos existentes preservados.
+- Transporte Hermes largo: Unicode y opciones originales conservados mediante stdin, sin contactar proveedor en estas pruebas.
+- Escritorio/móvil local comprobados en Chrome con fixtures, sin overflow horizontal. Pendientes aceptación humana, modelos reales en QA separado, móvil/PWA físico e integración/despliegue autorizados. No afirmar verificación remota ni aceptación del usuario por suites verdes.
