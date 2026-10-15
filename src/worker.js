@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "minutas-skill-2026-10-15";
+const CODE_VERSION = "minutas-lapiz-2026-10-15";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -67,6 +67,13 @@ function requestAuthentication() {
       "content-type": "text/plain; charset=utf-8",
     },
   });
+}
+
+// Cheap synchronous fingerprint of a handwriting payload (change detection and replay, not security).
+function inkHash(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return text.length + ':' + (h >>> 0).toString(36);
 }
 
 async function readJson(request, maxBytes = 1_000_000) {
@@ -1054,7 +1061,7 @@ export class DashboardChatQueue extends DurableObject {
         // Hidden right away; the VM records the tombstone so the source is never imported again.
         record.eliminadaEn = new Date().toISOString();
         storage.delete(`minute-text:${record.id}`);
-        for (const [key, manual] of [...storage.list({ prefix: "manual:" })]) if (manual.minuteId === record.id) storage.delete(key);
+        for (const [key, manual] of [...storage.list({ prefix: "manual:" })]) if (manual.minuteId === record.id) { storage.delete(key); storage.delete(`manual-ink:${manual.id}`); }
       }
       const id = crypto.randomUUID();
       storage.put(`decision:${id}`, { ...decision, id, status: "queued", createdAt: new Date().toISOString() });
@@ -1105,24 +1112,44 @@ export class DashboardChatQueue extends DurableObject {
     const body = request.method === 'POST' ? await request.json() : null;
     const storage = this.ctx.storage.kv, now = Date.now();
     const entries = () => [...storage.list({prefix:'manual:'})].map(([,v])=>v);
-    const view = d => { const {attempt,leaseUntil,operationId,lastRequest,...visible}=d; return visible; };
+    // Handwriting (iPad): the ink is kept apart ('manual-ink:<id>') so the drafts list stays light.
+    const transcribing = d => ['queued','running'].includes(d.transcription?.status);
+    const view = d => { const {attempt,leaseUntil,operationId,lastRequest,inkHash:_h,...visible}=d;
+      if (visible.transcription) { const {attempt:_a,leaseUntil:_l,...t}=visible.transcription; visible.transcription=t; }
+      return visible; };
     if (url.pathname === '/manual/list') {
       let recoveryKey=storage.get('manual-recovery-key');
       if (!recoveryKey) { recoveryKey=toBase64Url(crypto.getRandomValues(new Uint8Array(32))); storage.put('manual-recovery-key',recoveryKey); }
       return json({drafts:entries().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(view),recoveryKey});
     }
+    if (url.pathname === '/manual/ink') {
+      const id=url.searchParams.get('id')||'';
+      if (!ACTION_UUID.test(id) || !storage.get('manual:'+id)) return json({error:'Minuta no encontrada.'},404);
+      return json({ink:storage.get('manual-ink:'+id)||''});
+    }
     if (url.pathname === '/manual/next') {
-      const active=entries().find(d=>d.status==='running' && d.leaseUntil>now);
-      if (active) return json({job:null});
-      const d=entries().find(d=>d.status==='queued' || (d.status==='running' && d.leaseUntil<=now));
+      const all=entries();
+      if (all.some(d=>(d.status==='running' && d.leaseUntil>now) || (d.transcription?.status==='running' && d.transcription.leaseUntil>now))) return json({job:null});
+      const t=all.find(d=>d.transcription?.status==='queued' || (d.transcription?.status==='running' && d.transcription.leaseUntil<=now));
+      if (t) {
+        Object.assign(t.transcription,{status:'running',attempt:crypto.randomUUID(),leaseUntil:now+300_000});
+        storage.put('manual:'+t.id,t);
+        return json({job:{kind:'transcribe',id:t.id,attempt:t.transcription.attempt,title:t.title,ink:storage.get('manual-ink:'+t.id)||''}});
+      }
+      const d=all.find(d=>d.status==='queued' || (d.status==='running' && d.leaseUntil<=now));
       if (!d) return json({job:null});
       Object.assign(d,{status:'running',attempt:crypto.randomUUID(),leaseUntil:now+900_000});
-      storage.put('manual:'+d.id,d); return json({job:d});
+      storage.put('manual:'+d.id,d);
+      // The analysis reads the typed notes plus the reviewed transcription of the handwriting.
+      const content=[d.content,d.transcript?'[Escrito a mano · transcripción revisada]\n'+d.transcript:''].filter(x=>String(x||'').trim()).join('\n\n');
+      return json({job:{...d,content}});
     }
     if (!body || !ACTION_UUID.test(body.id || '')) return json({error:'Identificador inválido.'},400);
     const old=storage.get('manual:'+body.id);
     if (url.pathname === '/manual/save') {
-      if (Object.keys(body).some(k=>!['id','revision','operationId','title','date','content','context'].includes(k)) ||
+      if (Object.keys(body).some(k=>!['id','revision','operationId','title','date','content','context','transcript','ink'].includes(k)) ||
+          (body.transcript!==undefined && (typeof body.transcript!=='string' || body.transcript.length>60_000)) ||
+          (body.ink!==undefined && (typeof body.ink!=='string' || body.ink.length>1_500_000 || (body.ink && !body.ink.startsWith('{"v":1')))) ||
           !ACTION_UUID.test(body.operationId || '') || !Number.isSafeInteger(body.revision) || body.revision<0 ||
           typeof body.title!=='string' || !body.title.trim() || body.title.length>200 ||
           typeof body.content!=='string' || body.content.length>60_000 ||
@@ -1132,19 +1159,31 @@ export class DashboardChatQueue extends DurableObject {
       if (!c || Object.keys(c).some(k=>!['taskIds','projectIds','sections'].includes(k)) ||
           !['taskIds','projectIds'].every(k=>Array.isArray(c[k]) && c[k].length<=500 && c[k].every(id=>Number.isSafeInteger(id)&&id>0)) ||
           !Array.isArray(c.sections) || c.sections.length>20 || c.sections.some(s=>typeof s!=='string'||s.length>200)) return json({error:'Contexto inválido.'},400);
-      if (old?.operationId===body.operationId) return JSON.stringify(old.lastRequest)===JSON.stringify(body) ? json(view(old)) : json({error:'Identificador reutilizado.'},409);
+      const {ink,...request}=body; if (ink!==undefined) request.inkHash=inkHash(ink);
+      if (old?.operationId===body.operationId) return JSON.stringify(old.lastRequest)===JSON.stringify(request) ? json(view(old)) : json({error:'Identificador reutilizado.'},409);
       if (old && old.status!=='draft') return json({error:'Esta minuta ya fue enviada. Puedes consultar su estado y sus propuestas.'},409);
+      if (old && transcribing(old)) return json({error:'Se está transcribiendo tu escritura. Espera unos segundos.'},409);
       if ((old?.revision || 0)!==body.revision) return json({error:'El borrador cambió en otra ventana. Recupera la versión guardada antes de editar.'},409);
       const snapshot=storage.get('data:snapshot');
       if (c.taskIds.some(id=>!snapshot?.tasks?.some(t=>t.id===id)) || c.projectIds.some(id=>!snapshot?.projects?.some(p=>p.id===id))) return json({error:'Contexto fuera de tu espacio o desactualizado.'},403);
       if (!old && entries().length>=100) return json({error:'Límite de 100 minutas manuales alcanzado.'},429);
-      const d={...body,revision:body.revision+1,status:'draft',source:'Manual-Dashboard',updatedAt:new Date(now).toISOString(),lastRequest:body};
+      const {inkHash:_h,...fields}=request;
+      const d={...fields,transcript:body.transcript??old?.transcript??'',hasInk:old?.hasInk||false,inkRev:old?.inkRev||0,inkHash:old?.inkHash||'',
+        ...(old?.transcription?{transcription:old.transcription}:{}),
+        revision:body.revision+1,status:'draft',source:'Manual-Dashboard',updatedAt:new Date(now).toISOString(),lastRequest:request};
+      if (ink!==undefined && request.inkHash!==d.inkHash) {
+        if (ink) storage.put('manual-ink:'+d.id,ink); else storage.delete('manual-ink:'+d.id);
+        Object.assign(d,{hasInk:Boolean(ink),inkRev:d.inkRev+1,inkHash:request.inkHash});
+      }
       storage.put('manual:'+d.id,d); return json(view(d));
     }
     if (!old) return json({error:'Minuta no encontrada.'},404);
     if (url.pathname === '/manual/submit') {
       if (body.revision!==old.revision) return json({error:'La versión enviada ya no está vigente.'},409);
-      if (!old.content.trim()) return json({error:'Escribe el contenido de la reunión antes de procesar.'},400);
+      if (old.hasInk && !(old.transcription?.status==='done' && old.transcription.inkRev===old.inkRev)) {
+        return json({error:'Tienes escritura a mano sin transcribir. Usa «Transcribir» y revisa el texto antes de procesar.'},409);
+      }
+      if (!(old.content+(old.transcript||'')).trim()) return json({error:'Escribe el contenido de la reunión antes de procesar.'},400);
       if (['draft','error'].includes(old.status)) {
         Object.assign(old,{status:'queued',error:'',updatedAt:new Date(now).toISOString()}); storage.put('manual:'+old.id,old);
       } else if (body.reprocess===true && old.status==='processed') {
@@ -1158,9 +1197,27 @@ export class DashboardChatQueue extends DurableObject {
       }
       return json(view(old),202);
     }
+    if (url.pathname === '/manual/transcribe') {
+      if (!['draft','error'].includes(old.status)) return json({error:'Esta minuta ya fue enviada a análisis.'},409);
+      if (body.revision!==old.revision) return json({error:'Guarda el borrador antes de transcribir.'},409);
+      if (!old.hasInk) return json({error:'No hay escritura a mano para transcribir.'},400);
+      if (!transcribing(old)) {
+        old.transcription={status:'queued',inkRev:old.inkRev,requestedAt:new Date(now).toISOString()};
+        storage.put('manual:'+old.id,old);
+      }
+      return json(view(old),202);
+    }
     if (url.pathname === '/manual/delete') {
       if (!['draft','error'].includes(old.status)) return json({error:'Esta minuta ya se envió a análisis. Elimínala desde su resumen.'},409);
-      storage.delete('manual:'+old.id); return json({ok:true});
+      storage.delete('manual:'+old.id); storage.delete('manual-ink:'+old.id); return json({ok:true});
+    }
+    if (url.pathname === '/manual/done' && body.kind==='transcribe') {
+      const t=old.transcription;
+      if (t?.status!=='running' || t.attempt!==body.attempt || t.leaseUntil<=now) return json({error:'Intento no activo.'},409);
+      if (!body.error && (typeof body.text!=='string' || body.text.length>60_000)) return json({error:'Transcripción inválida.'},400);
+      if (body.error) old.transcription={status:'error',inkRev:t.inkRev,error:'No se pudo transcribir. Reintenta en unos minutos.'};
+      else Object.assign(old,{transcript:body.text.trim(),revision:old.revision+1,transcription:{status:'done',inkRev:t.inkRev,doneAt:new Date(now).toISOString()}});
+      old.updatedAt=new Date(now).toISOString(); storage.put('manual:'+old.id,old); return json({ok:true});
     }
     if (url.pathname === '/manual/done') {
       if (old.status!=='running' || old.attempt!==body.attempt || old.leaseUntil<=now) return json({error:'Intento no activo.'},409);
@@ -1828,13 +1885,15 @@ export default {
       return response;
     };
 
-    if (url.pathname === '/api/manual-minutes' || url.pathname === '/api/manual-minutes/submit' || url.pathname === '/api/manual-minutes/delete') {
+    if (['/api/manual-minutes','/api/manual-minutes/submit','/api/manual-minutes/delete','/api/manual-minutes/transcribe','/api/manual-minutes/ink'].includes(url.pathname)) {
       if (!accounts) return json({error:'Requiere modo cuentas.'},404);
       // A tab opened as A must not send A's notes after another tab logs in as B.
       if (request.headers.get('x-dsta-actor')!==session.actor.id) return json({error:'La cuenta cambió. Recarga el dashboard para continuar.'},409);
       if (request.method==='GET' && url.pathname==='/api/manual-minutes') return chatStub(env,box).fetch('https://chat.internal/manual/list');
+      if (request.method==='GET' && url.pathname==='/api/manual-minutes/ink') return chatStub(env,box).fetch('https://chat.internal/manual/ink?id='+encodeURIComponent(url.searchParams.get('id')||''));
       if (request.method!=='POST') return json({error:'Método no permitido.'},405);
-      const parsed=await readJson(request,260_000); if (parsed.error) return parsed.error;
+      const parsed=await readJson(request,1_700_000); if (parsed.error) return parsed.error;
+      if (url.pathname.endsWith('/transcribe')) return announce(forwardToChatObject(env,'/manual/transcribe',parsed.body,box),'manual');
       const submit=url.pathname.endsWith('/submit');
       if (url.pathname.endsWith('/delete')) return forwardToChatObject(env,'/manual/delete',parsed.body,box);
       return announce(forwardToChatObject(env,submit?'/manual/submit':'/manual/save',parsed.body,box),submit?'manual':null);

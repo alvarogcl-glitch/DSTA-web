@@ -1,0 +1,202 @@
+// Handwriting pad for manual minutes (iPad + Apple Pencil, also mouse; finger optional).
+// Ink is vector data: pages of strokes in a 1000-unit-wide page space, delta-encoded integers.
+(() => {
+  'use strict';
+  const PAGE_W = 1000, PAGE_H = 1414;
+  const COLORS = [['#1b1b1b', 'Negro'], ['#1f4fd1', 'Azul'], ['#c62828', 'Rojo']];
+  const WIDTHS = [[2, 'Fino'], [3.5, 'Medio'], [6, 'Grueso']];
+  const MAX_PAGES = 20, MAX_CHARS = 1_400_000, ERASE_RADIUS = 14;
+  const SETTINGS = 'dsta-ink-settings';
+  const loadSettings = () => { try { return { color: 0, width: 1, finger: false, ...JSON.parse(localStorage.getItem(SETTINGS) || '{}') }; } catch { return { color: 0, width: 1, finger: false }; } };
+  const saveSettings = s => { try { localStorage.setItem(SETTINGS, JSON.stringify(s)); } catch { /* per-device convenience only */ } };
+
+  // Stroke: {c, w, pts:[x,y,p, x,y,p, ...]} absolute page units; p = pressure 1..9.
+  function decode(text) {
+    if (!text) return [{ strokes: [] }];
+    const data = JSON.parse(text);
+    const pages = (data.pages || []).map(page => ({ strokes: page.map(([c, w, d]) => {
+      const pts = []; let x = 0, y = 0;
+      for (let i = 0; i < d.length; i += 3) { x += d[i]; y += d[i + 1]; pts.push(x, y, d[i + 2]); }
+      return { c, w, pts };
+    }) }));
+    return pages.length ? pages : [{ strokes: [] }];
+  }
+  function encode(pages) {
+    if (pages.every(p => !p.strokes.length)) return '';
+    return JSON.stringify({ v: 1, w: PAGE_W, h: PAGE_H, pages: pages.map(page => page.strokes.map(s => {
+      const d = []; let x = 0, y = 0;
+      for (let i = 0; i < s.pts.length; i += 3) { d.push(s.pts[i] - x, s.pts[i + 1] - y, s.pts[i + 2]); x = s.pts[i]; y = s.pts[i + 1]; }
+      return [s.c, s.w, d];
+    })) });
+  }
+  function drawStroke(ctx, s, scale) {
+    const color = COLORS[s.c]?.[0] || COLORS[0][0], base = WIDTHS[s.w]?.[0] || WIDTHS[1][0];
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const p = s.pts;
+    if (p.length === 3) { ctx.beginPath(); ctx.arc(p[0] * scale, p[1] * scale, base * scale * (0.5 + p[2] / 10) / 2, 0, Math.PI * 2); ctx.fill(); return; }
+    for (let i = 3; i < p.length; i += 3) {
+      ctx.lineWidth = base * scale * (0.5 + (p[i - 1] + p[i + 2]) / 20);
+      ctx.beginPath(); ctx.moveTo(p[i - 3] * scale, p[i - 2] * scale); ctx.lineTo(p[i] * scale, p[i + 1] * scale); ctx.stroke();
+    }
+  }
+  const nearStroke = (s, x, y) => {
+    for (let i = 0; i < s.pts.length; i += 3) if (Math.hypot(s.pts[i] - x, s.pts[i + 1] - y) <= ERASE_RADIUS) return true;
+    return false;
+  };
+
+  function create({ ink = '', readOnly = false, onChange = () => {} } = {}) {
+    let pages = decode(ink), locked = readOnly, tool = 'pen', penSeen = false;
+    const settings = loadSettings(), undo = [], redo = [];
+    const el = document.createElement('div'); el.className = 'ink';
+    el.innerHTML = `<div class="ink-bar" role="toolbar" aria-label="Herramientas de escritura">
+        <div class="ink-group"><button type="button" data-tool="pen" aria-label="Lápiz">✏️</button><button type="button" data-tool="eraser" aria-label="Borrador">🧽</button></div>
+        <div class="ink-group" data-colors></div><div class="ink-group" data-widths></div>
+        <div class="ink-group"><button type="button" data-undo aria-label="Deshacer">↶</button><button type="button" data-redo aria-label="Rehacer">↷</button></div>
+        <div class="ink-group"><button type="button" data-add>+ Hoja</button></div>
+        <button type="button" class="ink-finger" data-finger aria-label="Escribir también con el dedo">☝️ Dedo</button>
+      </div><div class="ink-pages"></div>`;
+    const bar = el.querySelector('.ink-bar'), box = el.querySelector('.ink-pages');
+    COLORS.forEach(([color, label], i) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ink-swatch' });
+      b.style.setProperty('--ink', color); b.setAttribute('aria-label', label); b.dataset.color = i;
+      el.querySelector('[data-colors]').append(b);
+    });
+    WIDTHS.forEach(([w, label], i) => {
+      const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ink-width' });
+      b.innerHTML = `<i style="width:${4 + w * 2}px;height:${4 + w * 2}px"></i>`; b.setAttribute('aria-label', label); b.dataset.width = i;
+      el.querySelector('[data-widths]').append(b);
+    });
+
+    const snapshot = () => pages.map(p => p.strokes.slice());
+    const restore = snap => { pages = snap.map(strokes => ({ strokes })); renderPages(); };
+    const commit = before => { undo.push(before); if (undo.length > 100) undo.shift(); redo.length = 0; changed(); };
+    let cached = null;
+    const changed = () => { cached = null; refreshBar(); onChange(); };
+    const serialize = () => (cached ??= encode(pages));
+
+    function refreshBar() {
+      bar.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
+      bar.querySelectorAll('[data-color]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.color) === settings.color)));
+      bar.querySelectorAll('[data-width]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.width) === settings.width)));
+      bar.querySelector('[data-finger]').setAttribute('aria-pressed', String(settings.finger));
+      bar.querySelectorAll('button,input').forEach(b => { b.disabled = locked; });
+      if (!locked) {
+        bar.querySelector('[data-undo]').disabled = !undo.length;
+        bar.querySelector('[data-redo]').disabled = !redo.length;
+        bar.querySelector('[data-add]').disabled = pages.length >= MAX_PAGES;
+      }
+      el.classList.toggle('ink-locked', locked); el.classList.toggle('ink-finger-on', settings.finger);
+    }
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b || locked) return;
+      if (b.dataset.tool) tool = b.dataset.tool;
+      else if (b.dataset.color) { settings.color = Number(b.dataset.color); tool = 'pen'; saveSettings(settings); }
+      else if (b.dataset.width) { settings.width = Number(b.dataset.width); tool = 'pen'; saveSettings(settings); }
+      else if ('finger' in b.dataset) { settings.finger = !settings.finger; saveSettings(settings); }
+      else if ('undo' in b.dataset && undo.length) { redo.push(snapshot()); restore(undo.pop()); changed(); return; }
+      else if ('redo' in b.dataset && redo.length) { undo.push(snapshot()); restore(redo.pop()); changed(); return; }
+      else if ('add' in b.dataset && pages.length < MAX_PAGES) {
+        const before = snapshot(); pages.push({ strokes: [] }); renderPages(); commit(before);
+        box.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+      }
+      refreshBar();
+    });
+
+    const views = [];
+    function renderPages() {
+      box.replaceChildren(); views.length = 0;
+      pages.forEach((page, index) => {
+        const wrap = document.createElement('div'); wrap.className = 'ink-page';
+        const head = document.createElement('div'); head.className = 'ink-page-head';
+        head.innerHTML = `<span>Hoja ${index + 1}</span>`;
+        const clear = Object.assign(document.createElement('button'), { type: 'button', textContent: page.strokes.length || pages.length === 1 ? 'Limpiar' : 'Quitar hoja' });
+        clear.disabled = locked;
+        clear.onclick = () => {
+          const before = snapshot();
+          if (!page.strokes.length && pages.length > 1) pages.splice(index, 1); else page.strokes = [];
+          renderPages(); commit(before);
+        };
+        head.append(clear);
+        const canvas = document.createElement('canvas'); canvas.setAttribute('aria-label', `Hoja ${index + 1} para escribir a mano`);
+        wrap.append(head, canvas); box.append(wrap);
+        const view = { page, canvas, ctx: canvas.getContext('2d'), scale: 1 };
+        views.push(view); bindCanvas(view, index); paint(view);
+      });
+      refreshBar();
+    }
+    function paint(view) {
+      const { canvas, ctx } = view, ratio = window.devicePixelRatio || 1, width = canvas.clientWidth || 600;
+      canvas.width = Math.round(width * ratio); canvas.height = Math.round(width * PAGE_H / PAGE_W * ratio);
+      view.scale = canvas.width / PAGE_W;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const s of view.page.strokes) drawStroke(ctx, s, view.scale);
+    }
+    const resize = new ResizeObserver(() => views.forEach(paint)); resize.observe(box);
+
+    function bindCanvas(view, index) {
+      const { canvas } = view; let current = null, before = null, pointer = null, erased = false;
+      const point = e => {
+        const r = canvas.getBoundingClientRect();
+        const x = Math.round((e.clientX - r.left) / r.width * PAGE_W), y = Math.round((e.clientY - r.top) / r.height * PAGE_H);
+        const p = e.pressure > 0 && e.pointerType === 'pen' ? Math.max(1, Math.min(9, Math.round(e.pressure * 9))) : 5;
+        return [Math.max(0, Math.min(PAGE_W, x)), Math.max(0, Math.min(PAGE_H, y)), p];
+      };
+      // Palm and finger: with a pencil (or the finger option off) only pencil/mouse write; fingers scroll.
+      const accepts = e => !locked && (e.pointerType === 'pen' || e.pointerType === 'mouse' || (e.pointerType === 'touch' && settings.finger && !penSeen));
+      const eraseAt = ([x, y]) => {
+        const keep = view.page.strokes.filter(s => !nearStroke(s, x, y));
+        if (keep.length !== view.page.strokes.length) { view.page.strokes = keep; erased = true; paint(view); }
+      };
+      canvas.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'pen') penSeen = true;
+        if (!accepts(e) || pointer !== null) return;
+        if (e.button > 0 && e.pointerType === 'mouse') return;
+        if (serialize().length > MAX_CHARS) { window.DstaToast?.show('Esta minuta alcanzó el máximo de escritura. Transcríbela o crea otra minuta.', false); return; }
+        e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or lost pointer */ } pointer = e.pointerId; before = snapshot(); erased = false;
+        // Pencil eraser end or barrel button also erases.
+        if (tool === 'eraser' || e.button === 5 || e.buttons === 32) { current = 'erase'; eraseAt(point(e)); return; }
+        current = { c: settings.color, w: settings.width, pts: point(e) };
+        drawStroke(view.ctx, current, view.scale);
+      });
+      canvas.addEventListener('pointermove', e => {
+        if (e.pointerId !== pointer || !current) return;
+        e.preventDefault();
+        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+        for (const ev of events.length ? events : [e]) {
+          const pt = point(ev);
+          if (current === 'erase') { eraseAt(pt); continue; }
+          const n = current.pts.length;
+          if (Math.hypot(pt[0] - current.pts[n - 3], pt[1] - current.pts[n - 2]) < 1.5) continue;
+          current.pts.push(...pt);
+          drawStroke(view.ctx, { ...current, pts: current.pts.slice(-6) }, view.scale);
+        }
+      });
+      const end = e => {
+        if (e.pointerId !== pointer) return;
+        pointer = null;
+        if (current === 'erase') { if (erased) commit(before); }
+        else if (current) { view.page.strokes.push(current); commit(before); }
+        current = null;
+      };
+      canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+      // iPadOS: a pencil touch must never scroll the page; a finger scrolls unless finger writing is on.
+      canvas.addEventListener('touchstart', e => {
+        if (locked) return;
+        if ([...e.touches].some(t => t.touchType === 'stylus') || (settings.finger && !penSeen)) e.preventDefault();
+      }, { passive: false });
+      canvas.addEventListener('touchmove', e => { if (pointer !== null) e.preventDefault(); }, { passive: false });
+    }
+
+    renderPages();
+    return {
+      el,
+      serialize,
+      isEmpty: () => pages.every(p => !p.strokes.length),
+      setReadOnly(value) { locked = Boolean(value); renderPages(); },
+      setInk(text) { pages = decode(text); undo.length = redo.length = 0; cached = null; renderPages(); },
+      destroy() { resize.disconnect(); el.remove(); },
+    };
+  }
+
+  window.DstaInk = { create, decode, encode, PAGE_W, PAGE_H };
+})();

@@ -89,6 +89,58 @@ try{
  await a.locator('.mm-editor-del .mm-danger').click();await a.locator('.mm-editor-del .mm-danger',{hasText:'Sí, eliminar'}).click();
  await a.waitForFunction(n=>document.querySelectorAll('.mm-item').length&&[...document.querySelectorAll('.mm-item')].filter(e=>e.textContent.includes('Borrador')).length===n-1,drafts);
  results['eliminar minuta y borrador']=true;
+ // Handwriting (iPad): Teclado/Lápiz, pencil and mouse write, finger scrolls, transcription before processing.
+ const box=boxes.get('u:qa-a');
+ const inkStrokes=()=>{const e=[...kv.list({prefix:'manual-ink:'})][0];return e?JSON.parse(e[1]).pages.flat().length:0;};
+ await a.locator('[data-new]').click();
+ await a.locator('[data-mode="pen"]').click();
+ const canvas=a.locator('.ink-page canvas').first();await canvas.waitFor();
+ assert.ok(!(await a.locator('.mm-editor textarea.minute-text').isVisible()),'pen mode hides the keyboard field');
+ const bb=await canvas.boundingBox();
+ for(const row of [0,1,2]){
+   await a.mouse.move(bb.x+40,bb.y+60+row*50);await a.mouse.down();
+   for(let i=1;i<=12;i++)await a.mouse.move(bb.x+40+i*18,bb.y+60+row*50+(i%2?6:-6));
+   await a.mouse.up();
+ }
+ await a.waitForFunction(()=>/guardado/.test(document.querySelector('.mm-editor .manual-status')?.textContent||''),null,{timeout:10000});
+ assert.equal(inkStrokes(),3,'three mouse strokes saved as ink');
+ const synthetic=type=>a.evaluate(t=>{const c=document.querySelector('.ink-page canvas'),r=c.getBoundingClientRect();
+   const ev=(name,x)=>c.dispatchEvent(new PointerEvent(name,{pointerType:t,pointerId:t==='pen'?7:9,bubbles:true,cancelable:true,clientX:r.left+x,clientY:r.top+300,pressure:.6,button:0,buttons:1}));
+   ev('pointerdown',50);for(let x=60;x<200;x+=10)ev('pointermove',x);ev('pointerup',200);},type);
+ await synthetic('pen');
+ await a.waitForFunction(()=>/guardado/.test(document.querySelector('.mm-editor .manual-status')?.textContent||''),null,{timeout:10000});
+ await a.waitForTimeout(500);
+ assert.equal(inkStrokes(),4,'pencil writes');
+ await synthetic('touch');await a.waitForTimeout(3500);
+ assert.equal(inkStrokes(),4,'with a pencil in use, a finger (palm) never writes');
+ await a.locator('.ink-bar [data-undo]').click();await a.waitForTimeout(3500);
+ assert.equal(inkStrokes(),3,'undo');
+ if(process.env.SHOT_DIR){
+   await a.setViewportSize({width:820,height:1180});await a.evaluate(()=>document.querySelector('.mm-detail').scrollTop=0);
+   await a.screenshot({path:process.env.SHOT_DIR+'/lapiz-ipad.png'});await a.setViewportSize({width:1280,height:900});
+ }
+ await a.locator('.mm-editor [data-submit]').click();
+ await a.locator('.mm-editor .manual-status',{hasText:'sin transcribir'}).waitFor();
+ await a.locator('[data-transcribe]').click();
+ await a.locator('.mm-editor .manual-status',{hasText:'Transcribiendo'}).waitFor();
+ assert.ok(await a.locator('.ink.ink-locked').count(),'pad locked while transcribing');
+ if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/lapiz-transcribiendo.png'});
+ // The VM side: the queued job carries the ink; the result comes back as the draft's transcription.
+ const job=(await (await box.fetch(new Request('https://chat.internal/manual/next'))).json()).job;
+ assert.equal(job.kind,'transcribe');assert.ok(job.ink.startsWith('{"v":1'));
+ assert.equal((await box.fetch(new Request('https://chat.internal/manual/done',{method:'POST',body:JSON.stringify({id:job.id,attempt:job.attempt,kind:'transcribe',text:'Reunión QA\n- Acuerdo: cerrar la entrega'})}))).status,200);
+ await a.locator('.mm-editor .manual-status',{hasText:'Transcripción lista'}).waitFor({timeout:20000});
+ assert.equal(await a.locator('[data-transcript]').inputValue(),'Reunión QA\n- Acuerdo: cerrar la entrega');
+ await a.locator('[data-transcript]').fill('Reunión QA\n- Acuerdo: cerrar la entrega el viernes');
+ if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/lapiz-transcrita.png'});
+ await a.locator('.mm-editor [data-submit]').click();
+ await a.locator('.mm-editor .manual-status',{hasText:'En cola'}).waitFor({timeout:10000});
+ const analysis=(await (await box.fetch(new Request('https://chat.internal/manual/next'))).json()).job;
+ assert.ok(analysis.content.includes('cerrar la entrega el viernes'),'the analysis gets the reviewed transcription');
+ results['escritura a mano: lápiz, palma, transcripción y análisis']=true;
+ // Keyboard mode remains the default elsewhere and the choice is remembered.
+ assert.equal(await a.evaluate(()=>localStorage.getItem('dsta-minute-input')),'pen');
+ await a.evaluate(()=>localStorage.setItem('dsta-minute-input','keys'));
  // The «Minutas» header button is spaced like the others.
  const gap=await a.evaluate(()=>{const m=document.querySelector('#manual-minutes-open').getBoundingClientRect(),r=document.querySelector('#refresh').getBoundingClientRect();return r.left-m.right;});
  assert.ok(gap>=4,'Minutas button is not glued to the next one: '+gap);

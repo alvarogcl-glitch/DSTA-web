@@ -69,3 +69,37 @@
 .mm-original{background:#0d1117;border:1px solid #2b3745;border-radius:12px;padding:14px 16px;max-height:46vh;overflow:auto}
 .mm-original-text{font-size:14.5px;line-height:1.6}
 .mm-analysis{margin-top:6px;padding-top:4px;border-top:1px dashed #2b3745}
+/* Teclado / Lápiz */
+.manual-modes{display:inline-flex;gap:0;border:1px solid #2b3745;border-radius:10px;overflow:hidden;margin:6px 0 8px;align-self:flex-start}
+.manual-modes button{border:0;border-radius:0;background:transparent;padding:7px 14px;min-height:36px}
+.manual-modes button[aria-pressed="true"]{background:#1f3a2c;color:#8ff0b5}
+.manual-ink,.manual-transcript{display:none}
+.manual-pen .manual-ink{display:block}
+.manual-pen > .minute-text,.manual-pen > textarea.minute-text,.manual-pen > .manual-tools{display:none}
+.manual-transcript:not([hidden]){display:flex;flex-direction:column;gap:6px;margin-top:10px;font-size:13px;color:#9fb0c3}
+.manual-transcript textarea{min-height:140px;width:100%;box-sizing:border-box;font:inherit;font-size:14.5px;line-height:1.5;color:#e8eef5;background:#0d1117;border:1px solid #2b3745;border-radius:10px;padding:10px}
+.manual-transcribe{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px;font-size:13px;color:#9fb0c3}
+.manual-transcribe button{background:#1f3a2c;color:#8ff0b5;border-color:#2f6b4a;font-weight:600}
+.ink{display:flex;flex-direction:column;gap:10px}
+.ink-bar{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px;background:#141b24;border:1px solid #2b3745;border-radius:12px}
+.ink-group{display:inline-flex;gap:4px;align-items:center}
+.ink-bar button{min-width:40px;min-height:40px;padding:4px 8px;border-radius:9px;font-size:16px}
+.ink-bar button[aria-pressed="true"]{outline:2px solid #6fdc9b;outline-offset:1px;background:#1f3a2c}
+.ink-swatch::before{content:"";display:block;width:20px;height:20px;border-radius:50%;background:var(--ink);margin:auto;border:2px solid #e8eef5}
+.ink-width i{display:block;margin:auto;border-radius:50%;background:#e8eef5}
+.ink-bar .ink-finger{margin-left:auto;font-size:14px}
+.ink-pages{display:flex;flex-direction:column;gap:14px}
+.ink-page{background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.ink-page-head{display:flex;justify-content:space-between;align-items:center;padding:4px 10px;background:#eef1f5;color:#4a5868;font-size:12px}
+.ink-page-head button{font-size:12px;min-height:28px;padding:2px 10px;background:#fff;color:#4a5868;border:1px solid #c9d2dc}
+.ink-page canvas{display:block;width:100%;aspect-ratio:1000/1414;touch-action:pan-y pinch-zoom;cursor:crosshair;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 31px,#dfe7f1 31px,#dfe7f1 32px)}
+.ink-finger-on .ink-page canvas{touch-action:none}
+.ink-locked .ink-page canvas{cursor:default}
+.manual-transcript textarea{text-transform:none;letter-spacing:normal}
+/* Writing by hand needs the whole width: the list steps aside while the pen editor is open. */
+.mm:has(.manual-pen){width:min(1100px,98vw);height:96dvh;max-height:none}
+.mm:has(.manual-pen) .mm-body{grid-template-columns:1fr}
+.mm:has(.manual-pen) .mm-list{display:none}
+.mm:has(.manual-pen) .mm-detail{display:block}
+.mm:has(.manual-pen) .mm-back{display:inline-flex}

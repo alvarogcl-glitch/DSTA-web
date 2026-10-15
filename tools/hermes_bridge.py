@@ -487,9 +487,25 @@ def owner_manual_inbox(hermes_home: Path):
                            store_engine=minute_inbox, vk_factory=lambda _: minute_inbox.load_vikunja())
 
 
+def process_transcription(job: dict, done_url: str, token: str, claude_cli: str, claude_model: str,
+                          post: Callable = None) -> None:
+    """Handwritten manual minute: the dashboard's ink -> text for the user to review (no analysis here)."""
+    import ink_transcribe
+    payload = {"id": job["id"], "attempt": job["attempt"], "kind": "transcribe"}
+    try:
+        payload["text"] = ink_transcribe.transcribe(job.get("ink") or "", claude_cli, claude_model or "sonnet")
+    except Exception as failure:
+        print(f"Transcripción manuscrita fallida ({type(failure).__name__})", flush=True)
+        payload["error"] = True  # never the ink or the model's output in errors
+    (post or request_json)(done_url, token=token, method="POST", payload=payload, timeout=40)
+
+
 def process_manual(job: dict, base_url: str, token: str, hermes_home: Path,
-                   vikunja_token: str, vikunja_url: str, ask: Callable[[str], str]) -> None:
+                   vikunja_token: str, vikunja_url: str, ask: Callable[[str], str],
+                   claude_cli: str = "", claude_model: str = "sonnet") -> None:
     """The owner retains the existing inbox store and read-only model provider/backup."""
+    if job.get("kind") == "transcribe":
+        return process_transcription(job, f"{base_url}/api/bridge/manual-done", token, claude_cli, claude_model)
     inbox = owner_manual_inbox(hermes_home)
     minute = {"source": "Manual-Dashboard", "source_id": "manual-" + job['id'],
               "version": str(job['revision']), "title": job['title'], "date": job['date'],
@@ -933,7 +949,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
                 result = request_json(f"{dashboard_url}/api/bridge/next?kind={chat_query}", token=bridge_token)
                 if result.get('manual'):
                     args = (result['manual'], dashboard_url, bridge_token, hermes_home, vikunja_token, vikunja_url,
-                            analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model, claude_cli, claude_model))
+                            analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model, claude_cli, claude_model),
+                            claude_cli, claude_model)
                     if once:
                         process_manual(*args)
                         return 0

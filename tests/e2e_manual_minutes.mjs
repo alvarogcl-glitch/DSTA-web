@@ -48,13 +48,13 @@ try{
  await a.locator('#copy-minute').click();assert.ok((await a.evaluate(()=>navigator.clipboard.readText())).includes('Acuerdo:'));
  await a.screenshot({path:join(screenshots,'editor-desktop.png')});
  await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').filter({hasText:'Minuta QA'}).first().click();
- assert.ok((await a.locator('dialog textarea').inputValue()).includes('Acuerdo:'),'recovered draft after reload');
+ assert.ok((await a.locator('dialog textarea.minute-text').inputValue()).includes('Acuerdo:'),'recovered draft after reload');
  // Recover an unsent edit after an HTTP failure and a reload.
  let offline=true;await a.route('**/api/manual-minutes',route=>route.request().method()==='POST'&&offline?route.abort():route.continue());
- await a.locator('dialog textarea').fill('Portafolio\nAcuerdo: entrega completada.\nRecuperación sin conexión QA.');
+ await a.locator('dialog textarea.minute-text').fill('Portafolio\nAcuerdo: entrega completada.\nRecuperación sin conexión QA.');
  await a.locator('[data-save]').click();await a.waitForTimeout(200);offline=false;
  await a.reload();await a.locator('#manual-minutes-open').click();await a.locator('.mm-item').filter({hasText:'Minuta QA'}).first().click();
- assert.match(await a.locator('dialog textarea').inputValue(),/Recuperación sin conexión QA/);
+ assert.match(await a.locator('dialog textarea.minute-text').inputValue(),/Recuperación sin conexión QA/);
  await a.locator('[data-save]').click();await a.locator('.manual-status').filter({hasText:'guardado en tu cuenta'}).waitFor();
  await a.setViewportSize({width:390,height:844});await a.locator('.manual-dialog').evaluate(e=>e.scrollTop=0);await a.screenshot({path:join(screenshots,'editor-mobile.png')});
  assert.ok(await a.locator('.manual-dialog').evaluate(e=>e.getBoundingClientRect().width<=390));
@@ -98,7 +98,7 @@ try{
  // Storage failure still permits an explicit, confirmed cloud save.
  await b.locator('[data-new]').click();await b.locator('.manual-dialog [data-title]').fill('B sin almacenamiento local');
  await b.evaluate(()=>{Storage.prototype.setItem=()=>{throw new DOMException('QA quota failure','QuotaExceededError');};});
- await b.locator('.manual-dialog textarea').fill('Notas propias de B');await b.locator('.manual-dialog [data-save]').click();
+ await b.locator('.manual-dialog textarea.minute-text').fill('Notas propias de B');await b.locator('.manual-dialog [data-save]').click();
  await b.locator('.manual-status').filter({hasText:'guardado en tu cuenta'}).waitFor();
  assert.equal([...boxes.get('u:qa-b').ctx.storage.kv.list({prefix:'manual:'}).values()][0].content,'Notas propias de B');
  assert.deepEqual(errors,[]);console.log('PASS: template/copy, format, durable reload, encrypted offline recovery, desktop/mobile, account isolation, manual -> existing engine -> inbox -> human approval -> snapshot; no external writes');console.log('Evidence: '+screenshots);

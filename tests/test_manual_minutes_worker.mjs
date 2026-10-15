@@ -58,6 +58,44 @@ await minutesCall('upsert',{id:'g-txt',sourceId:'s',digest:'1',acciones:[],titul
 assert.equal(await textOf('g-txt'),'Texto original de Granola','an analysis upload without text keeps it');
 await minutesCall('decide',{minuteId:'g-txt',decision:'eliminar',digest:'1'});
 assert.equal(data.get('minute-text:g-txt'),undefined,'deleting the minute deletes its text');
+// Handwriting: ink kept apart, transcription queue, no processing with untranscribed ink.
+{
+  const hid=crypto.randomUUID(),ink='{"v":1,"w":1000,"h":1414,"pages":[[[0,1,[10,10,5,5,0,5]]]]}';
+  const base={id:hid,title:'A mano',date:'2026-10-15T12:00:00Z',content:'',context:{projectIds:[],taskIds:[],sections:[]}};
+  const op1=crypto.randomUUID();
+  let r=await (await call('save',{...base,revision:0,operationId:op1,transcript:'',ink})).json();
+  assert.equal(r.hasInk,true);assert.equal(r.inkRev,1);
+  assert.equal((await (await call('save',{...base,revision:0,operationId:op1,transcript:'',ink})).json()).revision,1,'replay with ink');
+  assert.ok(!JSON.stringify((await (await call('list')).json()).drafts).includes('"pages"'),'the drafts list carries no ink');
+  assert.equal((await (await box.fetch(new Request('https://internal/manual/ink?id='+hid))).json()).ink,ink);
+  assert.equal((await call('submit',{id:hid,revision:1})).status,409,'untranscribed ink is never processed');
+  assert.equal((await call('transcribe',{id:hid,revision:0})).status,409,'stale revision');
+  assert.equal((await call('transcribe',{id:hid,revision:1})).status,202);
+  assert.equal((await call('save',{...base,revision:1,operationId:crypto.randomUUID(),transcript:'x'})).status,409,'no edits while transcribing');
+  const tj=(await (await call('next')).json()).job;
+  assert.equal(tj.kind,'transcribe');assert.equal(tj.ink,ink);
+  assert.equal((await call('done',{id:hid,attempt:'otro',kind:'transcribe',text:'x'})).status,409);
+  assert.equal((await call('done',{id:hid,attempt:tj.attempt,kind:'transcribe',text:'Acuerdo: cerrar el contrato'})).status,200);
+  r=(await (await call('list')).json()).drafts.find(d=>d.id===hid);
+  assert.equal(r.transcript,'Acuerdo: cerrar el contrato');assert.equal(r.revision,2);assert.equal(r.transcription.status,'done');
+  assert.ok(!('attempt' in r.transcription),'no lease internals in the view');
+  // New ink after the transcription makes it stale again.
+  r=await (await call('save',{...base,revision:2,operationId:crypto.randomUUID(),transcript:r.transcript,ink:ink.replace('10,10','12,12')})).json();
+  assert.equal(r.inkRev,2);assert.equal((await call('submit',{id:hid,revision:3})).status,409);
+  await call('transcribe',{id:hid,revision:3});const tj2=(await (await call('next')).json()).job;
+  await call('done',{id:hid,attempt:tj2.attempt,kind:'transcribe',error:true});
+  r=(await (await call('list')).json()).drafts.find(d=>d.id===hid);
+  assert.equal(r.transcription.status,'error');assert.equal(r.transcript,'Acuerdo: cerrar el contrato','a failed run keeps the previous text');
+  await call('transcribe',{id:hid,revision:3});const tj3=(await (await call('next')).json()).job;
+  await call('done',{id:hid,attempt:tj3.attempt,kind:'transcribe',text:'Acuerdo: cerrar el contrato el lunes'});
+  assert.equal((await call('submit',{id:hid,revision:4})).status,202);
+  const aj=(await (await call('next')).json()).job;
+  assert.ok(aj.content.includes('cerrar el contrato el lunes'),'analysis receives the transcription');
+  assert.equal(aj.ink,undefined);
+  // Deleting a draft removes its ink.
+  const did=crypto.randomUUID();await call('save',{...base,id:did,revision:0,operationId:crypto.randomUUID(),ink});
+  await call('delete',{id:did});assert.equal(data.get('manual-ink:'+did),undefined);
+}
 // A draft that was never sent is deleted directly; a sent one is not.
 const draftId=crypto.randomUUID();
 await call('save',{...draft,id:draftId,operationId:crypto.randomUUID(),revision:0});

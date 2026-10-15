@@ -280,6 +280,11 @@ class MultiuserBridge:
     def handle_manual(self, actor: str, user: dict, job: dict) -> None:
         """Source adapter only: same isolated model, parser, inbox and approval engine as Granola.
         A saved analysis is republished after an uncertain delivery, never analysed twice."""
+        if job.get("kind") == "transcribe":
+            import hermes_bridge as hb
+            return hb.process_transcription(job, f"{self.user_base(actor)}/api/bridge/manual-done", self.token,
+                                            getattr(self.copilot, "claude_cli", ""), getattr(self.copilot, "claude_model", "sonnet"),
+                                            post=self.request_json)
         minute = {"source": "Manual-Dashboard", "source_id": "manual-" + job["id"],
                   "version": str(job["revision"]), "title": job["title"], "date": job["date"],
                   "summary": "", "private_notes": job["content"], "context": job["context"]}

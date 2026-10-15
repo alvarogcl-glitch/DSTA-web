@@ -53,9 +53,16 @@
     return {taskIds:selected.map(t=>t.id),projectIds:[...new Set([...lines.map(p=>p.id),...selected.map(t=>t.project_id)])],sections:[title]};
   }
   function newDraft(title='',content=''){
-    return {id:crypto.randomUUID(),revision:0,title:title||'Minuta de reunión',date:localISO(new Date()),content,
+    return {id:crypto.randomUUID(),revision:0,title:title||'Minuta de reunión',date:localISO(new Date()),content,transcript:'',
       context:contextFor(content,title||'Registro manual'),status:'draft',dirty:true,updatedAt:new Date().toISOString()};
   }
+  // Teclado / Lápiz: the preferred input is a per-device setting (iPad defaults to the pencil).
+  const MODE='dsta-minute-input';
+  const isTablet=()=>/iPad/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const preferredMode=()=>{try{return localStorage.getItem(MODE)||(isTablet()?'pen':'keys');}catch{return isTablet()?'pen':'keys';}};
+  const transcribing=d=>['queued','running'].includes(d.transcription?.status);
+  const inkCurrent=d=>!d.hasInk&&!d.ink||(!d.inkDirty&&d.transcription?.status==='done'&&d.transcription.inkRev===d.inkRev);
+  const fullText=d=>[d.content,d.transcript?'[Escrito a mano · transcripción]\n'+d.transcript:''].filter(x=>String(x||'').trim()).join('\n\n');
   function toolbar(field,container,onChange){
     const bar=document.createElement('div');bar.className='manual-tools';bar.setAttribute('aria-label','Formato de texto');
     for(const [label,kind] of [['Negrita','bold'],['Cursiva','italic'],['Lista numerada','number'],['Viñetas','bullet']]){
@@ -73,6 +80,30 @@
     const meta=document.createElement('div');meta.className='manual-meta';
     meta.innerHTML=`<label>Título de la minuta<input maxlength="200" data-title value="${esc(draft.title)}"></label><label>Fecha y hora (hora local)<input type="datetime-local" data-date value="${dateInput(draft.date)}"></label><div class="manual-context">Contexto: ${esc(contextText(draft.context))}</div>`;
     container.insertBefore(meta,field);const title=meta.querySelector('[data-title]'),date=meta.querySelector('[data-date]');
+    // Input mode switch, handwriting pad and the editable transcription of the handwriting.
+    const modes=document.createElement('div');modes.className='manual-modes';modes.setAttribute('role','group');modes.setAttribute('aria-label','Forma de escribir');
+    modes.innerHTML='<button type="button" data-mode="keys">⌨️ Teclado</button><button type="button" data-mode="pen">✏️ Lápiz</button>';
+    container.insertBefore(modes,field);
+    const inkArea=document.createElement('div');inkArea.className='manual-ink';
+    const pad=window.DstaInk?.create({ink:draft.ink||'',onChange:()=>{draft.ink=pad.serialize();draft.inkDirty=true;changed();}});
+    const transcribeRow=document.createElement('div');transcribeRow.className='manual-transcribe';
+    transcribeRow.innerHTML='<button type="button" data-transcribe>Transcribir a texto</button><span>La IA convierte tu letra en texto; lo revisas antes de procesar.</span>';
+    if(pad)inkArea.append(pad.el,transcribeRow);
+    const transcriptBox=document.createElement('label');transcriptBox.className='manual-transcript';
+    transcriptBox.innerHTML='Transcripción de lo escrito a mano · revísala y corrígela<textarea maxlength="60000" data-transcript placeholder="Aquí aparecerá el texto de tu escritura a mano."></textarea>';
+    const transcript=transcriptBox.querySelector('textarea');transcript.value=draft.transcript||'';
+    field.after(inkArea,transcriptBox);
+    let mode=(draft.hasInk||draft.ink)&&!draft.content?.trim()?'pen':preferredMode();
+    if(!pad)mode='keys';
+    const setMode=(next,remember)=>{
+      mode=next;container.classList.toggle('manual-pen',mode==='pen');
+      modes.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));
+      transcriptBox.hidden=!(draft.transcript||transcript.value||(mode==='pen'&&!pad?.isEmpty()));
+      if(remember)try{localStorage.setItem(MODE,mode);}catch{}
+    };
+    modes.addEventListener('click',e=>{const b=e.target.closest('[data-mode]');if(b)setMode(b.dataset.mode,true);});
+    if(!pad)modes.hidden=true;
+    if(pad&&draft.hasInk&&draft.ink===undefined)api('/ink?id='+encodeURIComponent(draft.id)).then(r=>{if(draft.ink===undefined){draft.ink=r.ink||'';pad.setInk(draft.ink);renderStatus();}}).catch(()=>message('No se pudo cargar la escritura a mano. Recarga para reintentar.',true));
     const buttons=container.querySelector('.minute-actions')||document.createElement('div');buttons.classList.add('manual-buttons');
     buttons.insertAdjacentHTML('beforeend','<button type="button" data-save>Guardar borrador</button><button type="button" data-submit>Guardar y procesar minuta</button>');
     if(copyButton&&!buttons.contains(copyButton))buttons.prepend(copyButton);
@@ -80,24 +111,36 @@
     container.append(buttons,status);
     let timer=null,busy=false,pendingSave=null;
     const message=(text,error=false)=>{status.textContent=text;status.classList.toggle('manual-error',error);};
+    let padLocked=null;
     const renderStatus=()=>{
-      const locked=draft.status!=='draft';field.readOnly=locked;title.disabled=date.disabled=locked;
+      const locked=draft.status!=='draft'||transcribing(draft);field.readOnly=transcript.readOnly=locked;title.disabled=date.disabled=locked;
+      if(pad&&padLocked!==locked){padLocked=locked;pad.setReadOnly(locked);}
+      const tb=transcribeRow.querySelector('[data-transcribe]');
+      tb.disabled=busy||locked||!pad||pad.isEmpty()||inkCurrent(draft);
+      tb.textContent=transcribing(draft)?'Transcribiendo…':inkCurrent(draft)&&draft.transcript?'✓ Transcrita':draft.transcript?'Volver a transcribir':'Transcribir a texto';
+      setMode(mode);
       container.querySelectorAll('.manual-tools button').forEach(b=>b.disabled=locked);
       buttons.querySelector('[data-save]').disabled=locked||busy;
       buttons.querySelector('[data-submit]').disabled=busy||!['draft','error'].includes(draft.status);
       buttons.querySelector('[data-submit]').textContent=draft.status==='error'?'Reintentar procesamiento':'Guardar y procesar minuta';
-      message(states[draft.status]+(draft.error?' · '+draft.error:''));
+      if(draft.status==='draft'&&transcribing(draft))message('Transcribiendo tu escritura a mano… suele tardar menos de un minuto.');
+      else if(draft.status==='draft'&&draft.transcription?.status==='error')message(draft.transcription.error||'No se pudo transcribir.',true);
+      else message(states[draft.status]+(draft.error?' · '+draft.error:''));
     };
     async function sync(){
       if(pendingSave){await pendingSave;if(draft.dirty)return sync();return;}
       if(!draft.dirty||draft.status!=='draft')return;
-      const request=draft.pendingRequest||{id:draft.id,revision:draft.revision,operationId:crypto.randomUUID(),title:draft.title,date:draft.date,content:draft.content,context:draft.context};
+      const request=draft.pendingRequest||{id:draft.id,revision:draft.revision,operationId:crypto.randomUUID(),title:draft.title,date:draft.date,content:draft.content,context:draft.context,
+        transcript:draft.transcript||'',...(draft.inkDirty?{ink:draft.ink||''}:{})};
       draft.pendingRequest=request;
       await persistLocal(draft).catch(()=>message('Recuperación local no disponible · guardando en tu cuenta…',true));
       const run=async()=>{
         const result=await api('',request);
-        const unchanged=draft.title===request.title&&draft.date===request.date&&draft.content===request.content;
-        Object.assign(draft,{revision:result.revision,status:result.status,dirty:!unchanged,pendingRequest:null});
+        const inkSent=request.ink!==undefined&&(draft.ink||'')===request.ink;
+        const unchanged=draft.title===request.title&&draft.date===request.date&&draft.content===request.content&&
+          (draft.transcript||'')===request.transcript&&(request.ink===undefined?!draft.inkDirty:inkSent);
+        Object.assign(draft,{revision:result.revision,status:result.status,hasInk:result.hasInk,inkRev:result.inkRev,transcription:result.transcription,
+          dirty:!unchanged,pendingRequest:null,...(inkSent?{inkDirty:false}:{})});
         server[draft.id]=result;await persistLocal(draft).catch(()=>{});unsaved=draft.dirty;
         message(unchanged?'✓ Borrador guardado en tu cuenta':'Hay cambios nuevos por guardar');
       };
@@ -106,25 +149,43 @@
     }
     function changed(){
       if(draft.status!=='draft')return;
-      draft.title=title.value;draft.content=field.value;
+      draft.title=title.value;draft.content=field.value;draft.transcript=transcript.value;
       if(date.value)draft.date=localISO(new Date(date.value));else draft.date='';
       draft.dirty=true;draft.updatedAt=new Date().toISOString();unsaved=true;
       persistLocal(draft).then(()=>message('Borrador protegido en este dispositivo · guardando en tu cuenta…')).catch(()=>message('No se pudo guardar en este dispositivo. Mantén esta ventana abierta y guarda en tu cuenta.',true));
       clearTimeout(timer);timer=setTimeout(()=>sync().catch(e=>message(e.message+' · tu texto se conserva para reintentar.',true)),2500);
     }
-    for(const input of [field,title,date])input.addEventListener('input',changed);
+    for(const input of [field,title,date,transcript])input.addEventListener('input',changed);
+    transcribeRow.querySelector('[data-transcribe]').addEventListener('click',async()=>{
+      if(busy)return;busy=true;clearTimeout(timer);renderStatus();
+      try{
+        await sync();
+        const result=await api('/transcribe',{id:draft.id,revision:draft.revision});
+        Object.assign(draft,result,{dirty:false});server[draft.id]=result;await persistLocal(draft).catch(()=>{});
+      }catch(e){message(e.message,true);}finally{busy=false;renderStatus();}
+    });
     toolbar(field,container,changed);
     buttons.querySelector('[data-save]').addEventListener('click',()=>sync().catch(e=>message(e.message,true)));
     buttons.querySelector('[data-submit]').addEventListener('click',async()=>{
       if(busy)return;busy=true;renderStatus();clearTimeout(timer);
+      if(pad&&!pad.isEmpty()&&!inkCurrent(draft)){busy=false;renderStatus();message('Tienes escritura a mano sin transcribir. Usa «Transcribir a texto» y revisa el resultado antes de procesar.',true);return;}
       try{await sync();const result=await api('/submit',{id:draft.id,revision:draft.revision});Object.assign(draft,result,{dirty:false});await persistLocal(draft).catch(()=>{});unsaved=false;renderStatus();}
       catch(e){message(e.message+' · el borrador se conserva.',true);}finally{busy=false;renderControls();}
     });
-    function renderControls(){buttons.querySelector('[data-submit]').disabled=busy||!['draft','error'].includes(draft.status);buttons.querySelector('[data-save]').disabled=busy||draft.status!=='draft';}
-    if(copyButton && copyButton.id!=='copy-minute')copyButton.addEventListener('click',()=>navigator.clipboard.writeText(field.value).then(()=>message('✓ Texto copiado')).catch(()=>message('Selecciona el texto y cópialo manualmente.',true)));
+    function renderControls(){renderStatus();}
+    if(copyButton && copyButton.id!=='copy-minute')copyButton.addEventListener('click',()=>navigator.clipboard.writeText(fullText({content:field.value,transcript:transcript.value})).then(()=>message('✓ Texto copiado')).catch(()=>message('Selecciona el texto y cópialo manualmente.',true)));
     renderStatus();
     if(draft.dirty)changed();
-    active.update=()=>{const remote=server[draft.id];if(remote&&remote.status!=='draft'){Object.assign(draft,remote,{dirty:false});renderStatus();}};
+    active.update=()=>{
+      const remote=server[draft.id];if(!remote)return;
+      if(remote.status!=='draft'){Object.assign(draft,remote,{dirty:false});renderStatus();return;}
+      // Transcription finished on the VM: it bumped the revision with the text; the editor was locked meanwhile.
+      if(transcribing(draft)&&!transcribing(remote)&&!draft.dirty){
+        Object.assign(draft,{revision:remote.revision,transcript:remote.transcript||'',transcription:remote.transcription});
+        transcript.value=draft.transcript;persistLocal(draft).catch(()=>{});renderStatus();
+        if(remote.transcription?.status==='done'){message('✓ Transcripción lista. Revísala y corrígela; luego «Guardar y procesar minuta».');transcriptBox.hidden=false;transcript.focus();}
+      }
+    };
   }
   function attach(){
     if(!ready)return;
@@ -171,7 +232,7 @@
   function visible(list){
     const q=query.trim().toLowerCase();
     return list.filter(i=>(filter==='all'||(filter==='pending'?pendingOf(i.record)>0:origin(i.source).cls===filter))&&
-      (!q||[i.title,i.record?.resumen,i.draft?.content].some(t=>String(t||'').toLowerCase().includes(q))));
+      (!q||[i.title,i.record?.resumen,i.draft?.content,i.draft?.transcript].some(t=>String(t||'').toLowerCase().includes(q))));
   }
   async function refreshRecords(){
     const response=await fetch('/api/minutes?all=1',{cache:'no-store',credentials:'same-origin'});
@@ -267,7 +328,7 @@
     const original=pane.querySelector('[data-original]');
     const showOriginal=text=>{original.replaceChildren(text?Object.assign(document.createElement('div'),{className:'mm-text mm-original-text',textContent:text})
       :Object.assign(document.createElement('p'),{className:'mm-note',textContent:'El texto original de esta minuta aún no está disponible. Llegará en la próxima sincronización con Granola.'}));};
-    if(d?.content)showOriginal(d.content);
+    if(d&&fullText(d))showOriginal(fullText(d));
     else if(r)fetch('/api/minutes/text?id='+encodeURIComponent(r.id),{cache:'no-store',credentials:'same-origin'})
       .then(res=>res.ok?res.json():{}).then(p=>{if(selected===item.key||!selected)showOriginal(p.contenido||'');}).catch(()=>showOriginal(''));
     else showOriginal('');
@@ -304,7 +365,7 @@
     button.onclick=()=>{selected=null;openList().catch(e=>window.DstaToast?.show(e.message,false));};
     new MutationObserver(attach).observe(document.querySelector('#detail-body'),{childList:true});attach();
     setInterval(()=>{
-      if(!Object.values(cache).some(d=>['queued','running'].includes(d.status)))return;
+      if(!Object.values(cache).some(d=>['queued','running'].includes(d.status)||transcribing(d)))return;
       load().then(()=>{active?.update?.();window.dispatchEvent(new Event('dsta-minutes-changed'));}).catch(()=>{});
     },10000);
   }
