@@ -42,7 +42,10 @@ def entries(store: Path) -> list[dict[str, Any]]:
             continue
         title = str(record.get("titulo") or block.get("title") or "Minuta manual")
         date = str(record.get("fecha") or str(block.get("date") or "")[:10])
+        source_id = str(record.get("sourceId") or "")
         found.append({"id": PREFIX + str(record["id"]), "titulo": title, "fecha": date,
+                      # the dashboard draft: its handwriting (if any) is shown next to the text
+                      "borrador": source_id[len("manual-"):] if source_id.startswith("manual-") else "",
                       "origen": "Manual (dashboard)", "contenido": f"# {title}\n\nFecha: {date}\nOrigen: minuta manual del dashboard"
                       + (" (incluye escritura a mano transcrita)" if "[Escrito a mano" in notes else "") + f"\n\n{notes}"})
     found.sort(key=lambda item: (item["fecha"], item["id"]), reverse=True)

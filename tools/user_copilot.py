@@ -352,8 +352,8 @@ def _words(text: str) -> set[str]:
 
 def _manual(manual: list[dict] | None) -> list[dict]:
     """Manual minutes of the dashboard (typed or handwritten) in the copilot's minute shape."""
-    return [{"id": m["id"], "title": m["titulo"], "date": m["fecha"], "summary": m["contenido"], "source": "Manual"}
-            for m in (manual or [])]
+    return [{"id": m["id"], "title": m["titulo"], "date": m["fecha"], "summary": m["contenido"], "source": "Manual",
+             "draft": m.get("borrador", "")} for m in (manual or [])]
 
 
 def minutes_for(user: dict, query: str = "", manual: list[dict] | None = None) -> list[dict]:
@@ -386,5 +386,7 @@ def cited_minutes(user: dict, reply: str, manual: list[dict] | None = None) -> d
         minute = by_id.get(minute_id.strip())
         if minute and minute_id.strip() not in cited and len(cited) < 5:
             cited[minute_id.strip()] = {"titulo": minute.get("title", ""), "fecha": minute.get("date", ""),
-                                        "contenido": str(minute.get("summary") or "")}
+                                        "contenido": str(minute.get("summary") or ""),
+                                        "origen": "Manual (dashboard)" if minute.get("source") == "Manual" else "Granola",
+                                        "borrador": minute.get("draft", "")}
     return cited

@@ -204,7 +204,7 @@
           const toast = window.DstaToast?.task('decision:' + id);
           if (minute.errorDecision) {
             notice = minute.errorDecision;
-            toast?.fail(`«${minute.titulo}»: ${minute.errorDecision}`);
+            toast?.fail(`Decisiones de «${minute.titulo}» · ${minute.errorDecision}`);
             continue;
           }
           // The bridge publishes the new snapshot before closing the decision: show it now, not in 30 s.
@@ -212,9 +212,10 @@
           notice = discarded(minute) ? `«${minute.titulo}» fue descartada y salió de las pendientes.` : left ? `Decisiones aplicadas en «${minute.titulo}»; quedan ${left} por decidir.`
             : `«${minute.titulo}» quedó procesada y salió de la bandeja.`;
           const result = notice;
-          toast?.step(`«${minute.titulo}» · ${window.DstaSteps?.refreshing || 'Actualizando…'}`);
-          if (typeof refresh === 'function') Promise.resolve(refresh()).finally(() => toast?.done(result));
-          else toast?.done(result);
+          toast?.step(`Decisiones de «${minute.titulo}» · ${window.DstaSteps?.refreshing || 'Actualizando…'}`);
+          const head = `Decisiones de «${minute.titulo}»`;
+          if (typeof refresh === 'function') Promise.resolve(refresh()).finally(() => toast?.done(`${head} · ✓ ${result}`));
+          else toast?.done(`${head} · ✓ ${result}`);
           if (!left && openId === id) openId = '';
         }
       }
@@ -261,18 +262,18 @@
     minute.aplicando = true;
     render();
     const toast = window.DstaToast?.task('decision:' + minuteId);
-    toast?.step(`«${minute.titulo}» · Enviando ${decisions.length} ${decisions.length === 1 ? 'decisión' : 'decisiones'}…`);
+    toast?.step(`Decisiones de «${minute.titulo}» · Enviando ${decisions.length} ${decisions.length === 1 ? 'decisión' : 'decisiones'}…`);
     try {
       const response = await fetch('/api/minutes/decide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ minuteId, digest: minute.digest, decisions }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'No se pudo enviar la decisión.');
       delete drafts[minuteId];
       awaiting.add(minuteId);
-      toast?.step(`«${minute.titulo}» · Aplicando decisiones…`);
+      toast?.step(`Decisiones de «${minute.titulo}» · La VM las aplica en Vikunja…`);
     } catch (error) {
       minute.aplicando = false;
       loadError = error.message;
-      toast?.fail(`«${minute.titulo}»: ${error.message}`);
+      toast?.fail(`Decisiones de «${minute.titulo}» · ${error.message}`);
     }
     lastPayload = '';
     load();

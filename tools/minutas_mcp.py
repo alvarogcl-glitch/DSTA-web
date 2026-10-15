@@ -133,7 +133,7 @@ def read_minute(minute_id: str) -> tuple[dict[str, Any], str] | None:
     minute_id = minute_id.strip()
     if minute_id.startswith(manual_minutes.PREFIX):
         item = manual_minutes.by_id(MANUAL_STORE).get(minute_id)
-        return ({key: item[key] for key in ("id", "fecha", "titulo", "origen")}, item["contenido"]) if item else None
+        return ({key: item[key] for key in ("id", "fecha", "titulo", "origen", "borrador")}, item["contenido"]) if item else None
     path = minute_files().get(minute_id)
     if not path:
         return None

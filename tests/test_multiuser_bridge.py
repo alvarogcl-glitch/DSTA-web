@@ -248,7 +248,7 @@ class CitedMinutesBridgeTest(unittest.TestCase):
                                     users_dir=Path("C:/tmp/x"), copilot=FakeCopilot(), fetch_snapshot=lambda u: {"projects": [], "tasks": []})
         bridge.dispatch_once()
         self.assertEqual([m["id"] for m in prompts[0]], ["g-2"])
-        self.assertEqual(finished[0]["minutes"], {"g-2": {"titulo": "Comité", "fecha": "2026-07-01", "contenido": "Acuerdo licitación"}})
+        self.assertEqual(finished[0]["minutes"], {"g-2": {"titulo": "Comité", "fecha": "2026-07-01", "contenido": "Acuerdo licitación", "origen": "Granola", "borrador": ""}})
 
 
 class ExecuteLabelProposalsBridgeTest(unittest.TestCase):

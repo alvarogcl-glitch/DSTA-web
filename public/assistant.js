@@ -54,6 +54,28 @@
       showContext();
       input.focus();
     }
+    renderChatNotice();
+  }
+
+  // While the copilot works and its window is closed, a notice tells where the question is; when the
+  // answer arrives it stays as «Respuesta lista», and tapping it opens the copilot.
+  let chatNote = null;
+  const shortQuestion = text => { const t = String(text || '').replace(/\s+/g, ' ').trim(); return t.length > 48 ? t.slice(0, 47) + '…' : t; };
+  function renderChatNotice() {
+    if (!chatNote || !window.DstaToast) return;
+    const toast = window.DstaToast.task(chatNote.key);
+    if (!panel.hidden) { toast.close(); if (chatNote.result) chatNote = null; return; }
+    const head = `Copiloto: «${chatNote.question}»`;
+    if (chatNote.result === 'ready') { toast.ready(`${head} · Respuesta lista: toca para verla`, () => { chatNote = null; openPanel(true); }); return; }
+    if (chatNote.result === 'error') { toast.fail(`${head} · ${chatNote.step}`); return; }
+    const secs = Math.round((Date.now() - chatNote.started) / 1000);
+    toast.step(`${head} · ${chatNote.step}${secs >= 5 ? ` (${secs} s)` : ''}`);
+  }
+  function chatProgress(step, result = '') {
+    if (!chatNote) return;
+    Object.assign(chatNote, { step, result });
+    renderChatNotice();
+    if (result) { if (!panel.hidden) chatNote = null; }
   }
 
   function setWaiting(value) {
@@ -85,7 +107,7 @@
 
   // Minutas citadas como [título](minuta:<id>): el puente adjunta su texto y se abren en una
   // ventana flotante dentro del dashboard. Todo se construye con nodos de texto, sin HTML del modelo.
-  const minuteLink = /\[([^\]\n]{1,200})\]\(minuta:([^)\n]{1,200})\)/g;
+  const minuteLink = /\[((?:[^\[\]\n]|\[[^\[\]\n]*\]){1,200})\]\(minuta:([^)\n]{1,200})\)/g;
   const knownMinutes = {};
 
   function renderReply(bubble, reply, minutes = {}) {
@@ -122,6 +144,7 @@
     const minute = knownMinutes[id];
     if (!minute) return;
     viewer.querySelector('#dsta-minute-title').textContent = minute.titulo || id;
+    viewer.querySelector('.kicker').textContent = /manual/i.test(minute.origen || '') ? 'MINUTA · MANUAL' : 'MINUTA · GRANOLA';
     viewer.querySelector('#dsta-minute-date').textContent = minute.fecha ? minute.fecha.split('-').reverse().join('-') : '';
     const body = viewer.querySelector('#dsta-minute-body');
     body.replaceChildren(...minute.contenido.split('\n').map(line => {
@@ -132,6 +155,18 @@
       if (!line.trim()) item.className = 'gap';
       return item;
     }));
+    // A handwritten manual minute: the original pages above its transcription (read-only).
+    if (minute.borrador && window.DstaInk) {
+      const holder = Object.assign(document.createElement('div'), { className: 'dsta-minute-ink' });
+      body.prepend(holder);
+      fetch('/api/manual-minutes/ink?id=' + encodeURIComponent(minute.borrador), { cache: 'no-store', credentials: 'same-origin',
+        headers: { 'x-dsta-actor': window.__dstaActorId || '' } })
+        .then(r => r.ok ? r.json() : {}).then(p => {
+          if (!p.ink) { holder.remove(); return; }
+          const pad = window.DstaInk.create({ ink: p.ink, readOnly: true, compact: true });
+          holder.append(Object.assign(document.createElement('h5'), { textContent: 'Escrito a mano (original)' }), pad.el);
+        }).catch(() => holder.remove());
+    }
     body.scrollTop = 0;
     viewer.hidden = false;
     viewer.querySelector('#dsta-minute-close').focus();
@@ -153,6 +188,7 @@
   // D30: label changes use the label queue; everything else the structure/action queue.
   const isLabel = proposal => proposal.queue === 'label' || String(proposal.action).startsWith('label.');
   const queueUrl = proposal => (isLabel(proposal) ? '/api/label-actions' : '/api/task-actions');
+  window.DstaDescribeAction = p => describeProposal(p);  // shared concrete wording (notices, D62)
   function describeProposal(p) {
     switch (p.action) {
       case 'task.create': return `Crear tarea «${p.title}» en ${lineName(p.projectId)}${p.dueDate ? ` (fecha ${p.dueDate})` : ''}`;
@@ -193,7 +229,7 @@
           toast?.step(`${label} · ${window.DstaSteps?.refreshing || 'Actualizando…'}`);
           const shown = await refreshUntil(job.snapshotTimestamp || '');
           note.textContent = shown ? '✓ Aplicado' : '✓ Aplicado (pulsa Actualizar ahora para verlo)';
-          toast?.done(label);
+          toast?.done(`${label} · ✓ Aplicado`);
           return;
         }
         if (job.status === 'error') throw new Error(job.error || 'No se pudo aplicar.');
@@ -292,6 +328,7 @@
       if (result.status === 'completed') return result;
       if (result.status === 'error') throw new Error(result.error || 'Hermes no pudo completar la consulta.');
       status.textContent = result.status === 'running' ? 'Hermes está consultando o ejecutando la acción…' : 'Solicitud en cola para Hermes…';
+      chatProgress(result.status === 'running' ? 'Pensando: revisa tu portafolio y minutas…' : 'En cola, esperando a la VM…');
     }
     throw new Error('La consulta excedió el tiempo de espera. Puedes volver a intentarlo.');
   }
@@ -306,6 +343,7 @@
       history.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
       if (history.length > 20) history.splice(0, history.length - 20);
       status.textContent = result.refreshError || 'Listo. Puedes continuar la conversación.';
+      chatProgress('Respuesta lista', 'ready');
       window.dispatchEvent(new CustomEvent('dsta-snapshot-ready', {
         detail: { timestamp: result.snapshotTimestamp || '' },
       }));
@@ -314,6 +352,7 @@
       replyBubble.textContent = error.message;
       replyBubble.classList.remove('pending');
       status.textContent = 'No se completó la solicitud.';
+      chatProgress(error.message, 'error');
       if (!error.message.includes('excedió el tiempo')) savePending(null);
     } finally {
       setWaiting(false);
@@ -331,6 +370,8 @@
     addMessage('user', message);
     const replyBubble = addMessage('assistant', 'Hermes está trabajando…', true);
     status.textContent = 'Conectando con Hermes en la VM…';
+    chatNote = { key: 'chat:' + Date.now(), question: shortQuestion(message), started: Date.now(), step: 'Enviando…', result: '' };
+    renderChatNotice();
     input.value = '';
     try {
       const response = await fetch('/api/assistant', {
@@ -371,6 +412,7 @@
       addMessage('user', pending.message);
       const replyBubble = addMessage('assistant', 'Recuperando la respuesta de Hermes…', true);
       status.textContent = 'Retomando la consulta pendiente…';
+      chatNote = { key: 'chat:' + pending.id, question: shortQuestion(pending.message), started: Date.now(), step: 'Retomando…', result: '' };
       void finishPending(pending.id, pending.message, replyBubble);
     }
   } catch (_) { savePending(null); }

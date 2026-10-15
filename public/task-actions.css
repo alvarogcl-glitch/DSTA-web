@@ -28,18 +28,27 @@
 }
 @media(prefers-reduced-motion:reduce){.task-complete-text{transition:none}}
 
-/* Per-action notices (15-10), minimal: small one-line pills in the bottom-left corner that never
-   block the page; a spinner while running, ✓ when done (gone in ~2 s), ! on error (stays, with ×). */
-.task-toasts{position:fixed;z-index:30;left:calc(12px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-start;gap:5px;max-width:min(340px,calc(100vw - 96px));pointer-events:none}
-.task-toasts .task-action-toast{position:static;transform:none;left:auto;bottom:auto;width:auto;max-width:100%;min-height:0;display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;font-size:12.5px;line-height:1.3;color:#c9d4df;background:rgba(20,27,36,.82);border:1px solid rgba(58,72,89,.7);box-shadow:0 2px 8px rgba(0,0,0,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:toast-in .18s ease}
-.task-toasts .task-action-toast span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Per-action notices (15-10), minimal: small two-line cards in the bottom-left corner that never
+   block the page. Line 1: the concrete action; line 2: where it is now. Spinner while running,
+   ✓ when done (gone in ~2 s), ! on error (stays, with ×); a ready result can be tapped. */
+.task-toasts{position:fixed;z-index:30;left:calc(12px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-start;gap:6px;width:min(330px,calc(100vw - 96px));pointer-events:none}
+.task-toasts .task-action-toast{position:static;transform:none;left:auto;bottom:auto;width:100%;max-width:100%;min-height:0;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:10px;font-size:12.5px;line-height:1.3;color:#c9d4df;background:rgba(20,27,36,.86);border:1px solid rgba(58,72,89,.7);box-shadow:0 2px 8px rgba(0,0,0,.25);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:toast-in .18s ease}
+.toast-body{display:flex;flex-direction:column;min-width:0;flex:1}
+.toast-head{font-weight:600;color:#e8eef5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast-step{color:#8fa0b2;font-size:11.5px;overflow-wrap:anywhere}
+.toast-step:empty{display:none}
 .task-toasts .task-action-toast button{display:none}
-.task-toasts .task-action-toast.error{pointer-events:auto;border-color:rgba(122,59,51,.9);color:#f2c4bb}
-.task-toasts .task-action-toast.error button{display:inline-block;min-width:0;min-height:0;width:18px;height:18px;padding:0;margin-left:2px;border:0;background:transparent;color:#f2c4bb;font-size:14px;line-height:1;cursor:pointer}
+.task-toasts .task-action-toast.error,.task-toasts .task-action-toast.ready{pointer-events:auto}
+.task-toasts .task-action-toast.error{border-color:rgba(122,59,51,.9)}
+.task-toasts .task-action-toast.error .toast-step{color:#f2c4bb}
+.task-toasts .task-action-toast.ready{cursor:pointer;border-color:rgba(47,107,74,.95)}
+.task-toasts .task-action-toast.ready .toast-step{color:#8ff0b5}
+.task-toasts .task-action-toast.error button,.task-toasts .task-action-toast.ready button{display:inline-block;align-self:flex-start;min-width:0;min-height:0;width:18px;height:18px;padding:0;border:0;background:transparent;color:#8fa0b2;font-size:14px;line-height:1;cursor:pointer}
 .task-toasts .task-action-toast.fading{opacity:0;transition:opacity .3s ease}
 .toast-icon{flex:none;width:11px;height:11px;display:inline-grid;place-items:center;font-style:normal;font-size:11px;font-weight:700;border-radius:50%}
 .task-action-toast.busy .toast-icon{border:1.5px solid #3a4859;border-top-color:#68d391;animation:toast-spin .8s linear infinite}
 .task-action-toast.ok .toast-icon::before{content:"✓";color:#68d391}
+.task-action-toast.ready .toast-icon::before{content:"💬";font-size:11px}
 .task-action-toast.error .toast-icon::before{content:"!";color:#f6a899}
 @keyframes toast-spin{to{transform:rotate(360deg)}}
 @keyframes toast-in{from{opacity:0;transform:translateY(4px)}}

@@ -57,7 +57,8 @@
     return false;
   };
 
-  function create({ ink = '', readOnly = false, onChange = () => {} } = {}) {
+  // compact: a read-only view that crops each page below its last stroke (Minutas detail, copilot).
+  function create({ ink = '', readOnly = false, compact = false, onChange = () => {} } = {}) {
     let pages = decode(ink), locked = readOnly, tool = 'pen', penSeen = false;
     const settings = loadSettings(), undo = [], redo = [];
     const el = document.createElement('div'); el.className = 'ink';
@@ -132,14 +133,21 @@
         head.append(clear);
         const canvas = document.createElement('canvas'); canvas.setAttribute('aria-label', `Hoja ${index + 1} para escribir a mano`);
         wrap.append(head, canvas); box.append(wrap);
-        const view = { page, canvas, ctx: canvas.getContext('2d'), scale: 1 };
+        let height = PAGE_H;
+        if (compact) {
+          let bottom = 0;
+          for (const s of page.strokes) for (let i = 1; i < s.pts.length; i += 3) bottom = Math.max(bottom, s.pts[i]);
+          height = Math.min(PAGE_H, Math.max(160, bottom + 60));
+          canvas.style.aspectRatio = `${PAGE_W}/${height}`;
+        }
+        const view = { page, canvas, ctx: canvas.getContext('2d'), scale: 1, height };
         views.push(view); bindCanvas(view, index); paint(view);
       });
       refreshBar();
     }
     function paint(view) {
       const { canvas, ctx } = view, ratio = window.devicePixelRatio || 1, width = canvas.clientWidth || 600;
-      canvas.width = Math.round(width * ratio); canvas.height = Math.round(width * PAGE_H / PAGE_W * ratio);
+      canvas.width = Math.round(width * ratio); canvas.height = Math.round(width * (view.height || PAGE_H) / PAGE_W * ratio);
       view.scale = canvas.width / PAGE_W;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (const s of view.page.strokes) drawStroke(ctx, s, view.scale);

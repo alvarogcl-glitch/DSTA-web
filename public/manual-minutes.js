@@ -69,13 +69,13 @@
       const [kind,id]=key.split(':'),d=cache[id],toast=window.DstaToast?.task(key);if(!d||!toast)continue;
       if(kind==='ink'){
         const t=d.transcription?.status;
-        if(t==='done'){toast.done(`«${title}» · transcripción lista para revisar`);followed.delete(key);}
-        else if(t==='error'){toast.fail(`«${title}»: ${d.transcription.error||'no se pudo transcribir'}`);followed.delete(key);}
-        else toast.step(`«${title}» · ${t==='running'?'Transcribiendo…':'Transcripción en cola…'}`);
+        if(t==='done'){toast.done(`Transcribir «${title}» · ✓ Lista para revisar`);followed.delete(key);}
+        else if(t==='error'){toast.fail(`Transcribir «${title}» · ${d.transcription.error||'No se pudo transcribir'}`);followed.delete(key);}
+        else toast.step(`Transcribir «${title}» · ${t==='running'?'La IA está leyendo tu escritura…':'En cola, esperando a la VM…'}`);
       }else{
-        if(d.status==='processed'){toast.done(`«${title}» procesada · revisa la 🔔`);followed.delete(key);}
-        else if(d.status==='error'){toast.fail(`«${title}»: ${d.error||'no se pudo analizar'}`);followed.delete(key);}
-        else toast.step(`«${title}» · ${d.status==='running'?'Analizando con IA…':'Análisis en cola…'}`);
+        if(d.status==='processed'){toast.done(`Analizar minuta «${title}» · ✓ Propuestas en la 🔔`);followed.delete(key);}
+        else if(d.status==='error'){toast.fail(`Analizar minuta «${title}» · ${d.error||'No se pudo analizar'}`);followed.delete(key);}
+        else toast.step(`Analizar minuta «${title}» · ${d.status==='running'?'La IA la compara con tus LT y tareas…':'En cola, esperando a la VM…'}`);
       }
     }
   }
@@ -348,6 +348,12 @@
     const showOriginal=text=>{original.replaceChildren(text?Object.assign(document.createElement('div'),{className:'mm-text mm-original-text',textContent:text})
       :Object.assign(document.createElement('p'),{className:'mm-note',textContent:'El texto original de esta minuta aún no está disponible. Llegará en la próxima sincronización con Granola.'}));};
     if(d&&fullText(d))showOriginal(fullText(d));
+    if(d?.hasInk&&window.DstaInk)api('/ink?id='+encodeURIComponent(d.id)).then(p=>{
+      if(!p.ink||!original.isConnected)return;
+      const pad=window.DstaInk.create({ink:p.ink,readOnly:true,compact:true});
+      original.prepend(Object.assign(document.createElement('h5'),{className:'mm-ink-title',textContent:'Escrito a mano (original)'}),pad.el,
+        Object.assign(document.createElement('h5'),{className:'mm-ink-title',textContent:'Transcripción'}));
+    }).catch(()=>{});
     else if(r)fetch('/api/minutes/text?id='+encodeURIComponent(r.id),{cache:'no-store',credentials:'same-origin'})
       .then(res=>res.ok?res.json():{}).then(p=>{if(selected===item.key||!selected)showOriginal(p.contenido||'');}).catch(()=>showOriginal(''));
     else showOriginal('');
@@ -376,7 +382,7 @@
   window.addEventListener('online',()=>{if(ready)load().then(()=>active?.update?.()).catch(()=>{});});
   async function start(){
     const response=await fetch('/api/session',{cache:'no-store'});if(!response.ok)return;
-    actor=(await response.json()).actor;
+    actor=(await response.json()).actor;window.__dstaActorId=actor.id;  // for the copilot's minute viewer (ink)
     await load();ready=true;
     const style=Object.assign(document.createElement('link'),{rel:'stylesheet',href:'/manual-minutes.css'});document.head.append(style);
     const button=Object.assign(document.createElement('button'),{type:'button',id:'manual-minutes-open',textContent:'Minutas'});

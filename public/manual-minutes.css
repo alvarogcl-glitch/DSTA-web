@@ -103,3 +103,8 @@
 .mm:has(.manual-pen) .mm-list{display:none}
 .mm:has(.manual-pen) .mm-detail{display:block}
 .mm:has(.manual-pen) .mm-back{display:inline-flex}
+/* Handwriting shown read-only (Minutas detail, copilot viewer): pages only, no tools. */
+.mm-original .ink-bar,.dsta-minute-ink .ink-bar,.mm-original .ink-page-head button,.dsta-minute-ink .ink-page-head button{display:none}
+.mm-ink-title,.dsta-minute-ink h5{margin:6px 0;font-size:12px;color:#8fa0b2;text-transform:uppercase;letter-spacing:.06em}
+.dsta-minute-ink{margin-bottom:12px}
+.mm-original .ink-page canvas,.dsta-minute-ink .ink-page canvas{cursor:default}

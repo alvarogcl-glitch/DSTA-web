@@ -59,7 +59,7 @@
         await new Promise(r => setTimeout(r,750));
       }
       if (!confirmed) throw Error('El cambio terminó, pero falta cargar el snapshot actualizado. Consulta su resultado.');
-      persist(null);notify('Etiquetas actualizadas.','done');notice.hidden=true;
+      persist(null);notify('Etiquetas · ✓ Actualizadas','done');notice.hidden=true;
       if (editor.open) editor.close();
       renderManager();
     } catch (error) {

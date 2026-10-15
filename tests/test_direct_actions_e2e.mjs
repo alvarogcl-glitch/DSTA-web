@@ -73,7 +73,7 @@ b.process_job(`);
  assert.equal(exit,0,output);
  for(let i=0;i<100 && pending;i++)await new Promise(r=>setTimeout(r,10));
  assert.equal(pending,null,'frontend only clears after real published done snapshot');
-  assert.match(toast.children[0].children[1].textContent,/Tarea completada/); // the action's own notice (icon, text, ×)
+  assert.match(toast.children[0].title,/Tarea completada/); // the action's own notice (icon, text, ×)
  assert.equal(writes,1);
  assert.equal((await(await browserFetch('/api/task-actions?id='+requestId)).json()).status,'completed');
  const duplicate=await browserFetch('/api/task-actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(action)});

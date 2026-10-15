@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "avisos-minimos-2026-10-15";
+const CODE_VERSION = "avisos-concretos-2026-10-15";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -520,6 +520,9 @@ function citedMinutes(minutes) {
       titulo: String(minute.titulo || "").slice(0, 200),
       fecha: String(minute.fecha || "").slice(0, 10),
       contenido: minute.contenido.slice(0, 60_000),
+      origen: String(minute.origen || "Granola").slice(0, 40),
+      // a manual minute's draft: the browser loads its handwriting through the user's own session
+      ...(/^[0-9a-f-]{36}$/i.test(String(minute.borrador || "")) ? { borrador: String(minute.borrador) } : {}),
     };
   }
   return clean;

@@ -142,6 +142,36 @@ try{
  // Keyboard mode remains the default elsewhere and the choice is remembered.
  assert.equal(await a.evaluate(()=>localStorage.getItem('dsta-minute-input')),'pen');
  await a.evaluate(()=>localStorage.setItem('dsta-minute-input','keys'));
+ // Copilot: with its window closed, a notice follows the question; the answer leaves a «Respuesta lista»
+ // notice that opens it. Cited links survive titles with [brackets]; a handwritten minute shows its ink.
+ await a.keyboard.press('Escape');
+ await a.locator('#dsta-assistant-toggle').click();
+ await a.locator('#dsta-assistant-input').fill('¿Qué minutas tengo hoy?');
+ await a.locator('#dsta-assistant-send').click();
+ await a.locator('#dsta-assistant-toggle').click();
+ await a.locator('.task-action-toast',{hasText:'Copiloto: «¿Qué minutas tengo hoy?»'}).waitFor();
+ const auth={authorization:'Bearer qa-only','user-agent':'qa'};
+ let chatJob=null;for(let i=0;i<30&&!chatJob;i++){chatJob=(await (await fetch(base+'/u/qa-a/api/bridge/next?kind=chat',{headers:auth})).json()).job;if(!chatJob)await new Promise(r=>setTimeout(r,300));}
+ assert.ok(chatJob,'chat job queued');
+ await a.locator('.task-action-toast',{hasText:'Pensando'}).waitFor({timeout:10000});
+ if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/copiloto-pensando.png'});
+ const inkDraft=[...kv.list({prefix:'manual-ink:'})][0][0].slice('manual-ink:'.length);
+ const done=await fetch(base+'/u/qa-a/api/bridge/complete',{method:'POST',headers:{...auth,'content-type':'application/json'},body:JSON.stringify({id:chatJob.id,
+   reply:'Hoy: [Estrategia global [En persona] - 15-10-2026](minuta:Minutas 2026/est.md) y [Comité a mano](minuta:Manual/m-x).',
+   minutes:{'Minutas 2026/est.md':{titulo:'Estrategia global [En persona]',fecha:'2026-10-15',contenido:'Texto Granola'},
+            'Manual/m-x':{titulo:'Comité a mano',fecha:'2026-10-15',contenido:'Transcripción del comité',origen:'Manual (dashboard)',borrador:inkDraft}}})});
+ assert.equal(done.status,200,await done.text());
+ await a.locator('.task-action-toast.ready',{hasText:'Respuesta lista'}).waitFor({timeout:10000});
+ await a.locator('.task-action-toast.ready').click();
+ assert.equal(await a.locator('#dsta-assistant-panel').isHidden(),false,'tapping the notice opens the copilot');
+ assert.equal(await a.locator('.dsta-minute-link').count(),2,'both cited minutes are links, brackets included');
+ await a.locator('.dsta-minute-link',{hasText:'Comité a mano'}).click();
+ await a.locator('#dsta-minute-viewer .dsta-minute-ink canvas').first().waitFor({timeout:10000});
+ assert.equal(await a.locator('#dsta-minute-viewer .kicker').innerText(),'MINUTA · MANUAL');
+ if(process.env.SHOT_DIR)await a.screenshot({path:process.env.SHOT_DIR+'/copiloto-minuta-manuscrita.png'});
+ await a.locator('#dsta-minute-close').click();
+ await a.locator('#dsta-assistant-close').click();
+ results['copiloto: aviso de avance, respuesta lista, links y minuta manuscrita']=true;
  // The «Minutas» header button is spaced like the others.
  const gap=await a.evaluate(()=>{const m=document.querySelector('#manual-minutes-open').getBoundingClientRect(),r=document.querySelector('#refresh').getBoundingClientRect();return r.left-m.right;});
  assert.ok(gap>=4,'Minutas button is not glued to the next one: '+gap);

@@ -13,7 +13,7 @@ async function scenario(mode) {
     el.classList = { add: c => { el.className += ' ' + c; }, contains: c => el.className.split(' ').includes(c) }; return el; };
   // Notices are stacked per action: the current one is the last child of the stack (icon, text, ×).
   const note = () => toast?.children[toast.children.length - 1];
-  const noteText = () => note()?.children[1]?.textContent || '';
+  const noteText = () => note()?.title || '';
   const context = {
     crypto: {randomUUID: () => '12345678-1234-4234-8234-123456789012'}, tasks: [task], inspection: { taskId: '17' }, Intl,
     Date: class extends Date { static now() { return now; } },

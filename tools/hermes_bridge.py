@@ -208,7 +208,8 @@ def cited_minutes(reply: str) -> dict[str, dict]:
         if not found:
             continue
         item, text = found
-        cited[minute_id] = {"titulo": item["titulo"], "fecha": item["fecha"], "contenido": text[:60_000]}
+        cited[minute_id] = {"titulo": item["titulo"], "fecha": item["fecha"], "contenido": text[:60_000],
+                            "origen": item.get("origen", "Granola"), "borrador": item.get("borrador", "")}
     return cited
 
 

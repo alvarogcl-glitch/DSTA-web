@@ -92,7 +92,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         notice?.step(`${label} · ${window.DstaSteps.refreshing}`);
         await refreshUntil(job.snapshotTimestamp || '');
         dialog.close();
-        notice?.done(doneText[job.action] || 'Cambio aplicado');  // D58
+        notice?.done(`${label} · ✓ ${doneText[job.action] || 'Cambio aplicado'}`);  // D58
         return;
       }
       if (job.status === 'error') {
@@ -143,8 +143,9 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
           headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
-        window.DstaPending.add({ id: body.requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
-        await track(body.requestId, status, dialog, doneText[action] || 'Cambio');
+        const what = window.DstaDescribeAction?.(body) || doneText[action] || 'Cambio';
+        window.DstaPending.add({ id: body.requestId, url: '/api/task-actions', label: what });
+        await track(body.requestId, status, dialog, what);
       } catch (error) {
         status.textContent = error.message;
         status.className = 'status error';
@@ -170,8 +171,9 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, requestId, ...fields }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw Error(payload.error || `HTTP ${response.status}`);
-      window.DstaPending.add({ id: requestId, url: '/api/task-actions', label: doneText[action] || 'Cambio aplicado' });
-      await track(requestId, status, { close() {} }, doneText[action] || 'Cambio');
+      const what = window.DstaDescribeAction?.({ action, ...fields }) || doneText[action] || 'Cambio';
+      window.DstaPending.add({ id: requestId, url: '/api/task-actions', label: what });
+      await track(requestId, status, { close() {} }, what);
     } catch (error) {
       status.textContent = error.message;
       status.className = 'status error';
@@ -286,7 +288,7 @@ dialog.structure-dialog::backdrop{background:rgba(0,0,0,.6)}
             window.DstaPending.done(item.id);
             notice?.step(`${item.label} · ${window.DstaSteps.refreshing}`);
             await refreshUntil(job.snapshotTimestamp || '');
-            notice?.done(item.label);
+            notice?.done(`${item.label} · ✓ Listo`);
             return;
           }
           if (job.status === 'error' || ['Acción no encontrada.', 'Solicitud no encontrada'].includes(job.error)) {

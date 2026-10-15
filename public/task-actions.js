@@ -27,12 +27,17 @@
       el.className = 'task-action-toast';
       const icon = Object.assign(document.createElement('i'), { className: 'toast-icon' });
       icon.setAttribute('aria-hidden', 'true');
-      const text = document.createElement('span');
+      // Two short lines: WHAT (the concrete action) and WHERE it is now (its current step).
+      const body = Object.assign(document.createElement('div'), { className: 'toast-body' });
+      const head = Object.assign(document.createElement('strong'), { className: 'toast-head' });
+      const step = Object.assign(document.createElement('small'), { className: 'toast-step' });
+      body.append?.(head, step);
       const dismiss = Object.assign(document.createElement('button'), { type: 'button', textContent: '×' });
       dismiss.setAttribute('aria-label', 'Descartar aviso');
-      item = { el, text, timer: 0 };
-      dismiss.addEventListener('click', () => remove(key));
-      el.append(icon, text, dismiss);
+      item = { el, head, step, timer: 0, onClick: null };
+      dismiss.addEventListener('click', event => { event?.stopPropagation?.(); remove(key); });
+      el.addEventListener('click', () => { if (item.onClick) { const fn = item.onClick; remove(key); fn(); } });
+      el.append(icon, body, dismiss);
       stack.append(el);
       while ((stack.children?.length || 0) > 3) {  // the oldest finished notice makes room
         const old = [...notices].find(([, n]) => !n.el.classList?.contains('busy'));
@@ -51,33 +56,45 @@
     item.el.classList?.add('fading');
     setTimeout(() => item.el.remove?.(), 350);
   }
-  function setNotice(key, message, state) {
+  // «Acción concreta · paso actual»: the first part is the headline, the rest the step line.
+  function setNotice(key, message, state, onClick = null) {
     const item = noticeFor(key);
     clearTimeout(item.timer);
+    const text = String(message), cut = text.indexOf(' · ');
     item.el.className = 'task-action-toast ' + state;
-    item.text.textContent = message;
-    item.el.title = message;  // the pill shows one line; the full text on hover
+    item.head.textContent = cut > 0 ? text.slice(0, cut) : text;
+    item.step.textContent = cut > 0 ? text.slice(cut + 3) : '';
+    item.el.title = text;  // full text on hover / for assistive tech
+    item.onClick = onClick;
     if (state === 'ok') item.timer = setTimeout(() => remove(key), DONE_MS);
+    if (state === 'ready') item.timer = setTimeout(() => remove(key), 60_000);
   }
-  // task(key): the same key always updates the same notice (step → done / fail).
+  // task(key): the same key always updates the same notice (step → done / fail / ready).
   function task(key) {
     return {
       step: message => setNotice(key, message, 'busy'),
       done: message => setNotice(key, message, 'ok'),
       fail: message => setNotice(key, message, 'error'),
+      ready: (message, onClick) => setNotice(key, message, 'ready', onClick),  // clickable result
       close: () => remove(key),
     };
   }
   function notify(text, success = false) { setNotice('msg:' + (++serial), text, success ? 'ok' : 'error'); }
   const taskKey = id => 'task:' + id;
-  const label = (id, message) => '#' + (window.DstaTaskNumber?.(id) ?? id) + ' · ' + message;
+  const kinds = new Map();  // task id → 'complete' | 'log', for a concrete headline
+  const shortTitle = text => { const t = String(text || ''); return t.length > 42 ? t.slice(0, 41) + '…' : t; };
+  const label = (id, message) => {
+    const task = (typeof tasks !== 'undefined' ? tasks : []).find(t => String(t.id) === String(id));
+    const verb = kinds.get(String(id)) === 'log' ? 'Registrar en bitácora' : 'Completar';
+    return `${verb} #${window.DstaTaskNumber?.(id) ?? id}${task ? ` «${shortTitle(task.title)}»` : ''} · ${message}`;
+  };
   function feedback(id, message, success = false) { task(taskKey(id))[success ? 'done' : 'fail'](label(id, message)); }
   const stepFor = (id, message) => task(taskKey(id)).step(label(id, message));
   window.DstaToast = { show: notify, task };
   window.DstaSteps = {
     // Shared wording for the verified action queue (dashboard buttons, forms, copilot, labels).
-    queue: status => status === 'running' ? 'Aplicando en Vikunja…' : 'En cola…',
-    refreshing: 'Actualizando…',
+    queue: status => status === 'running' ? 'Aplicando el cambio en Vikunja…' : 'En cola, esperando a la VM…',
+    refreshing: 'Actualizando el dashboard…',
   };
   const progress = job => job.kind === 'complete' ? 'Completando…' : 'Guardando registro…';
   const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Santiago' }).format(new Date());
@@ -178,6 +195,7 @@
     let result;
     const draft = state(job.taskId);
     if (job.draft) Object.assign(draft, job.draft);
+    kinds.set(String(job.taskId), job.kind);
     draft.status = progress(job);
     stepFor(job.taskId, draft.status);
     redraw();
@@ -226,6 +244,7 @@
   }
   async function submit(id, kind) {
     if (pending || sending) return;
+    kinds.set(String(id), kind);
     const draft = state(id), entry = draft.entry.trim();
     if (kind === 'log' && (!entry || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date))) {
       draft.status = 'Escribe un registro y elige una fecha válida.'; redraw(); return;
