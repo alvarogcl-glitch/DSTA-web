@@ -1,5 +1,6 @@
 """Hermes subprocesses must not create a visible console on Windows."""
 
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import importlib.util
 import os
 import subprocess
@@ -59,7 +60,7 @@ class HermesWindowTests(unittest.TestCase):
         self.assertIn("no una lista fija LT1-LT7", prompt)
 
     def test_summaries_use_codex_without_tools(self):
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
         output = '{"summaries":[{"id":1,"summary":"Pendiente","nextAction":"","attention":"normal"}]}'
         with patch.object(bridge, "run_watched", return_value=(0, output, False)) as run:
             summaries = bridge.run_summarizer(
@@ -70,7 +71,7 @@ class HermesWindowTests(unittest.TestCase):
         self.assertIn("--safe-mode", run.call_args.args[0])
 
     def test_summaries_fall_back_to_claude_without_tools(self):
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
         output = '```json\n{"summaries":[{"id":1,"summary":"Resumen Claude","attention":"seguimiento"}]}\n```'
         completed = subprocess.CompletedProcess([], 0, stdout=output)
         with patch.object(bridge, "run_watched", return_value=(1, "", True)),              patch.object(bridge.subprocess, "run", return_value=completed) as run,              tempfile.TemporaryDirectory() as home:
@@ -84,7 +85,7 @@ class HermesWindowTests(unittest.TestCase):
         self.assertIn("--strict-mcp-config", args)
         self.assertNotIn("--mcp-config", args)
         self.assertIn("Tarea", run.call_args.kwargs["input"])
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
 
     def test_chat_rebuilds_snapshot_before_reporting_completion(self):
         job = {"id": "test-id", "kind": "chat", "message": "crear tarea"}
@@ -132,7 +133,7 @@ class HermesWindowTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 20)
 
     def test_claude_answers_when_codex_is_unavailable(self):
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
         completed = subprocess.CompletedProcess([], 0, stdout="LT1 tiene 10 tareas abiertas.")
         with patch.object(bridge, "run_hermes", side_effect=bridge.CodexUnavailable("402")) as hermes, \
              patch.object(bridge.subprocess, "run", return_value=completed) as run, \
@@ -150,10 +151,10 @@ class HermesWindowTests(unittest.TestCase):
         self.assertIn("--strict-mcp-config", args)
         self.assertEqual(args[args.index("--allowedTools") + 1], "mcp__vikunja-dashboard,mcp__dsta-minutas")
         self.assertIn("LT2", run.call_args.kwargs["input"])
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
 
     def test_codex_failure_without_claude_reports_error(self):
-        bridge._codex_retry_at = 0.0
+        bridge._codex_retry_at = 0.0; _hermetic.llm_engines.reset()
         with patch.object(bridge, "run_hermes", side_effect=bridge.CodexUnavailable("402")):
             with self.assertRaises(RuntimeError):
                 bridge.answer_chat({"message": "hola"}, "hermes", Path.cwd(), "openai-codex", "gpt-6-luna")

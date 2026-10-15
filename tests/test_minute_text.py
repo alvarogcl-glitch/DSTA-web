@@ -1,5 +1,6 @@
 """«Minutas» shows Granola's own text: the owner's bridge attaches the exported file to each minute it
 publishes (the Worker keeps it apart from the inbox list)."""
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import sys
 import unittest
 from pathlib import Path

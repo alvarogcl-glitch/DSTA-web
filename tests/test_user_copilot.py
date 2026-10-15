@@ -1,5 +1,6 @@
 """F5: Copilot por usuario con las cuentas del CEO (Hermes → Claude), aislado: sin memoria ni reglas
 del CEO, sin herramientas ni MCP, contexto solo con los datos del usuario y sesión borrada al final."""
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import importlib.util
 import sys
 import unittest

@@ -38,7 +38,7 @@ class FakeVK:
         data[self.actor]['tasks'].append(task);self.save(data);return {'task':task}
 
 class Model:
-    def ask(self,actor,user,prompt):
+    def ask(self,actor,user,prompt,function='copiloto'):
         assert actor=='qa-a'
         assert 'Minuta QA' in prompt and 'Portafolio' in prompt
         assert 'Revisión contextual de minutas DSTA' in prompt

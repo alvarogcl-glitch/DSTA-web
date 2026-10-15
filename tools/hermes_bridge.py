@@ -44,6 +44,7 @@ _publisher_spec = importlib.util.spec_from_file_location(
 _publisher = importlib.util.module_from_spec(_publisher_spec)
 _publisher_spec.loader.exec_module(_publisher)
 fetch_dashboard = _publisher.fetch_dashboard
+import llm_engines  # noqa: E402  (engine order per function, CEO 15-10)
 _minutes_spec = importlib.util.spec_from_file_location("dsta_minutas", Path(__file__).with_name("minutas_mcp.py"))
 minutas = importlib.util.module_from_spec(_minutes_spec)
 _minutes_spec.loader.exec_module(minutas)
@@ -439,13 +440,29 @@ def codex_or_claude(with_codex: Callable[[], str], with_claude: Callable[[], str
     return with_claude()
 
 
+# Reminders are scheduled with Hermes' cronjob tool: those requests go straight to Hermes.
+REMINDER_REQUEST = re.compile(r"recu[eé]rd(?:a|ame|ale)|recordatori|av[ií]same|alarma|program(?:a|ar|ame)\b", re.IGNORECASE)
+ENGINE_PROMPT_NOTE = ("\n\nNota: en este modo no puedes programar recordatorios; si te lo piden, indícalo.")
+
+
+def fallback_note(step: dict) -> str:
+    return f"\n\n— Respondido por {llm_engines.label(step)} (respaldo)."
+
+
 def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, model: str,
                 claude_cli: str = "", claude_model: str = "sonnet") -> str:
-    return codex_or_claude(
-        lambda: run_hermes(job, hermes_cli, hermes_home, provider, model),
-        lambda: run_claude(job, claude_cli, hermes_home, claude_model),
-        claude_cli,
-    )
+    """Owner's copilot: engine order from llm_profiles.json («copiloto»), each one with the dashboard tools."""
+    name = "recordatorios" if REMINDER_REQUEST.search(str(job.get("message") or "")) else "copiloto"
+    engines = {
+        "codex": lambda step: llm_engines.ask_codex(chat_prompt(job) + ENGINE_PROMPT_NOTE, step.get("modelo") or "gpt-6-luna",
+                                                    step.get("razonamiento", "medium"), mcp=llm_engines.mcp_servers(read_only=False)),
+        "hermes": lambda step: run_hermes(job, hermes_cli, hermes_home, provider, model),
+    }
+    if claude_cli:
+        engines["claude"] = lambda step: ask_claude(chat_prompt(job) + ENGINE_PROMPT_NOTE, claude_cli, hermes_home,
+                                                    step.get("modelo") or claude_model)
+    answer, step, fallback = llm_engines.run(name, engines)
+    return answer + (fallback_note(step) if fallback else "")
 
 
 def granola_cycle(base_url: str, token: str, hermes_cli: str, hermes_home: Path, provider: str,
@@ -495,7 +512,9 @@ def process_transcription(job: dict, done_url: str, token: str, claude_cli: str,
     import ink_transcribe
     payload = {"id": job["id"], "attempt": job["attempt"], "kind": "transcribe"}
     try:
-        payload["text"] = ink_transcribe.transcribe(job.get("ink") or "", claude_cli, claude_model or "sonnet")
+        configured = next((step.get("modelo") for step in llm_engines.profile("transcripcion")
+                           if step["motor"] == "claude" and step.get("modelo")), "")
+        payload["text"] = ink_transcribe.transcribe(job.get("ink") or "", claude_cli, configured or claude_model or "sonnet")
     except Exception as failure:
         print(f"Transcripción manuscrita fallida ({type(failure).__name__})", flush=True)
         payload["error"] = True  # never the ink or the model's output in errors
@@ -563,15 +582,21 @@ def publish_snapshot(base_url: str, token: str, vikunja_token: str, vikunja_url:
 
 
 def analysis_asker(hermes_cli: str, hermes_home: Path, provider: str, model: str,
-                   claude_cli: str, claude_model: str) -> Callable[[str], str]:
-    """Read-only model session (Vikunja queries + minutes); writes are done by minute_inbox."""
-    return lambda prompt: codex_or_claude(
-        lambda: ask_hermes(prompt, hermes_cli, hermes_home, provider, model, ANALYSIS_TOOLSETS,
-                           max_turns=20, timeout=ANALYSIS_TIMEOUT_SECONDS),
-        lambda: ask_claude(prompt, claude_cli, hermes_home, claude_model, read_only=True,
-                           timeout=ANALYSIS_TIMEOUT_SECONDS),
-        claude_cli,
-    )
+                   claude_cli: str, claude_model: str, function: str = "analisis_minutas") -> Callable[[str], str]:
+    """Read-only model session (Vikunja queries + minutes); writes are done by minute_inbox.
+    `function`: «analisis_minutas» or «instrucciones_bandeja» in llm_profiles.json."""
+    def ask(prompt: str) -> str:
+        engines = {
+            "codex": lambda step: llm_engines.ask_codex(prompt, step.get("modelo") or "gpt-6.1-sol", step.get("razonamiento", "medium"),
+                                                        mcp=llm_engines.mcp_servers(read_only=True), timeout=ANALYSIS_TIMEOUT_SECONDS),
+            "hermes": lambda step: ask_hermes(prompt, hermes_cli, hermes_home, provider, model, ANALYSIS_TOOLSETS,
+                                              max_turns=20, timeout=ANALYSIS_TIMEOUT_SECONDS),
+        }
+        if claude_cli:
+            engines["claude"] = lambda step: ask_claude(prompt, claude_cli, hermes_home, step.get("modelo") or claude_model,
+                                                        read_only=True, timeout=ANALYSIS_TIMEOUT_SECONDS)
+        return llm_engines.run(function, engines)[0]
+    return ask
 
 
 def process_decision(decision: dict, base_url: str, token: str, hermes_home: Path,
@@ -633,11 +658,11 @@ def run_summarizer(job: dict, hermes_cli: str, hermes_home: Path, provider: str,
             raise CodexUnavailable("Hermes no pudo generar los resúmenes.")
         return stdout
 
-    output = codex_or_claude(
-        with_codex,
-        lambda: ask_claude(prompt, claude_cli, hermes_home, claude_model, with_mcp=False),
-        claude_cli,
-    )
+    engines = {"codex": lambda step: llm_engines.ask_codex(prompt, step.get("modelo") or "gpt-6-luna", step.get("razonamiento", "medium"), timeout=180),
+               "hermes": lambda step: with_codex()}
+    if claude_cli:
+        engines["claude"] = lambda step: ask_claude(prompt, claude_cli, hermes_home, step.get("modelo") or claude_model, with_mcp=False)
+    output = llm_engines.run("resumenes", engines)[0]
     start, end = output.find("{"), output.rfind("}")
     if start < 0 or end < start:
         raise ValueError("El modelo no devolvió JSON de resúmenes.")
@@ -961,8 +986,8 @@ def run(*, once: bool, env_file: Path | None) -> int:
                     # Instructions call the model, so decisions run beside the hourly Granola work.
                     granola.submit(process_decision, result["decision"], dashboard_url, bridge_token, hermes_home,
                                    vikunja_token, vikunja_url,
-                                   analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model,
-                                                  claude_cli, claude_model))
+                                   analysis_asker(hermes_cli, hermes_home, hermes_provider, hermes_model,  # «instrucciones_bandeja»
+                                                  claude_cli, claude_model, function="instrucciones_bandeja"))
                 chat_job = result.get("job")
                 if chat_job:
                     if once:

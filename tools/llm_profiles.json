@@ -1,0 +1,29 @@
+{
+  "_nota": "Motor principal y respaldos por función (CEO, 15-10-2026). Se prueban en orden; un motor que falla se salta 10 minutos. motor: codex | claude | hermes. razonamiento (solo Codex): low | medium | high.",
+  "copiloto": [
+    {"motor": "codex", "modelo": "gpt-6-luna", "razonamiento": "medium"},
+    {"motor": "claude", "modelo": "claude-sonnet-5-5"},
+    {"motor": "hermes"}
+  ],
+  "analisis_minutas": [
+    {"motor": "codex", "modelo": "gpt-6.1-sol", "razonamiento": "medium"},
+    {"motor": "claude", "modelo": "claude-opus-5-5"},
+    {"motor": "hermes"}
+  ],
+  "instrucciones_bandeja": [
+    {"motor": "codex", "modelo": "gpt-6-luna", "razonamiento": "medium"},
+    {"motor": "claude", "modelo": "claude-sonnet-5-5"},
+    {"motor": "hermes"}
+  ],
+  "transcripcion": [
+    {"motor": "claude", "modelo": "claude-opus-5-5"}
+  ],
+  "resumenes": [
+    {"motor": "codex", "modelo": "gpt-6-luna", "razonamiento": "medium"},
+    {"motor": "claude", "modelo": "claude-sonnet-5-5"},
+    {"motor": "hermes"}
+  ],
+  "recordatorios": [
+    {"motor": "hermes"}
+  ]
+}

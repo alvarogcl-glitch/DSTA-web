@@ -174,7 +174,8 @@ class MultiuserBridge:
         try:
             tasks = job.get("tasks") or []
             allowed = {str(task.get("id")) for task in tasks}
-            reply = self.copilot.ask(actor, user, f"{hb.SUMMARY_INSTRUCTIONS}\n\nTareas para resumir:\n{_json.dumps(tasks, ensure_ascii=False)}")
+            reply = self.copilot.ask(actor, user, f"{hb.SUMMARY_INSTRUCTIONS}\n\nTareas para resumir:\n{_json.dumps(tasks, ensure_ascii=False)}",
+                                     "resumenes")
             start, end = reply.find("{"), reply.rfind("}")
             items = _json.loads(reply[start:end + 1]).get("summaries", []) if start >= 0 else []
             summaries = [item for item in items if isinstance(item, dict) and str(item.get("id")) in allowed]
@@ -256,7 +257,7 @@ class MultiuserBridge:
         """Like the CEO's inbox: evident actions applied, the rest proposed for review."""
         try:
             record = self.minute_inbox.process(actor, user, minute, self._snapshot(user),
-                                               lambda prompt: self.copilot.ask(actor, user, prompt))
+                                               lambda prompt: self.copilot.ask(actor, user, prompt, "analisis_minutas"))
             if record:
                 self._push_minute(actor, record)
                 if any(a.get("auto") and a.get("estado") == "aplicada" for a in record["acciones"]):
@@ -270,7 +271,7 @@ class MultiuserBridge:
         error = ""
         try:
             record = self.minute_inbox.decide(actor, user, decision, self._snapshot(user),
-                                              lambda prompt: self.copilot.ask(actor, user, prompt))
+                                              lambda prompt: self.copilot.ask(actor, user, prompt, "instrucciones_bandeja"))
             self._push_minute(actor, record)
             self.publish_now(actor, user)  # D46: approved/undone changes show up without waiting 5 minutes
         except Exception as failure:
@@ -293,7 +294,7 @@ class MultiuserBridge:
         payload = {"id": job["id"], "attempt": job["attempt"]}
         try:
             record = self.minute_inbox.process(actor, user, minute, self._snapshot(user),
-                                               lambda prompt: self.copilot.ask(actor, user, prompt))
+                                               lambda prompt: self.copilot.ask(actor, user, prompt, "analisis_minutas"))
             record = record or self.minute_inbox.current_record(actor, minute)
             if not record:
                 raise RuntimeError("No saved analysis")

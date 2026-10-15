@@ -1,3 +1,4 @@
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import json
 import sys
 import tempfile

@@ -380,6 +380,24 @@ def pmo_tasks_created(start_date: str = "", end_date: str = "",
 
 
 @mcp.tool()
+def pmo_get_task(task_id: int) -> dict[str, Any]:
+    """One task by its id (#N): state, line, dates, labels and its FULL description and log. Use it for
+    any question about a specific task instead of scanning lists."""
+    task = request("GET", f"/api/v1/tasks/{int(task_id)}")
+    projects = pmo_projects()
+    project = next((p for p in projects if int(p.get("id") or 0) == int(task.get("project_id") or 0)), None)
+    if not project or not is_pmo_line(project):
+        return {"ok": False, "error": f"La tarea #{task_id} no pertenece a las líneas del portafolio."}
+    due = str(task.get("due_date") or "")
+    return {"ok": True, "id": task["id"], "title": task.get("title", ""), "done": bool(task.get("done")),
+            "done_at": task.get("done_at") if task.get("done") else None,
+            "line": project.get("title", ""), "project_id": project.get("id"),
+            "due_date": "" if due.startswith("0001") else due[:10], "created": str(task.get("created") or "")[:10],
+            "labels": [label.get("title", "") for label in task.get("labels") or []],
+            "description": str(task.get("description") or "")[:20_000]}
+
+
+@mcp.tool()
 def pmo_open_tasks() -> dict[str, Any]:
     """Compact list of every open task in the active PMO-DSTA lines, with the start of its description."""
     lines = [project for project in pmo_projects() if is_pmo_line(project)]
@@ -626,7 +644,7 @@ def pmo_edit_task_labels(task_id: int, add_ids: list[int] | None = None,
         return {"ok": True, "verified": True, "task": verified}
 
 
-READ_ONLY_TOOLS = {"pmo_list_projects", "pmo_list_tasks", "pmo_tasks_created", "pmo_open_tasks", "pmo_list_labels", "pmo_list_label_tasks"}
+READ_ONLY_TOOLS = {"pmo_get_task", "pmo_list_projects", "pmo_list_tasks", "pmo_tasks_created", "pmo_open_tasks", "pmo_list_labels", "pmo_list_label_tasks"}
 
 
 def restrict_to_read_only() -> None:

@@ -1,5 +1,6 @@
 """Handwritten manual minutes: the VM renders the dashboard's ink and transcribes it (Claude vision);
 the result (or an opaque error) goes back to the draft for the user to review."""
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import io
 import json
 import subprocess

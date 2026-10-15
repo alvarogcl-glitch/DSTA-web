@@ -278,13 +278,15 @@ class UserCopilot:
                  run: Callable = default_run, clock: Callable[[], float] = time.monotonic):
         self.hermes_cli, self.hermes_home, self.claude_cli = hermes_cli, hermes_home, claude_cli
         self.work_dir, self.provider, self.model, self.claude_model, self.run = work_dir, provider, model, claude_model, run
-        self.clock, self.hermes_down_until = clock, 0.0
+        self.clock, self.hermes_down_until, self._down = clock, 0.0, {}
 
     def answer(self, actor: str, user: dict, job: dict, snapshot: dict | None, minutes: list[dict]) -> str:
         return self.ask(actor, user, build_prompt(job, snapshot, minutes))
 
-    def ask(self, actor: str, user: dict, prompt: str) -> str:
-        """Any prompt (chat or minute analysis) on the same isolated Hermes → Claude chain."""
+    def ask(self, actor: str, user: dict, prompt: str, function: str = "copiloto") -> str:
+        """Any prompt (chat, minute analysis, inbox instruction, summaries) on the engines configured for
+        that function in llm_profiles.json, each isolated in this user's folder and without tools."""
+        import llm_engines
         if not ACTOR_ID.match(actor or ""):
             raise ValueError("Identificador de usuario inválido")
         provider = (user.get("llm") or {}).get("provider", "ceo-hermes")
@@ -292,16 +294,22 @@ class UserCopilot:
             raise CopilotUnavailable("El proveedor de IA configurado para este usuario aún no está disponible.")
         cwd = self.work_dir / actor
         cwd.mkdir(parents=True, exist_ok=True)
-        # D35: like production, after a Hermes failure go straight to Claude for 10 minutes.
-        if self.clock() >= self.hermes_down_until:
-            reply = self._hermes(actor, prompt, cwd)
-            if reply:
-                return reply
-            self.hermes_down_until = self.clock() + HERMES_COOLDOWN
-        reply = self._claude(prompt, cwd)
-        if reply:
-            return reply + BACKUP_NOTE
-        raise CopilotUnavailable("Ni Hermes ni el respaldo Claude pudieron responder.")
+
+        def required(text: str) -> str:
+            if not text:
+                raise llm_engines.EngineFailed("sin respuesta")
+            return text
+        engines = {
+            "codex": lambda step: llm_engines.ask_codex(prompt, step.get("modelo") or "gpt-6-luna", step.get("razonamiento", "medium")),
+            "hermes": lambda step: required(self._hermes(actor, prompt, cwd)),
+        }
+        if self.claude_cli:
+            engines["claude"] = lambda step: required(self._claude(prompt, cwd, step.get("modelo")))
+        try:
+            reply, step, fallback = llm_engines.run(function, engines, clock=self.clock, state=self._down)
+        except llm_engines.EngineFailed as error:
+            raise CopilotUnavailable("Ningún motor de IA pudo responder.") from error
+        return reply + (f"\n\n— Respondido por {llm_engines.label(step)} (respaldo)." if fallback else "")
 
     def _hermes(self, actor: str, prompt: str, cwd: Path) -> str:
         env = {**os.environ, "HERMES_HOME": str(self.hermes_home), "PYTHONIOENCODING": "utf-8"}
@@ -334,11 +342,11 @@ class UserCopilot:
             pass
         return deleted
 
-    def _claude(self, prompt: str, cwd: Path) -> str:
+    def _claude(self, prompt: str, cwd: Path, model: str | None = None) -> str:
         if not self.claude_cli:
             return ""
         args = [self.claude_cli, "-p", "--strict-mcp-config", "--tools", "", "--no-session-persistence",
-                "--model", self.claude_model, "--output-format", "text"]
+                "--model", model or self.claude_model, "--output-format", "text"]
         try:
             code, out, _ = self.run(args, input_text=prompt, cwd=str(cwd), env=dict(os.environ), timeout=CLAUDE_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired):

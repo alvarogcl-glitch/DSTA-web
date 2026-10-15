@@ -1,0 +1,9 @@
+{
+  "_nota": "Pruebas: el orden anterior (Hermes y luego Claude) y nunca un motor real nuevo. Ver tests/_hermetic.py.",
+  "copiloto": [{"motor": "hermes"}, {"motor": "claude"}],
+  "analisis_minutas": [{"motor": "hermes"}, {"motor": "claude"}],
+  "instrucciones_bandeja": [{"motor": "hermes"}, {"motor": "claude"}],
+  "resumenes": [{"motor": "hermes"}, {"motor": "claude"}],
+  "transcripcion": [{"motor": "claude"}],
+  "recordatorios": [{"motor": "hermes"}]
+}

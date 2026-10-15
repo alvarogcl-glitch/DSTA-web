@@ -53,3 +53,42 @@ Es igual para los tres motores. Medido en 17 acciones reales del 15-10:
 - Total: mediana 2,1 s, p90 2,4 s.
 
 A eso se suman hasta 8 s de espera a que la VM recoja la acción.
+
+## Configuración definida por el CEO (15-10-2026) e implementación
+
+`tools/llm_profiles.json` (principal → respaldo 1 → respaldo 2):
+
+| Función | Principal | Respaldo 1 | Respaldo 2 |
+|---|---|---|---|
+| Copiloto | Codex gpt-6-luna medium | Claude Sonnet 5.5 | Hermes |
+| Análisis de minutas | Codex gpt-6.1-sol medium | Claude Opus 5.5 | Hermes |
+| Instrucciones en la 🔔 | Codex gpt-6-luna medium | Claude Sonnet 5.5 | Hermes |
+| Transcripción a mano | Claude Opus 5.5 | | |
+| Resúmenes IA | Codex gpt-6-luna medium | Claude Sonnet 5.5 | Hermes |
+| Recordatorios | Hermes | | |
+
+**Implementación (`tools/llm_engines.py`):**
+- Prueba los motores en orden; el que falla queda en pausa 10 minutos.
+- El archivo de perfiles se lee en cada llamada.
+- Codex corre con `codex exec` en solo lectura, `--ephemeral` y `--ignore-user-config`.
+  - En el copiloto del dueño usa los MCP del dashboard con escritura, como hoy Hermes.
+  - En el análisis de minutas y en las instrucciones usa los MCP en `--read-only`.
+  - En la cuenta de cada usuario no usa herramientas.
+- Los pedidos de recordatorio van directo a Hermes.
+- Las pruebas nunca llaman a un motor real (`tests/_hermetic.py`).
+- Nueva herramienta de lectura `pmo_get_task`: una tarea por id, con descripción y bitácora completas.
+  - Antes, «estado de #143» fallaba en Hermes (0/2) y Codex (1/2) porque solo había listas truncadas.
+  - Ahora Codex responde 4/4 en unos 9 s.
+
+**Verificación real (solo lectura, datos del CEO):**
+
+| Función | Motor | Tiempo |
+|---|---|---|
+| Copiloto, saludo | Codex | 5,7 s |
+| Copiloto, minutas de hoy | Codex | 11 s |
+| Copiloto, estado y bitácora de una tarea | Codex | 9–10 s |
+| Copiloto multiusuario, acción `task.update` válida | Codex | 5,4 s |
+| Análisis de la minuta Cata 1-1 (16 acciones) | Codex 6.1-sol | 89 s |
+| Instrucción de la 🔔 | Codex | 5 s |
+| Resúmenes de 3 tareas | Codex | 6,7 s |
+| Transcripción, exacta | Claude Opus 5.5 | 6,5 s |

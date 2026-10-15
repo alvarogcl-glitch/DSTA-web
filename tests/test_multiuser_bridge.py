@@ -1,5 +1,6 @@
 """Puente multiusuario: un sondeo de despacho para N usuarios; cada trabajo corre con la credencial
 y la raíz de SU usuario; nunca con la de otro ni con la del CEO."""
+import _hermetic  # noqa: F401  (never a real AI engine in tests)
 import importlib.util
 import sys
 import unittest
@@ -142,7 +143,7 @@ class MinuteInboxBridgeTest(unittest.TestCase):
                 return {"id": "g-1", "acciones": [], "texto": "privado"}
 
         class FakeCopilot:
-            def ask(self, actor, user, prompt):
+            def ask(self, actor, user, prompt, function="copiloto"):
                 return f"respuesta-{actor}"
 
         class Granola(FakeGranolaService):
@@ -183,7 +184,7 @@ class SummaryBridgeTest(unittest.TestCase):
         finished = []
 
         class FakeCopilot:
-            def ask(self, actor, user, prompt):
+            def ask(self, actor, user, prompt, function="copiloto"):
                 assert "Revisar contrato" in prompt and user["vikunjaToken"] == "token-de-A"
                 return '{"summaries":[{"id":7,"summary":"Resumen","nextAction":"Firmar","attention":"normal"},{"id":999,"summary":"ajena"}]}'
 
