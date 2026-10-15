@@ -211,8 +211,16 @@ class ProposalsTest(unittest.TestCase):
         self.assertIn("etiquetas: Urgente", prompt)
         self.assertNotIn("[Aviso:", prompt)
         big = {"projects": [{"id": 8, "title": "LT"}], "tasks": [
-            {"id": i, "title": f"T{i}", "project_id": 8, "done": True, "description": "x" * 300} for i in range(1, 400)]}
+            {"id": i, "title": f"T{i}", "project_id": 8, "done": True, "description": "x" * 300} for i in range(1, 1000)]}  # > MAX_CONTEXT_CHARS
         self.assertIn("[Aviso: parte del contexto no cupo", uc.build_prompt(JOB, big, []))
+
+    def test_editar_solo_la_fecha_conserva_el_titulo(self):
+        """«Cambia la fecha de #143»: the model sends no title; the proposal keeps the current one."""
+        snap = {"projects": [{"id": 11, "title": "LT"}], "tasks": [{"id": 143, "project_id": 11, "title": "Starlink", "done": False}]}
+        _, proposals = uc.split_proposals('```acciones\n[{"action":"task.update","taskId":143,"dueDate":"2026-11-15","ejecutar":true}]\n```', snap)
+        self.assertEqual(proposals[0]["title"], "Starlink")
+        self.assertEqual(proposals[0]["dueDate"], "2026-11-15")
+        self.assertIn("#143 (id 143)", uc.build_prompt(JOB, snap, []), "without own numbering the id is explicit too")
 
     def test_numero_propio_en_el_contexto(self):
         """E12: the copilot shows #N to the person and uses the real id in actions."""

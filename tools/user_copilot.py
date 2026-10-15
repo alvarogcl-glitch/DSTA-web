@@ -33,7 +33,7 @@ HERMES_TIMEOUT = 180
 CLAUDE_TIMEOUT = 150
 HERMES_COOLDOWN = 600  # D35: seconds on Claude after a Hermes failure, as in production
 MINUTE_LINK = re.compile(r"\]\(minuta:([^)\n]{1,200})\)")
-MAX_CONTEXT_CHARS = 26_000  # keeps most prompts within Hermes' command-line limit
+MAX_CONTEXT_CHARS = 200_000  # the whole portfolio fits: long prompts reach every engine via stdin (E14)
 BACKUP_NOTE = "\n\n— Respondido por Claude (respaldo: Hermes no disponible)."
 INSTRUCTIONS = (
     "Eres el copiloto del dashboard DSTA de UNA persona. Responde en español, directo y conciso. "
@@ -172,7 +172,8 @@ def today_local() -> str:
 
 def task_label(task: dict) -> str:
     """E12: the person's own number (#N) plus the real Vikunja id the actions need."""
-    return f"#{task['num']} (id {task.get('id')})" if task.get("num") else f"#{task.get('id')}"
+    # Without own numbering (the owner) #N and the id are the same number: say so, never leave it ambiguous.
+    return f"#{task['num']} (id {task.get('id')})" if task.get("num") else f"#{task.get('id')} (id {task.get('id')})"
 
 
 def line_key(title) -> str:
@@ -185,6 +186,11 @@ def _valid_proposal(item: dict, snapshot: dict) -> dict | None:
     if not isinstance(item, dict) or item.get("action") not in SCHEMAS:
         return None
     required, optional = SCHEMAS[item["action"]]
+    if item["action"] == "task.update" and not item.get("title"):
+        # "change only the date/owner…": the edit keeps the current title (the queue needs one).
+        current = next((t for t in snapshot.get("tasks", []) if t.get("id") == item.get("taskId")), None)
+        if current and current.get("title"):
+            item = {**item, "title": current["title"]}
     # Models often send empty optional fields ("dueDate": ""): treat them as absent.
     clean = {"action": item["action"], **{k: item[k] for k in required if item.get(k) is not None},
              **{k: item[k] for k in optional if item.get(k) not in (None, "")}}
