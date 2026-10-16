@@ -453,6 +453,14 @@ def fallback_note(step: dict) -> str:
 def answer_chat(job: dict, hermes_cli: str, hermes_home: Path, provider: str, model: str,
                 claude_cli: str = "", claude_model: str = "sonnet") -> str:
     """Owner's copilot: engine order from llm_profiles.json («copiloto»), each one with the dashboard tools."""
+    if job.get('reminderMode'):
+        from reminder_copilot import prompt
+        from user_copilot import UserCopilot
+        copilot = UserCopilot(hermes_cli=hermes_cli, hermes_home=hermes_home, claude_cli=claude_cli,
+                              work_dir=hermes_home / 'cache' / 'reminder-chat', provider=provider,
+                              model=model, claude_model=claude_model)
+        LAST_ENGINE['label'] = 'Copiloto · recordatorios'
+        return copilot.ask('owner', {}, prompt(job))
     name = "recordatorios" if REMINDER_REQUEST.search(str(job.get("message") or "")) else "copiloto"
     engines = {
         "codex": lambda step: llm_engines.ask_codex(chat_prompt(job) + ENGINE_PROMPT_NOTE + identity_note(step),
@@ -852,7 +860,8 @@ def process_job(job: dict, base_url: str, token: str, hermes_cli: str, hermes_ho
             refresh_error = ""
             snapshot_timestamp = ""
             try:
-                snapshot_timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
+                if not job.get('reminderMode'):
+                    snapshot_timestamp = publish_snapshot(base_url, token, vikunja_token, vikunja_url)
             except (HTTPError, URLError, OSError, ValueError, RuntimeError) as error:
                 refresh_error = "No se pudo actualizar el portafolio inmediatamente; usa Actualizar ahora o espera la sincronización."
                 print(f"Actualización inmediata falló ({type(error).__name__})", file=sys.stderr, flush=True)

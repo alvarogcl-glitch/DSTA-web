@@ -1,0 +1,50 @@
+{
+  "status": "verified-local",
+  "completedAt": "2026-10-16T02:57:13.1421388+00:00",
+  "branch": "feature/recordatorios-dashboard",
+  "base": "6aa9ace",
+  "python": {
+    "tests": 239,
+    "passed": true,
+    "runtime": "Python 3.12 existing DSTA runtime",
+    "command": "python -m unittest discover -s tests -v"
+  },
+  "javascript": {
+    "suites": 23,
+    "passed": true,
+    "newSuites": [
+      "test_reminders.mjs",
+      "test_reminders_worker.mjs",
+      "test_web_push.mjs",
+      "test_reminders_sw.mjs",
+      "test_reminders_delivery.mjs"
+    ]
+  },
+  "browser": {
+    "passed": true,
+    "command": "node tests/e2e_reminders.mjs",
+    "viewports": [
+      "1280x900",
+      "390x844"
+    ],
+    "fixturesOnly": true
+  },
+  "packaging": {
+    "passed": true,
+    "command": "wrangler deploy --dry-run --config wrangler.staging.jsonc",
+    "wrangler": "4.147.0",
+    "uploadKiB": 143.5,
+    "gzipKiB": 34.25
+  },
+  "productionChanged": false,
+  "servicesChanged": false,
+  "realModelsCalled": false,
+  "realNotificationsSent": false,
+  "pending": [
+    "Human UI acceptance",
+    "QA with real model",
+    "VAPID setup for authorized environment",
+    "Android/PWA physical delivery test",
+    "Authorized integration and deployment"
+  ]
+}

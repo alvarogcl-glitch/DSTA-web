@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "copiloto-rapido-2026-10-15";
+const CODE_VERSION = "recordatorios-2026-10-15";
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -226,6 +226,14 @@ async function createAssistantJob(request, env, box = LEGACY_BOX) {
     history: history.slice(-20),
     task: task ? publicTask(task) : null,
   };
+  if (accountsMode(env) && /recordatori|recu[eé]rdame|av[ií]same/i.test(message+' '+history.slice(-2).map(h=>h.content).join(' '))) {
+    const { isReminderRequest } = await import("./reminders.js");
+    if (isReminderRequest(message, history)) {
+      job.reminderMode = true;
+      job.reminderContext = await (await chatStub(env,box).fetch('https://chat.internal/reminders/list')).json();
+      job.reminderTasks = (await chatStub(env,box).snapshot())?.tasks?.map(t=>({id:t.id,num:t.num,title:t.title})) || [];
+    }
+  }
   return chatStub(env, box).fetch(new Request("https://chat.internal/create", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -481,7 +489,11 @@ async function completeBridgeJob(request, env, box = LEGACY_BOX) {
   if (parsed.body?.kind === "action") return forwardToChatObject(env, "/actions/complete", parsed.body, box);
   const { id, reply, error, summaries, refreshError, snapshotTimestamp, minutes, proposals, engine, engineSeconds } = parsed.body || {};
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Identificador inválido." }, 400);
-  const cleaned = structureEnabled(env) && !error ? cleanProposals(proposals) : [];
+  // A reminder interpretation must never become a Vikunja/label action, even if the model
+  // emits an extra action block. Resolve the mode from the stored chat, not the bridge payload.
+  const proposalJob = Array.isArray(proposals) && proposals.length
+    ? await (await chatStub(env,box).fetch('https://chat.internal/status?id='+encodeURIComponent(id))).json() : null;
+  const cleaned = structureEnabled(env) && !error && !proposalJob?.reminderMode ? cleanProposals(proposals) : [];
   // D03: what the user asked for explicitly runs by itself through the same verified queue as the
   // buttons. The request id derives from the chat job, so a repeated completion cannot duplicate it.
   if (ACTION_UUID.test(id)) {
@@ -934,9 +946,25 @@ async function layoutRoute(request, env, box) {
 // Chat needs immediate, strongly consistent hand-off between the browser and VM.
 // Snapshot and Cata summaries remain in Workers KV, where eventual consistency is acceptable.
 export class DashboardChatQueue extends DurableObject {
+  async reminderRequest(request) {
+    // Logout is also used by existing accounts that never enabled reminders.
+    if(new URL(request.url).pathname === '/reminders/logout') {
+      const {sessionHash}=await request.json();
+      for(const [key,d] of this.ctx.storage.kv.list({prefix:'reminder-device:'})) if(d.sessionHash===sessionHash) this.ctx.storage.kv.delete(key);
+      return json({ok:true});
+    }
+    const { Reminders } = await import("./reminders.js");
+    return new Reminders(this).fetch(request);
+  }
+  async alarm() {
+    const { Reminders } = await import("./reminders.js");
+    return new Reminders(this).alarm();
+  }
   async fetch(request) {
     const url = new URL(request.url);
     const storage = this.ctx.storage.kv;
+
+    if (url.pathname.startsWith('/reminders/')) return this.reminderRequest(request);
 
     if (url.pathname.startsWith("/dispatch/")) return this.dispatchRequest(request, url);
 
@@ -982,7 +1010,7 @@ export class DashboardChatQueue extends DurableObject {
       const job = storage.get(`job:${id}`);
       if (!job || job.kind !== "chat") return json({ error: "Consulta no encontrada." }, 404);
       const seconds = job.completedAt && job.createdAt ? Math.round((Date.parse(job.completedAt) - Date.parse(job.createdAt)) / 100) / 10 : null;
-      return json({ id: job.id, status: job.status, reply: job.reply || "", error: job.error || "",
+      return json({ id: job.id, status: job.status, reminderMode:job.reminderMode===true, reply: job.reply || "", error: job.error || "",
         refreshError: job.refreshError || "", snapshotTimestamp: job.snapshotTimestamp || "",
         minutes: job.minutes || {}, proposals: job.proposals || [],
         engine: job.engine || "", engineSeconds: job.engineSeconds ?? null, totalSeconds: seconds });
@@ -1103,9 +1131,18 @@ export class DashboardChatQueue extends DurableObject {
       if (!job || job.status !== "running" || storage.get("current") !== id) {
         return json({ error: "Trabajo no encontrado o no está activo." }, 404);
       }
+      let reminderReply = null;
+      // Interpretations are data. The per-account reminder service validates all fields and
+      // scope, and only accepts commands for a chat explicitly about reminders.
+      if (!error && job.reminderMode) {
+        const { completeReminderChat } = await import("./reminders.js");
+        const completion = (this._reminderCompletion || Promise.resolve()).catch(()=>{}).then(()=>completeReminderChat(this,job,reply));
+        this._reminderCompletion = completion;
+        reminderReply = await completion;
+      }
       job.status = error ? "error" : "completed";
       job.error = typeof error === "string" ? error.slice(0, 1000) : "";
-      job.reply = typeof reply === "string" ? reply.slice(0, 20_000) : "";
+      job.reply = reminderReply ?? (typeof reply === "string" ? reply.slice(0, 20_000) : "");
       job.refreshError = typeof refreshError === "string" ? refreshError.slice(0, 300) : "";
       job.snapshotTimestamp = typeof snapshotTimestamp === "string" ? snapshotTimestamp.slice(0, 40) : "";
       job.minutes = minutes && typeof minutes === "object" ? minutes : {};
@@ -1545,7 +1582,8 @@ export class DashboardChatQueue extends DurableObject {
       const record = stored[String(task.id)];
       if (record?.sourceHash && record.sourceHash === await hash(task)) aiSummaries[String(task.id)] = record;
     }));
-    return { ...snapshot, aiSummaries, health: this.ctx.storage.kv.get("data:health") || {} };
+    const reminderPending = [...this.ctx.storage.kv.list({prefix:'reminder-event:'})].filter(([,e])=>!e.attendedAt&&!e.cancelledAt).length;
+    return { ...snapshot, aiSummaries, reminderPending, health: this.ctx.storage.kv.get("data:health") || {} };
   }
 
   requestHealthCheck() {
@@ -1861,7 +1899,10 @@ export default {
       session = publicPwaAsset || PUBLIC_ACCOUNT_PATHS.has(url.pathname) ? null : await currentSession(request, env);
       if (!session && !publicPwaAsset && !PUBLIC_ACCOUNT_PATHS.has(url.pathname)) {
         if (url.pathname.startsWith("/api/")) return json({ error: "No autenticado." }, 401);
-        return new Response(null, { status: 302, headers: { location: "/login", "cache-control": "no-store" } });
+        const reminder=url.searchParams.get('reminder'), binding=url.searchParams.get('binding');
+        const returnQuery=/^[a-zA-Z0-9-]{1,100}$/.test(reminder||'')&&/^[a-zA-Z0-9_-]{1,100}$/.test(binding||'')
+          ? '?reminder='+encodeURIComponent(reminder)+'&binding='+encodeURIComponent(binding) : '';
+        return new Response(null, { status: 302, headers: { location: "/login"+returnQuery, "cache-control": "no-store" } });
       }
       if (session) box = session.box;
       if (url.pathname === "/api/session") {
@@ -1869,6 +1910,8 @@ export default {
         return request.method === "GET" ? json({ actor: session.actor, owner: session.box === LEGACY_BOX }) : json({ error: "Método no permitido" }, 405);
       }
       if (url.pathname === "/api/auth/logout") {
+        if (request.method !== 'POST') return json({error:'Método no permitido'},405);
+        await forwardToChatObject(env, '/reminders/logout', {sessionHash:session.tokenHash}, box);
         return request.method === "POST" ? accountsLogout(env, session) : json({ error: "Método no permitido" }, 405);
       }
       if (url.pathname === "/api/auth/password") {
@@ -1888,6 +1931,19 @@ export default {
         const mediaType = (request.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
         if (mediaType !== "application/json") return json({ error: "Se requiere application/json." }, 415);
       }
+    }
+
+    if (url.pathname.startsWith('/api/reminders/')) {
+      if (!accounts || !session) return json({error:'Requiere una cuenta.'},404);
+      // An old tab must never send its data to a different account's current cookie.
+      if (request.headers.get('x-dsta-actor') !== session.actor.id) return json({error:'La cuenta cambió. Recarga el dashboard.'},409);
+      const action = url.pathname.slice('/api/reminders/'.length);
+      if (request.method === 'GET' && ['list','push-config','operation'].includes(action)) return chatStub(env,box).fetch('https://chat.internal/reminders/'+action+url.search);
+      if (request.method !== 'POST' || !['save','cancel','snooze','attend','subscribe','unsubscribe'].includes(action)) return json({error:'Método no permitido.'},405);
+      const parsed=await readJson(request,8000);if(parsed.error)return parsed.error;
+      const body=parsed.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return json({error:'Solicitud inválida.'},400);
+      return forwardToChatObject(env,'/reminders/'+action,{...body,sessionHash:session.tokenHash,accountTag:await sha256Url(session.actor.id)},box);
     }
 
     // Accounts mode: announce new work to the dispatcher after a successful browser write.

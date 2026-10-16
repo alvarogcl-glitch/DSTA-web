@@ -1,5 +1,25 @@
 # Decisiones y entregas de DSTA
 
+## E15 · D33 reabierta: recordatorios por cuenta (15-10-2026)
+
+- El usuario pidió revisar el repo y proponer recordatorios antes de avanzar. Eligió «Lo primero»:
+  dashboard + PWA como canal principal, manuales vinculados/independientes y repeticiones básicas.
+  Sustituye el diferimiento de D33 para este incremento; no autoriza integración ni despliegues.
+- Preparado/verificado local en `feature/recordatorios-dashboard`, base `6aa9ace`, copia aislada
+  `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`. Conservadas las copias operativas
+  y los cambios de latencia ajenos. El remoto de esta copia es local; no hacer push para publicar.
+- Implementa alta, consulta, edición, cancelación, posponer y atender; controles directos/chat,
+  una alarma durable por cuenta, push opcional con texto genérico, login con retorno interno,
+  separación de sesiones/dispositivos y perfil del dueño. El legado Hermes permanece separado.
+- Contrato, límites, reglas de horario y entrega futura: [RECORDATORIOS.md](../RECORDATORIOS.md).
+  Evidencia: [recordatorios](evidencia/recordatorios/). Sin dependencias nuevas ni migración D1.
+- Validación: 239 pruebas Python, suites JS anteriores y cinco nuevas, Chrome 1280×900/390×844,
+  firma/descifrado push independientes, empaquetado staging en seco. Modelo, datos y servicios externos
+  simulados. No claves push reales, notificaciones externas ni escrituras en datos personales.
+- Pendientes: aceptación humana del recorrido, QA con IA real y Android físico, configuración VAPID
+  e integración/publicación autorizadas. Consultar `git log -1 feature/recordatorios-dashboard`
+  en esta copia para el commit local. No registrar piloto/producción como actualizados.
+
 Este archivo es la fuente del estado vigente de las decisiones D01–D72. La comparación y recomendaciones están en [MATRIZ_DECISIONES.md](MATRIZ_DECISIONES.md); el orden, en [PLAN.md](PLAN.md).
 
 ## Estado al iniciar

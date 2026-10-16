@@ -42,6 +42,7 @@
   const logout = Object.assign(document.createElement('button'), { type: 'button', className: 'dsta-logout', textContent: 'Cerrar sesión' });
   logout.addEventListener('click', async () => {
     logout.disabled = true;
+    await window.DstaReminders?.logout();
     try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } finally { window.location.replace('/login'); }
   });
   // D67: change your own password (asks for the current one; your other sessions are closed).

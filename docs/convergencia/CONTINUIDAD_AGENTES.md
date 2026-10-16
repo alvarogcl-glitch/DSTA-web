@@ -1,5 +1,18 @@
 # Continuidad de agentes para DSTA
 
+## Estado más reciente · E15 recordatorios
+
+El usuario eligió dashboard + PWA («Lo primero») a la propuesta de recordatorios. Preparación local,
+sin integración/publicación. Copia aislada `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`,
+rama `feature/recordatorios-dashboard`, base `6aa9ace`. Leer `docs/RECORDATORIOS.md`, registro E15 y
+evidencia `docs/convergencia/evidencia/recordatorios/`. No confundir con versiones operativas actuales.
+
+Alta/consulta/edición/cancelación/posponer/atender, inspector/chat, alarmas en DO y Web Push implementados.
+239 pruebas Python, suites JS y Chrome desktop/móvil locales. No IA real ni recepción Android física.
+Faltan revisión humana y entrega autorizada con VAPID, Worker/assets y ambos Python coordinados.
+No tocar cronjob existentes, tareas/minutas personales ni servicios para demostrarlo. Consultar commit
+con `git log -1` en la copia aislada. Las copias operativas y su trabajo de latencia no se modificaron.
+
 ## Estado para retomar
 
 Fecha de referencia: 13 de octubre de 2026. Esta entrega prepara documentación de convergencia; no implementa cambios funcionales y no publica nada.

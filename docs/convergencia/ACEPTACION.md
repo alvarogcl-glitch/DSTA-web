@@ -1,5 +1,23 @@
 # Aceptación funcional de DSTA
 
+## A20 · Recordatorios (E15, preparado local)
+
+- Crear independiente y desde inspector; editar/cancelar, repetir diario/semanal/hábiles, consultar
+  próximos/historial y atender/posponer. Atender conserva tarea abierta, campos y bitácora.
+- Zona Santiago, cambio de hora, fecha inválida/pasada, recuperación tras demora y una ocurrencia
+  por alarma repetida. Recurrencias sin hora válida omiten esa fecha, con advertencia en formulario.
+- Guardado con revisión, respuesta perdida, recibo al recargar y UUID repetido: un recordatorio.
+  Fallo tras persistir y antes de armar alarma: replay rearma sin duplicar.
+- Chat ambiguo pregunta; solicitud explícita se guarda antes de confirmar; respuesta inválida o
+  acción distinta al pedido no escribe. Dueño y otras cuentas usan el mismo parser sin cronjob.
+- A/B separados en listas, tareas, recibos, chat y dispositivos. Actor de pestaña antigua rechazado.
+  CSRF, sesión revocada, cuenta deshabilitada, endpoint expirado y reintentos acotados.
+- Push cifrado/firma verificados; defecto genérico, opt-in de detalle. SW descarta otra cuenta,
+  colapsa redelivery, abre destino propio y cierra avisos en logout. Login solo retorna a ruta interna.
+- Evidencia desktop/móvil ficticia en `evidencia/recordatorios/`. Pendientes explícitos: calidad
+  con IA real, recepción Android física/PWA cerrada, conexiones reales y aceptación del usuario.
+  No afirmar verificación remota por estas pruebas locales. Ver `../RECORDATORIOS.md`.
+
 Las pruebas deben acreditar el comportamiento elegido para cada ambiente. Cada decisión de la matriz aporta su propio resultado observable; este archivo reúne los recorridos que impiden declarar equivalencia solo porque pasan pruebas unitarias.
 
 ## Datos de prueba y ambientes

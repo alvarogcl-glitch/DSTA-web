@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "viewports": [
+    "1280x900",
+    "390x844"
+  ],
+  "checks": [
+    "create",
+    "repetition",
+    "lost-response receipt",
+    "reload",
+    "A/B isolation",
+    "alarm replay",
+    "snooze",
+    "edit",
+    "cancel",
+    "task link",
+    "attend preserves task",
+    "Escape/focus",
+    "mobile overflow"
+  ],
+  "errors": []
+}

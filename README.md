@@ -1,5 +1,7 @@
 # DSTA-web
 
+Recordatorios por cuenta preparados en rama local: [recorrido, arquitectura y publicación pendiente](docs/RECORDATORIOS.md).
+
 Dashboard ejecutivo PMO-DSTA. La interfaz es HTML, CSS y JavaScript sin framework ni etapa de compilación. Un Cloudflare Worker protege el sitio, sirve los archivos estáticos y expone la API del dashboard. La VM consulta Vikunja y publica snapshots autenticados que el Worker guarda en un Durable Object.
 
 ## Estructura

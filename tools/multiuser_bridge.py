@@ -192,6 +192,11 @@ class MultiuserBridge:
         import user_copilot
         base = self.user_base(actor)
         try:
+            if job.get('reminderMode'):
+                from reminder_copilot import prompt
+                reply = self.copilot.ask(actor, user, prompt(job))
+                self.finish_job(base, self.token, job, reply=reply)
+                return  # no Vikunja/minutes lookup, proposals or snapshot publication for reminders
             with using_user(user):
                 snapshot = self.fetch_snapshot(user) if self.fetch_snapshot else None
             import manual_minutes
