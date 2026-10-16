@@ -190,15 +190,22 @@ export class Reminders {
       let status=0;
       try {status=await this.send(d.subscription,{title:'DSTA · Recordatorio',body:d.details?event.text:'Tienes un recordatorio pendiente.',eventId:event.id,reminderId:event.reminderId,accountTag:d.accountTag},this.env,()=>{
         const current=this.kv.get('reminder-event:'+event.id);return current&&!current.attendedAt&&!current.cancelledAt&&this.kv.get('reminder-device:'+d.deviceId);
-      });} catch { /* bounded retry, no endpoint or provider response in logs */ }
+      });} catch(error) {
+        // Keep only a bounded diagnostic category, never provider responses, keys or endpoints.
+        const kind=['TypeError','OperationError','NotSupportedError','InvalidAccessError','TimeoutError','AbortError','DataError','Error'].includes(error?.name)?error.name:'DeliveryError';
+        const reason=[['redirect',/redirect/i],['key',/key|jwk|extract/i],['algorithm',/algorithm|hkdf/i],['network',/network|fetch|connect/i]].find(([,pattern])=>pattern.test(String(error?.message||'')))?.[0]||'unknown';
+        delivery.errorCode=kind+':'+reason;
+      }
       const current=this.kv.get('reminder-event:'+event.id);if(!current||current.attendedAt||current.cancelledAt) return;
       if(status===404||status===410) {this.kv.delete('reminder-device:'+d.deviceId);delivery.state='expired';}
       else delivery.state=status>=200&&status<300?'sent':'error';
+      delivery.httpStatus=status;
       current.deliveries[d.deviceId]=delivery;this.kv.put('reminder-event:'+current.id,current);
     }
     const current=this.kv.get('reminder-event:'+event.id);if(!current||current.attendedAt||current.cancelledAt) return;
     const values=Object.values(current.deliveries), retry=values.some(v=>v.state==='error'&&v.attempts<3);
     current.pushState=values.some(v=>v.state==='sent')?'sent':values.length?'error':'no-devices';
+    current.pushErrorCodes=[...new Set(values.filter(v=>v.state==='error').map(v=>v.errorCode||'http-'+v.httpStatus))];
     current.retryAt=retry?now+60000:null;this.kv.put('reminder-event:'+current.id,current);
   }
 }
