@@ -2,6 +2,11 @@
 
 ## Estado más reciente · E15 recordatorios
 
+16-10: usuario autorizó publicación autónoma sin más aprobaciones/revisiones. Preparación de entrega
+en curso; no repetir permiso. Respaldo privado DPAPI en `%LOCALAPPDATA%/hermes/cache/dsta-reminders-release-20261016`.
+Worker previo `040aa4af-0d4b-4060-b66d-26dc46ae6843`, comprobado byte a byte contra compilación de `6aa9ace`.
+Dos cuentas QA propias, separadas de las personales. IA real ya validada (crear, aclarar hora, cancelar).
+
 El usuario eligió dashboard + PWA («Lo primero») a la propuesta de recordatorios. Preparación local,
 sin integración/publicación. Copia aislada `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`,
 rama `feature/recordatorios-dashboard`, base `6aa9ace`. Leer `docs/RECORDATORIOS.md`, registro E15 y

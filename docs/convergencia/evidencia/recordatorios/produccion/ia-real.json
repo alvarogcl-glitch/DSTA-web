@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "realModels": true,
+  "toolsEnabled": false,
+  "privateDataUsed": false,
+  "cases": [
+    {
+      "case": "owner-create-independent",
+      "model": [
+        "Codex gpt-6-luna"
+      ],
+      "seconds": 5.97,
+      "passed": true
+    },
+    {
+      "case": "other-account-clarification",
+      "model": [
+        "Codex gpt-6-luna"
+      ],
+      "seconds": 9.11,
+      "passed": true
+    },
+    {
+      "case": "other-account-cancel",
+      "model": [
+        "Codex gpt-6-luna"
+      ],
+      "seconds": 6.16,
+      "passed": true
+    }
+  ],
+  "storageProof": {
+    "created": 1,
+    "duplicateReplay": 0,
+    "independentTaskId": null,
+    "clarificationCreated": 0,
+    "cancelled": 1
+  }
+}

@@ -20,7 +20,7 @@ assert.equal((await call('/api/reminders/operation?id='+operationId,'qa-b')).sta
 assert.equal((await call('/api/reminders/operation?id='+operationId)).status,200);
 assert.equal((await call('/api/reminders/save','owner',{...draft,text:'Dueño'})).status,200);assert.ok(boxes.has('pmo-dsta'));
 // A model interpretation passes through the real chat queue; only the saved result becomes success.
-const job=await (await call('/api/assistant','qa-a',{message:'Recuérdame el 2 de diciembre de 2026 a las 9 revisar informe'})).json();
+const job=await (await call('/api/assistant','qa-a',{message:'Recuérdame el 2 de diciembre de 2026 a las 9 revisar informe, como recordatorio independiente.'})).json();
 const next=await (await call('/u/qa-a/api/bridge/next',null,undefined,{authorization:'Bearer synthetic-bridge'})).json();assert.equal(next.job.id,job.id);assert.equal(next.job.reminderMode,true);assert.equal(next.job.reminderContext.reminders.length,1);
 assert.ok(!JSON.stringify(next).includes('Dueño'));
 const modelReply='```recordatorios\n'+JSON.stringify({action:'save',text:'Revisar informe',local:'2026-12-02T09:00',repeat:'none',taskId:null})+'\n```';

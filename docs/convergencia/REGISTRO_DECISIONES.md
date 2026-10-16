@@ -2,6 +2,14 @@
 
 ## E15 · D33 reabierta: recordatorios por cuenta (15-10-2026)
 
+Actualización 16-10-2026: después de «Revisado», el usuario respondió a la autorización de publicación:
+«si autorizo, al lo que falte para pasarlo a producción autónomamente, sin pedirme mas aprobación o revisiones».
+Autoriza integración, configuración push, pruebas pendientes y producción. Sustituye las restricciones
+de no publicación de E15; las demás reglas de preservación, aislamiento y secretos siguen vigentes.
+QA real con Codex gpt-6-luna: crear independiente, pedir hora faltante y cancelar; guardado/recibo/estado
+verificados con el servicio real local, sin herramientas ni datos personales. Se corrigió la detección
+que confundía «como recordatorio independiente» con una pregunta «cómo…»; regresión añadida.
+
 - El usuario pidió revisar el repo y proponer recordatorios antes de avanzar. Eligió «Lo primero»:
   dashboard + PWA como canal principal, manuales vinculados/independientes y repeticiones básicas.
   Sustituye el diferimiento de D33 para este incremento; no autoriza integración ni despliegues.

@@ -1,8 +1,9 @@
 # Recordatorios del dashboard
 
-E15 preparado localmente sobre `6aa9ace`, rama `feature/recordatorios-dashboard`.
+E15 preparado sobre `6aa9ace`, rama `feature/recordatorios-dashboard`.
 El usuario eligió «Lo primero»: dashboard + PWA como canal principal, recordatorios manuales
-vinculados o independientes y repeticiones básicas. No autoriza integración ni publicación.
+vinculados o independientes y repeticiones básicas. El 16-10-2026 autorizó integrar, configurar push,
+publicar y realizar lo pendiente de forma autónoma, sin nuevas aprobaciones o revisiones.
 
 ## Recorrido
 
@@ -67,7 +68,7 @@ lista. `public/account.js` coordina logout; `public/login.js` admite solo el des
 existentes del perfil `copiloto`, sin cronjob ni MCP. La ruta Basic mantiene Hermes y sus recordatorios
 existentes. El nuevo servicio requiere modo cuentas.
 
-## Publicación futura, pendiente de autorización
+## Procedimiento de publicación autorizado
 
 1. Contrastar con la base productiva vigente y preservar los cambios de latencia ajenos a E15.
 2. Generar en privado un par VAPID P-256. No imprimir ni versionar la privada. Configurar

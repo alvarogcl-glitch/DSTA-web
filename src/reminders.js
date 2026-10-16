@@ -26,7 +26,8 @@ export async function completeReminderChat(box,job,text) {
   const follow=/^(?:a las? |manana|el \d|cada |los (?:lunes|martes|miercoles|jueves|viernes)|si\b)/.test(request);
   const intent=follow?normalized(job.history?.filter(h=>h.role==='user').at(-1)?.content)+' '+request:request;
   const permission={save:/recuerdame|avisame|\b(?:crea|programa|agrega|anade|anota|pon|ponme|quiero|necesito|cambia|modifica|edita)\b/,cancel:/\b(?:cancela\w*|anula|elimina|borra)\b/,snooze:/\b(?:pospon\w*|aplaza|retrasa)\b/,attend:/\b(?:marca|atiende|atendido)\b/};
-  if(!permission[command.action].test(intent) || /\b(?:podria|sugier|ejemplo|como)\b/.test(request)) return 'Puedes crear o cambiar ese recordatorio desde ⏰ Recordatorios. Dime «recuérdame…» con fecha y hora para programarlo aquí.';
+  const informational=/^(?:¿\s*)?(?:como\b|que\b|cuales\b|muestra\b|lista\b|consulta\b|sugiere\b|dame un ejemplo\b|quiero (?:saber|entender)\b)/.test(request);
+  if(!permission[command.action].test(intent) || informational) return 'Puedes crear o cambiar ese recordatorio desde ⏰ Recordatorios. Dime «recuérdame…» con fecha y hora para programarlo aquí.';
   const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(job.id)));
   const hex=[...digest.slice(0,16)].map(b=>b.toString(16).padStart(2,'0')).join('');
   const operationId=`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20)}`;
