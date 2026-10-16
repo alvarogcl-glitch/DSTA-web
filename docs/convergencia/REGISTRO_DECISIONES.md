@@ -10,9 +10,19 @@ QA real con Codex gpt-6-luna: crear independiente, pedir hora faltante y cancela
 verificados con el servicio real local, sin herramientas ni datos personales. Se corrigió la detección
 que confundía «como recordatorio independiente» con una pregunta «cómo…»; regresión añadida.
 
+Estado productivo 16-10-2026: integrado en main; versión `recordatorios-2026-10-16-r2`,
+corrección funcional final `733ad2a`. Worker y objeto del dueño comprobados con la misma versión;
+assets contrastados contra Git. VAPID configurado, ambos puentes instalados; publicador PID 3280
+preservado. 239 pruebas Python y 23 suites JS; modelos reales por ambos puentes guardaron
+exactamente un recordatorio independiente y lo cancelaron en QA productivo.
+Chrome recibió un Web Push real con todas las páginas cerradas, texto genérico y una ocurrencia.
+Evidencia final en `evidencia/recordatorios/produccion/`. No se probó Android físico.
+Las restricciones locales que siguen son historia de preparación y están sustituidas por la
+autorización explícita anterior. Staging y la cuenta alvaro del piloto no se modificaron.
+
 - El usuario pidió revisar el repo y proponer recordatorios antes de avanzar. Eligió «Lo primero»:
   dashboard + PWA como canal principal, manuales vinculados/independientes y repeticiones básicas.
-  Sustituye el diferimiento de D33 para este incremento; no autoriza integración ni despliegues.
+  Sustituye el diferimiento de D33 para este incremento; inicialmente solo preparación local.
 - Preparado/verificado local en `feature/recordatorios-dashboard`, base `6aa9ace`, copia aislada
   `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`. Conservadas las copias operativas
   y los cambios de latencia ajenos. El remoto de esta copia es local; no hacer push para publicar.
@@ -24,9 +34,9 @@ que confundía «como recordatorio independiente» con una pregunta «cómo…»
 - Validación: 239 pruebas Python, suites JS anteriores y cinco nuevas, Chrome 1280×900/390×844,
   firma/descifrado push independientes, empaquetado staging en seco. Modelo, datos y servicios externos
   simulados. No claves push reales, notificaciones externas ni escrituras en datos personales.
-- Pendientes: aceptación humana del recorrido, QA con IA real y Android físico, configuración VAPID
-  e integración/publicación autorizadas. Consultar `git log -1 feature/recordatorios-dashboard`
-  en esta copia para el commit local. No registrar piloto/producción como actualizados.
+- Pendientes históricos de la preparación: quedaron cubiertos por «Revisado», autorización
+  productiva y pruebas reales indicadas arriba, salvo Android físico. Piloto no desplegado.
+  Próximo incremento de producto requiere elección del usuario; E15 no autoriza otros flujos.
 
 Este archivo es la fuente del estado vigente de las decisiones D01–D72. La comparación y recomendaciones están en [MATRIZ_DECISIONES.md](MATRIZ_DECISIONES.md); el orden, en [PLAN.md](PLAN.md).
 

@@ -1,0 +1,49 @@
+{
+  "verifiedAt": "2026-10-16T13:13:33.448266+00:00",
+  "canonicalComparison": {
+    "tasks": {
+      "before": 147,
+      "after": 147,
+      "missingIds": 0,
+      "addedIds": 0,
+      "changedRecords": 1,
+      "changedFields": [
+        "description",
+        "title"
+      ]
+    },
+    "projects": {
+      "before": 7,
+      "after": 7,
+      "missingIds": 0,
+      "addedIds": 0,
+      "changedRecords": 0,
+      "changedFields": []
+    },
+    "labels": {
+      "before": 5,
+      "after": 5,
+      "missingIds": 0,
+      "addedIds": 0,
+      "changedRecords": 0,
+      "changedFields": []
+    }
+  },
+  "processes": {
+    "publisher": [
+      3280
+    ],
+    "multi": [
+      3328
+    ],
+    "owner": [
+      15824
+    ]
+  },
+  "publisherPreserved": true,
+  "temporaryDrainRemoved": true,
+  "vapidConfigured": true,
+  "noPersonalWritesByQA": true,
+  "ownerDashboardCanonicalIdsMatch": true,
+  "temporaryAuditSessionRevoked": true
+}

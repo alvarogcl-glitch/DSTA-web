@@ -1,0 +1,17 @@
+{
+  "updated": [
+    "DSTA Hermes Bridge",
+    "DSTA Multiusuario Bridge"
+  ],
+  "oldPids": [
+    20744,
+    4492
+  ],
+  "newPids": [
+    15824,
+    3328
+  ],
+  "publisherPid": 3280,
+  "publisherPreserved": true,
+  "files": 3
+}

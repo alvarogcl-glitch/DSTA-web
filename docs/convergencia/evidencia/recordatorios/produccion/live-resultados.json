@@ -1,0 +1,20 @@
+{
+  "startedAt": "2026-10-16T13:11:44.106Z",
+  "production": true,
+  "qaOnly": true,
+  "realPush": true,
+  "appClosed": true,
+  "subscriptionActivated": true,
+  "isolationVerified": true,
+  "reminderId": "174bf32b-7c1d-4010-a148-62edb090c5f0",
+  "dueAt": "2026-10-16T13:13:00.000Z",
+  "notificationGeneric": true,
+  "occurredOnce": true,
+  "closedAppAtDelivery": true,
+  "returnThroughLogin": true,
+  "deepLinkOpened": true,
+  "attendPreservesTask": true,
+  "unsubscribeVerified": true,
+  "completedAt": "2026-10-16T13:13:02.655Z",
+  "ok": true
+}

@@ -1,8 +1,9 @@
 # Plan de convergencia de DSTA
 
 Actualización E15: D33 reabierta por elección del usuario («Lo primero»: dashboard + PWA).
-Implementación y verificación locales en `feature/recordatorios-dashboard`; ver registro E15,
-aceptación A20 y `../RECORDATORIOS.md`. La publicación y aceptación humana siguen pendientes.
+Publicación autorizada expresamente el 16-10-2026 después de «Revisado». Código integrado
+en main, Worker/assets y ambos puentes actualizados. Ver registro E15, A20 y
+`../RECORDATORIOS.md`; la comprobación productiva se registra en evidencia/recordatorios/produccion.
 
 Producción es la referencia de comodidad y funcionamiento. El piloto conserva las capacidades necesarias para varias personas y sus mejoras se revisan junto con el usuario. La meta es una equivalencia **acordada y probada**, con diferencias intencionales registradas, antes de trasladar la versión multiusuario a producción.
 

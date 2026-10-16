@@ -1,6 +1,14 @@
 # Aceptación funcional de DSTA
 
-## A20 · Recordatorios (E15, preparado local)
+## A20 · Recordatorios (E15, producción 16-10-2026)
+
+«Revisado» y autorización explícita posterior de publicar autónomamente registrados en E15.
+Producción: Worker y objeto dueño `recordatorios-2026-10-16-r2`, assets contra Git,
+VAPID y ambos puentes activos. IA real por ambos puntos de entrada guardó/canceló en QA;
+Chrome recibió push real con páginas cerradas, aviso genérico, una ocurrencia y cuentas aisladas.
+Retorno por login y apertura del destino, atender sin completar tarea y desactivar avisos pasaron.
+Cuatro cuentas QA limpiadas; datos personales conservados y sesión de auditoría revocada.
+Ver resultados exactos en `evidencia/recordatorios/produccion/`; no se acredita Android físico.
 
 - Crear independiente y desde inspector; editar/cancelar, repetir diario/semanal/hábiles, consultar
   próximos/historial y atender/posponer. Atender conserva tarea abierta, campos y bitácora.
@@ -14,9 +22,9 @@
   CSRF, sesión revocada, cuenta deshabilitada, endpoint expirado y reintentos acotados.
 - Push cifrado/firma verificados; defecto genérico, opt-in de detalle. SW descarta otra cuenta,
   colapsa redelivery, abre destino propio y cierra avisos en logout. Login solo retorna a ruta interna.
-- Evidencia desktop/móvil ficticia en `evidencia/recordatorios/`. Pendientes explícitos: calidad
-  con IA real, recepción Android física/PWA cerrada, conexiones reales y aceptación del usuario.
-  No afirmar verificación remota por estas pruebas locales. Ver `../RECORDATORIOS.md`.
+- Evidencia local desktop/móvil ficticia en `evidencia/recordatorios/`, y remota QA en
+  `evidencia/recordatorios/produccion/`. Android físico permanece sin verificar.
+  Las pruebas remotas se distinguen de las regresiones locales. Ver `../RECORDATORIOS.md`.
 
 Las pruebas deben acreditar el comportamiento elegido para cada ambiente. Cada decisión de la matriz aporta su propio resultado observable; este archivo reúne los recorridos que impiden declarar equivalencia solo porque pasan pruebas unitarias.
 

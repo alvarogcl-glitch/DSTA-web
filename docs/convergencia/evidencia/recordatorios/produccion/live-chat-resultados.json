@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "production": true,
+  "realModels": true,
+  "qaOnly": true,
+  "routes": [
+    {
+      "route": "installed-owner-bridge",
+      "storedExactlyOnce": true,
+      "dateConfirmed": true,
+      "independentTaskConfirmed": true,
+      "cancelled": true,
+      "seconds": 8.45
+    },
+    {
+      "route": "installed-multiuser-bridge",
+      "storedExactlyOnce": true,
+      "dateConfirmed": true,
+      "independentTaskConfirmed": true,
+      "cancelled": true,
+      "seconds": 8.12
+    }
+  ]
+}

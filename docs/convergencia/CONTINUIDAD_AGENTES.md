@@ -2,21 +2,28 @@
 
 ## Estado más reciente · E15 recordatorios
 
-16-10: usuario autorizó publicación autónoma sin más aprobaciones/revisiones. Preparación de entrega
-en curso; no repetir permiso. Respaldo privado DPAPI en `%LOCALAPPDATA%/hermes/cache/dsta-reminders-release-20261016`.
-Worker previo `040aa4af-0d4b-4060-b66d-26dc46ae6843`, comprobado byte a byte contra compilación de `6aa9ace`.
-Dos cuentas QA propias, separadas de las personales. IA real ya validada (crear, aclarar hora, cancelar).
+16-10: usuario dijo «Revisado» y autorizó publicación autónoma sin más aprobaciones/revisiones.
+E15 integrado en main: versión Worker y objeto dueño `recordatorios-2026-10-16-r2`,
+corrección final `733ad2a`. Assets desplegados contrastados con Git; VAPID configurado.
+Ambos puentes actualizados (PID 15824 dueño, 3328 multiusuario), publicador 3280 preservado.
+Tres archivos runtime instalados: hermes_bridge.py, multiuser_bridge.py, reminder_copilot.py.
+El merge de hermes_bridge conserva la instrumentación local previa; no resetear ese checkout.
 
-El usuario eligió dashboard + PWA («Lo primero») a la propuesta de recordatorios. Preparación local,
-sin integración/publicación. Copia aislada `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`,
-rama `feature/recordatorios-dashboard`, base `6aa9ace`. Leer `docs/RECORDATORIOS.md`, registro E15 y
-evidencia `docs/convergencia/evidencia/recordatorios/`. No confundir con versiones operativas actuales.
+Copia fuente: `C:/Users/admin/Documents/ChatGPT/Dashboard DSTA/work/reminders`,
+`feature/recordatorios-dashboard`, base `6aa9ace`. Su origin es el piloto local; publicación
+mediante URL explícita GitHub. No hacer push al piloto para publicar ni desplegar staging.
+Leer `docs/RECORDATORIOS.md`, E15/A20 y `evidencia/recordatorios/produccion/`.
+239 pruebas Python y 23 suites JS; IA real local y ambos puentes productivos con cuentas QA;
+push Chrome real con páginas cerradas comprobado. Android físico no disponible/no verificado.
 
-Alta/consulta/edición/cancelación/posponer/atender, inspector/chat, alarmas en DO y Web Push implementados.
-239 pruebas Python, suites JS y Chrome desktop/móvil locales. No IA real ni recepción Android física.
-Faltan revisión humana y entrega autorizada con VAPID, Worker/assets y ambos Python coordinados.
-No tocar cronjob existentes, tareas/minutas personales ni servicios para demostrarlo. Consultar commit
-con `git log -1` en la copia aislada. Las copias operativas y su trabajo de latencia no se modificaron.
+Respaldo privado cifrado en `%LOCALAPPDATA%/hermes/cache/dsta-reminders-release-20261016`:
+Worker previo `040aa4af-0d4b-4060-b66d-26dc46ae6843` igual a compilación `6aa9ace`,
+runtime previo y patch ajeno. Nunca versionar ese respaldo. Evidencia pública solo sanitizada.
+La transición breve del objeto dueño no borró datos ni detuvo publicador/VM. No dejar
+`DSTA_OWNER_DRAIN_UNTIL` configurado: se eliminó tras verificar ambas versiones.
+Los datos QA se limpian por IDs exactos registrados en estado cifrado; nunca patrones amplios.
+No tocar staging/alvaro, cronjob, tareas o minutas personales. Siguiente cambio de producto:
+esperar elección del usuario dentro del plan. Las secciones inferiores son historia previa.
 
 ## Estado para retomar
 

@@ -1,9 +1,16 @@
 # Recordatorios del dashboard
 
-E15 preparado sobre `6aa9ace`, rama `feature/recordatorios-dashboard`.
+E15 integrado en producción sobre `6aa9ace`, desde `feature/recordatorios-dashboard`.
 El usuario eligió «Lo primero»: dashboard + PWA como canal principal, recordatorios manuales
 vinculados o independientes y repeticiones básicas. El 16-10-2026 autorizó integrar, configurar push,
 publicar y realizar lo pendiente de forma autónoma, sin nuevas aprobaciones o revisiones.
+
+Versión productiva `recordatorios-2026-10-16-r2`; corrección funcional final `733ad2a`.
+Worker/assets y tres módulos Python instalados, conservando los cambios previos de latencia.
+VAPID configurado en secretos Cloudflare, sin dependencias, migraciones ni cambios de bindings.
+Pruebas reales: IA por ambos puentes y recepción Web Push en Chrome con todas las páginas cerradas.
+Evidencia sanitizada en `convergencia/evidencia/recordatorios/produccion/`.
+Android físico no disponible para esta verificación; no se declara probado.
 
 ## Recorrido
 
@@ -78,7 +85,7 @@ existentes. El nuevo servicio requiere modo cuentas.
    informa que push no está configurado y conserva recordatorios internos.
 4. Instalar `reminder_copilot.py` y actualizar ambos puentes; reiniciar solo esos servicios según
    el procedimiento operativo. No reiniciar VM ni tocar el publicador.
-5. Comprobar versiones y cuenta QA separada. Probar IA real y Android físico con consentimiento:
+5. Comprobar versiones y cuenta QA separada. Probar IA real y dispositivos disponibles:
    activar, cerrar dashboard, recibir, abrir, posponer, desconectar/reconectar, logout y cambio de cuenta.
 6. Rollback: publicar esta versión con `REMINDERS_PAUSED=on`, conservar handler/datos y restaurar
    interfaz/Python previos. El handler pausado elimina las alarmas al despertar sin enviar avisos.
@@ -95,4 +102,19 @@ en seco correcto. No publicación, configuración de claves reales ni avisos ext
 Pruebas nuevas: alcance, revisiones, recibos, fallos de alarma, recurrencia/DST, cancelación,
 reintentos, sesiones revocadas, endpoints expirados, privacidad por defecto, firma VAPID y
 descifrado independiente con OpenSSL, ciclo SW y recorrido Chrome. Antes de implementar, la
-prueba falló por ausencia del módulo. IA real, Android físico y aceptación humana quedan pendientes.
+prueba falló por ausencia del módulo. La evidencia local es histórica; el estado productivo y
+las pruebas reales posteriores están arriba y en A20. Android físico continúa sin comprobar.
+
+## Operación de la entrega
+
+El objeto del dueño permanecía caliente por el sondeo de servicios y retenía código anterior.
+Se aplicó una transición acotada de 230 segundos mediante `DSTA_OWNER_DRAIN_UNTIL`;
+durante ella se rechazan temporalmente operaciones del dueño que requieren ese objeto.
+La bandera vence sola, se restringe a un máximo de 15 minutos y se elimina tras verificar.
+No borra almacenamiento ni detiene el publicador, la VM u otras cuentas. El secreto temporal
+no forma parte de la configuración permanente. Para otra entrega, no asumir que publicar el
+Worker actualiza inmediatamente un objeto que sigue caliente: verificar ambas versiones.
+
+La prueba push real detectó que Workers rechaza `fetch(..., {redirect:'error'})`.
+El envío usa `redirect:'manual'`: conserva la prohibición de seguir redirecciones y trata 3xx
+como entrega fallida. Los diagnósticos guardan categorías acotadas, nunca endpoints ni claves.

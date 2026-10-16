@@ -1,7 +1,7 @@
 # Diferencias y decisiones de DSTA
 
 Actualización D33 (E15): el usuario eligió recordatorios por cuenta en dashboard + PWA.
-Preparados/verificados localmente, sin publicación; prevalece la entrada E15 del registro.
+Publicación autorizada el 16-10-2026 y ejecutada; prevalece la entrada E15 del registro.
 La comparación inicial de la tabla se conserva como evidencia histórica.
 
 Esta matriz cubre funciones, flujos, apariencia y operación que deben revisarse antes de considerar equivalentes los ambientes. El estado inicial de D01 a D72 es **por decidir**. Cada resultado elegido debe definir por separado el piloto, el comportamiento de producción después de la migración y cualquier cambio a producción antes de migrar.
