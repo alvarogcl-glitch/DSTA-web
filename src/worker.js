@@ -22,7 +22,14 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "recordatorios-2026-10-15";
+const CODE_VERSION = "recordatorios-2026-10-16";
+// A short, explicitly configured deployment drain lets a hot owner object be evicted without
+// deleting storage or stopping the VM/publisher. The absolute deadline always expires itself.
+function ownerDraining(env) {
+  const until=Number(env.DSTA_OWNER_DRAIN_UNTIL), now=Date.now();
+  return Number.isFinite(until) && until>now && until-now<=900_000;
+}
+const ownerDrainResponse=()=>json({error:'El dashboard se está actualizando. Se conservan los datos; vuelve a intentar en unos minutos.'},503);
 function chatStub(env, box = LEGACY_BOX) {
   return env.CHAT_STATE.getByName(box);
 }
@@ -1844,7 +1851,7 @@ export default {
       if (!accounts && bridgePath.startsWith('/api/bridge/manual-')) return json({error:'Requiere modo cuentas.'},404);
       if (!accounts) return bridgeRoute[1](request, LEGACY_BOX);
       const resolved = await bridgeBox(request, env, bridgePath, prefixed ? prefixed[1] : null);
-      return resolved.error || bridgeRoute[1](request, resolved.box);
+      return resolved.error || (resolved.box===LEGACY_BOX&&ownerDraining(env)?ownerDrainResponse():bridgeRoute[1](request, resolved.box));
     }
     if (prefixed) return json({ error: "No encontrado" }, 404);
 
@@ -1858,7 +1865,8 @@ export default {
     if (url.pathname === "/api/bridge/runtime" && request.method === "GET") {
       if (!bridgeAuthorized(request, env)) return json({ error: "No autorizado" }, 401);
       let box = null;
-      try { box = await chatStub(env, LEGACY_BOX).codeVersion(); } catch { box = "anterior"; }
+      if(ownerDraining(env)) box='actualizándose';
+      else try { box = await chatStub(env, LEGACY_BOX).codeVersion(); } catch { box = "anterior"; }
       return json({ worker: CODE_VERSION, ownerBox: box });
     }
     let box = LEGACY_BOX;
@@ -1871,6 +1879,7 @@ export default {
       if (!env.DASHBOARD_USER || !env.DASHBOARD_PASSWORD || !basicAuthorized(request, env)) return json({ error: "No autenticado." }, 401);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ error: "Origen de solicitud no permitido." }, 403);
+      if(ownerDraining(env)) return ownerDrainResponse();
       if (url.pathname === "/api/dashboard") {
         return request.method === "GET" ? serveSnapshot(env, LEGACY_BOX) : json({ error: "Método no permitido" }, 405);
       }
@@ -1905,6 +1914,7 @@ export default {
         return new Response(null, { status: 302, headers: { location: "/login"+returnQuery, "cache-control": "no-store" } });
       }
       if (session) box = session.box;
+      if(session && box===LEGACY_BOX && ownerDraining(env) && url.pathname.startsWith('/api/')) return ownerDrainResponse();
       if (url.pathname === "/api/session") {
         // owner: the legacy box keeps Granola on the VM (Hermes), not the per-user OAuth flow.
         return request.method === "GET" ? json({ actor: session.actor, owner: session.box === LEGACY_BOX }) : json({ error: "Método no permitido" }, 405);

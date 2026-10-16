@@ -36,6 +36,14 @@ await call('/u/qa-a/api/bridge/complete',null,{id:badJob.id,reply:'Programado.\n
 assert.match((await(await call('/api/assistant?id='+badJob.id)).json()).reply,/No se guardó/);
 const nav=await call('/?reminder=qa-event&binding=qa-binding',null);assert.equal(nav.headers.get('location'),'/login?reminder=qa-event&binding=qa-binding');
 assert.equal((await call('/?reminder=https://evil.example&binding=qa',null)).headers.get('location'),'/login');
+// A bounded owner drain protects a hot object's deployment without deleting any data; QA/other
+// accounts keep working and expiry automatically restores access.
+env.DSTA_OWNER_DRAIN_UNTIL=String(Date.now()+200000);
+assert.equal((await call('/api/dashboard','owner')).status,503);
+assert.equal((await call('/api/reminders/list','qa-a')).status,200);
+assert.equal((await call('/u/owner/api/bridge/snapshot',null,{timestamp:new Date().toISOString(),projects:[],tasks:[]},{authorization:'Bearer synthetic-bridge'})).status,503);
+assert.equal((await(await call('/api/bridge/runtime',null,undefined,{authorization:'Bearer synthetic-bridge'})).json()).ownerBox,'actualizándose');
+env.DSTA_OWNER_DRAIN_UNTIL=String(Date.now()-1);assert.equal((await call('/api/reminders/list','owner')).status,200);delete env.DSTA_OWNER_DRAIN_UNTIL;
 // Existing Basic mode never enters this feature; old Hermes reminders remain unchanged.
 env.AUTH_MODE='legacy';env.DASHBOARD_USER='qa';env.DASHBOARD_PASSWORD='synthetic-password';env.INGEST_TOKEN='qa';
 assert.equal((await call('/api/reminders/list',null,undefined,{authorization:'Basic '+btoa('qa:synthetic-password')})).status,404);
