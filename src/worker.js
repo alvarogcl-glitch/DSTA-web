@@ -22,7 +22,7 @@ function json(value, status = 200) {
 const LEGACY_BOX = "pmo-dsta";
 // Code marker. A Durable Object under constant traffic can keep running the previous code for a
 // while after a deploy; the cutover checks /api/bridge/runtime until the owner box reports this.
-const CODE_VERSION = "recordatorios-2026-10-16";
+const CODE_VERSION = "recordatorios-2026-10-16-r2";
 // A short, explicitly configured deployment drain lets a hot owner object be evicted without
 // deleting storage or stopping the VM/publisher. The absolute deadline always expires itself.
 function ownerDraining(env) {

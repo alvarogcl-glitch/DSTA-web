@@ -11,7 +11,7 @@ const original=globalThis.fetch;let requests=0;
 const payload={body:'Revisar entrega · QA ñ',eventId:'one',accountTag:'qa'};
 try {
   globalThis.fetch=async(url,init)=>{
-    requests++;assert.equal(url,s.endpoint);assert.equal(init.redirect,'error');assert.equal(init.headers['Content-Encoding'],'aes128gcm');
+    requests++;assert.equal(url,s.endpoint);assert.equal(init.redirect,'manual');assert.equal(init.headers['Content-Encoding'],'aes128gcm');
     const token=init.headers.Authorization.match(/t=([^,]+)/)[1], [h,c,sig]=token.split('.');
     const claims=JSON.parse(Buffer.from(c,'base64url'));assert.equal(claims.aud,'https://fcm.googleapis.com');assert.equal(claims.sub,env.WEB_PUSH_SUBJECT);
     const pub=vapid.getPublicKey(), key=createPublicKey({key:{kty:'EC',crv:'P-256',x:base64(pub.subarray(1,33)),y:base64(pub.subarray(33))},format:'jwk'});
@@ -28,5 +28,7 @@ try {
   assert.equal(await sendWebPush(s,payload,env),201);assert.equal(requests,1);
   assert.equal(await sendWebPush(s,payload,env,()=>false),410);assert.equal(requests,1,'cancelled while encrypting never sends');
   await assert.rejects(()=>sendWebPush({...s,endpoint:'https://localhost/internal'},payload,env));assert.equal(requests,1);
+  globalThis.fetch=async(url,init)=>{requests++;assert.equal(url,s.endpoint);assert.equal(init.redirect,'manual');return new Response(null,{status:302,headers:{location:'https://attacker.example/never-follow'}});};
+  assert.equal(await sendWebPush(s,payload,env),302);assert.equal(requests,2,'a redirect is returned without following another destination');
   console.log('Web Push: independent AES-GCM decryption, ECDH/HKDF, VAPID signature, audience, SSRF and cancellation OK');
 }finally{globalThis.fetch=original;}

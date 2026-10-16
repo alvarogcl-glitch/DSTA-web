@@ -42,6 +42,8 @@ export async function sendWebPush(subscription,payload,env,stillActive=()=>true)
   const signature=base64(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,enc.encode(unsigned)));
   const body=await encryptPayload(subscription,payload);
   if(!stillActive()) return 410;
-  const result=await fetch(subscription.endpoint,{method:'POST',redirect:'error',signal:AbortSignal.timeout(12000),headers:{TTL:'86400',Urgency:'normal','Content-Encoding':'aes128gcm','Content-Type':'application/octet-stream',Authorization:`vapid t=${unsigned}.${signature}, k=${env.WEB_PUSH_PUBLIC_KEY}`},body});
+  // Workers supports manual/follow here, not RequestRedirect="error". Manual preserves the
+  // security boundary: a 3xx is returned as a failed delivery and is never followed.
+  const result=await fetch(subscription.endpoint,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{TTL:'86400',Urgency:'normal','Content-Encoding':'aes128gcm','Content-Type':'application/octet-stream',Authorization:`vapid t=${unsigned}.${signature}, k=${env.WEB_PUSH_PUBLIC_KEY}`},body});
   await result.body?.cancel();return result.status;
 }
