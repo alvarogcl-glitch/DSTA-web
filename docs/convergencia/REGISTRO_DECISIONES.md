@@ -2,6 +2,10 @@
 
 ## E15 · D33 reabierta: recordatorios por cuenta (15-10-2026)
 
+Solicitud posterior 16-10: documentar en repo y registros para alinear otros agentes.
+Resumen consolidado: [cierre y traspaso E15](CIERRE_E15_RECORDATORIOS.md), incluida la
+distinción entre interpretación por los puentes y programación/envío autónomo en Cloudflare.
+
 Actualización 16-10-2026: después de «Revisado», el usuario respondió a la autorización de publicación:
 «si autorizo, al lo que falte para pasarlo a producción autónomamente, sin pedirme mas aprobación o revisiones».
 Autoriza integración, configuración push, pruebas pendientes y producción. Sustituye las restricciones

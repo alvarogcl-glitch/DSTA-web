@@ -2,6 +2,9 @@
 
 ## Estado más reciente · E15 recordatorios
 
+Traspaso consolidado y aclaración Hermes/Cloudflare:
+[CIERRE_E15_RECORDATORIOS.md](CIERRE_E15_RECORDATORIOS.md). Leer antes de retomar E15.
+
 16-10: usuario dijo «Revisado» y autorizó publicación autónoma sin más aprobaciones/revisiones.
 E15 integrado en main: versión Worker y objeto dueño `recordatorios-2026-10-16-r2`,
 corrección final `733ad2a`. Assets desplegados contrastados con Git; VAPID configurado.

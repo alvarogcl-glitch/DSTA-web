@@ -1,0 +1,49 @@
+{
+  "verifiedAt": "2026-10-16T13:16:29.759606+00:00",
+  "runtime": {
+    "worker": "recordatorios-2026-10-16-r2",
+    "ownerBox": "recordatorios-2026-10-16-r2"
+  },
+  "activeVersions": [
+    {
+      "version_id": "f5354511-c95f-4617-824f-59fee2321814",
+      "percentage": 100
+    }
+  ],
+  "commit": "09d5e1da61e33381844ea152f48d281c00b82f4e",
+  "pushConfigured": true,
+  "privateAssetsMatch": {
+    "/reminders.js": {
+      "remoteSha256": "c4e70ed29c1ac57cd04ef80edabddb9c004c630d263fa49395387f2a3a295a9f",
+      "gitSha256": "c4e70ed29c1ac57cd04ef80edabddb9c004c630d263fa49395387f2a3a295a9f",
+      "normalizedTextMatch": true,
+      "rawBytesMatch": true
+    },
+    "/reminders.css": {
+      "remoteSha256": "c9b6a5b1855ab1a9e885e3f1c28a1d4e3bff59a0dd56a7c96942bf1c9f828bd6",
+      "gitSha256": "c9b6a5b1855ab1a9e885e3f1c28a1d4e3bff59a0dd56a7c96942bf1c9f828bd6",
+      "normalizedTextMatch": true,
+      "rawBytesMatch": true
+    },
+    "/sw.js": {
+      "remoteSha256": "ccef21278e9376239825c6ecf61cd87e948b6a265a153cb09ab9354914f986c5",
+      "gitSha256": "ccef21278e9376239825c6ecf61cd87e948b6a265a153cb09ab9354914f986c5",
+      "normalizedTextMatch": true,
+      "rawBytesMatch": true
+    },
+    "/login.js": {
+      "remoteSha256": "163cacdaed50af4e0749125a7165675963523fdd76c8898410a907bdbc1bf7ed",
+      "gitSha256": "163cacdaed50af4e0749125a7165675963523fdd76c8898410a907bdbc1bf7ed",
+      "normalizedTextMatch": true,
+      "rawBytesMatch": true
+    },
+    "/account.js": {
+      "remoteSha256": "ff2bc1f1f1ab792007d5a34fcf08d6fa0c455209d7ff0e1207e1f55f4c4ced64",
+      "gitSha256": "ff2bc1f1f1ab792007d5a34fcf08d6fa0c455209d7ff0e1207e1f55f4c4ced64",
+      "normalizedTextMatch": true,
+      "rawBytesMatch": true
+    }
+  },
+  "dashboardLoadsReminders": true,
+  "unauthenticatedRemindersStatus": 401
+}

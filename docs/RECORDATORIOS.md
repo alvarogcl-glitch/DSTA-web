@@ -12,6 +12,9 @@ Pruebas reales: IA por ambos puentes y recepción Web Push en Chrome con todas l
 Evidencia sanitizada en `convergencia/evidencia/recordatorios/produccion/`.
 Android físico no disponible para esta verificación; no se declara probado.
 
+Estado final, papel de Hermes, mapa de copias y traspaso para otros agentes:
+[CIERRE_E15_RECORDATORIOS.md](convergencia/CIERRE_E15_RECORDATORIOS.md).
+
 ## Recorrido
 
 - ⏰ abre próximos/pendientes e historial. «Recordarme» en el inspector crea uno vinculado.
