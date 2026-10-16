@@ -1914,14 +1914,15 @@ export default {
         return new Response(null, { status: 302, headers: { location: "/login"+returnQuery, "cache-control": "no-store" } });
       }
       if (session) box = session.box;
-      if(session && box===LEGACY_BOX && ownerDraining(env) && url.pathname.startsWith('/api/')) return ownerDrainResponse();
+      if(session && box===LEGACY_BOX && ownerDraining(env) && url.pathname.startsWith('/api/') &&
+          url.pathname!=='/api/session' && !url.pathname.startsWith('/api/auth/')) return ownerDrainResponse();
       if (url.pathname === "/api/session") {
         // owner: the legacy box keeps Granola on the VM (Hermes), not the per-user OAuth flow.
         return request.method === "GET" ? json({ actor: session.actor, owner: session.box === LEGACY_BOX }) : json({ error: "Método no permitido" }, 405);
       }
       if (url.pathname === "/api/auth/logout") {
         if (request.method !== 'POST') return json({error:'Método no permitido'},405);
-        await forwardToChatObject(env, '/reminders/logout', {sessionHash:session.tokenHash}, box);
+        if(!(box===LEGACY_BOX&&ownerDraining(env))) await forwardToChatObject(env, '/reminders/logout', {sessionHash:session.tokenHash}, box);
         return request.method === "POST" ? accountsLogout(env, session) : json({ error: "Método no permitido" }, 405);
       }
       if (url.pathname === "/api/auth/password") {

@@ -40,6 +40,7 @@ assert.equal((await call('/?reminder=https://evil.example&binding=qa',null)).hea
 // accounts keep working and expiry automatically restores access.
 env.DSTA_OWNER_DRAIN_UNTIL=String(Date.now()+200000);
 assert.equal((await call('/api/dashboard','owner')).status,503);
+assert.equal((await call('/api/session','owner')).status,200,'account identity remains available during maintenance');
 assert.equal((await call('/api/reminders/list','qa-a')).status,200);
 assert.equal((await call('/u/owner/api/bridge/snapshot',null,{timestamp:new Date().toISOString(),projects:[],tasks:[]},{authorization:'Bearer synthetic-bridge'})).status,503);
 assert.equal((await(await call('/api/bridge/runtime',null,undefined,{authorization:'Bearer synthetic-bridge'})).json()).ownerBox,'actualizándose');
